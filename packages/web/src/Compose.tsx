@@ -58,6 +58,7 @@ export function Compose({ draftId }: { draftId?: string }) {
   }
 
   useEffect(() => {
+    setConflict(null);
     if (draftId) {
       api<DraftView>(`/v1/drafts/${encodeURIComponent(draftId)}?text=1`)
         .then(show)
