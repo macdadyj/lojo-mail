@@ -1,0 +1,158 @@
+tests/offline_plan.tftest.hcl... in progress
+  run "defaults_adopt_existing_identity_and_write_no_dns"... pass
+  run "security_md_says_active_rule_set_defaults_off"... fail
+
+Error: Test assertion failed
+
+  on tests/offline_plan.tftest.hcl line 179, in run "security_md_says_active_rule_set_defaults_off":
+ 179:     condition     = length(aws_ses_active_receipt_rule_set.main) == 0
+    ├────────────────
+    │ aws_ses_active_receipt_rule_set.main is tuple with 1 element
+
+FINDING: manage_active_rule_set defaults to true, but SECURITY.md says the
+flag defaults off.
+  run "processor_role_can_scan_the_tables_it_scans"... fail
+
+Error: Test assertion failed
+
+  on tests/offline_plan.tftest.hcl line 192, in run "processor_role_can_scan_the_tables_it_scans":
+ 192:     condition     = contains(flatten([for s in data.aws_iam_policy_document.processor.statement : s.actions]), "dynamodb:Scan")
+    ├────────────────
+    │ data.aws_iam_policy_document.processor.statement is list of object with 6 elements
+
+FINDING: processor role lacks dynamodb:Scan, but ingestRaw ->
+getMessageByRfcId -> ScanCommand on every inbound message.
+  run "api_role_can_scan_the_tables_it_scans"... fail
+
+Error: Test assertion failed
+
+  on tests/offline_plan.tftest.hcl line 201, in run "api_role_can_scan_the_tables_it_scans":
+ 201:     condition     = contains(flatten([for s in data.aws_iam_policy_document.api.statement : s.actions]), "dynamodb:Scan")
+    ├────────────────
+    │ data.aws_iam_policy_document.api.statement is list of object with 6 elements
+
+FINDING: API role lacks dynamodb:Scan, but
+listThreads/listDrafts/search/readThread/export all Scan.
+  run "receipt_rule_relies_on_bucket_sse_kms_not_ses_client_side_encryption"... fail
+
+Error: Test assertion failed
+
+  on tests/offline_plan.tftest.hcl line 213, in run "receipt_rule_relies_on_bucket_sse_kms_not_ses_client_side_encryption":
+ 213:     condition     = one(aws_ses_receipt_rule.store.s3_action).kms_key_arn == null
+    ├────────────────
+    │ aws_ses_receipt_rule.store.s3_action is set of object with 1 element
+
+FINDING: s3_action.kms_key_arn is set. SES then encrypts client-side (S3
+encryption client, KMS-wrapped CEK in object metadata). handler.ts reads with
+plain GetObject and parses ciphertext as MIME.
+  run "lambda_runtime_is_supported"... fail
+
+Error: Test assertion failed
+
+  on tests/offline_plan.tftest.hcl line 222, in run "lambda_runtime_is_supported":
+ 222:     condition     = !contains(["nodejs16.x", "nodejs18.x", "nodejs20.x"], aws_lambda_function.processor.runtime)
+    ├────────────────
+    │ aws_lambda_function.processor.runtime is "nodejs20.x"
+
+FINDING: nodejs20.x is past its Lambda deprecation date (Node 20 upstream EOL
+April 2026). Check the Lambda runtime table; create/update may be blocked.
+  run "processor_has_failure_destination_or_dlq"... fail
+
+Error: Test assertion failed
+
+  on tests/offline_plan.tftest.hcl line 231, in run "processor_has_failure_destination_or_dlq":
+ 231:     condition     = length(aws_lambda_function.processor.dead_letter_config) > 0
+    ├────────────────
+    │ aws_lambda_function.processor.dead_letter_config is empty list of object
+
+FINDING: processor has no DLQ / on-failure destination. After two async
+retries an inbound message is silently not indexed.
+  run "manage_dns_is_refused_in_existing_mode"... pass
+  run "create_mode_without_confirmation_is_refused"... pass
+  run "create_mode_without_zone_is_refused"... pass
+  run "dns_plan_output_lists_every_record_to_leave_alone"... pass
+  run "create_mode_with_confirmation_writes_new_domain_records_without_overwrite"... fail
+
+Error: Output refers to sensitive values
+
+  on outputs.tf line 25:
+  25: output "dkim_tokens" {
+
+To reduce the risk of accidentally exporting sensitive data that was intended
+to be only internal, Terraform requires that any root module output
+containing sensitive data be explicitly marked as sensitive, to confirm your
+intent.
+
+If you do intend to export this data, annotate the output value as sensitive
+by adding the following argument:
+    sensitive = true
+tests/offline_plan.tftest.hcl... tearing down
+Terraform encountered an error destroying resources created while executing
+tests/offline_plan.tftest.hcl/create_mode_with_confirmation_writes_new_domain_records_without_overwrite.
+
+Error: Output refers to sensitive values
+
+  on outputs.tf line 25:
+  25: output "dkim_tokens" {
+
+To reduce the risk of accidentally exporting sensitive data that was intended
+to be only internal, Terraform requires that any root module output
+containing sensitive data be explicitly marked as sensitive, to confirm your
+intent.
+
+If you do intend to export this data, annotate the output value as sensitive
+by adding the following argument:
+    sensitive = true
+
+Terraform left the following resources in state after executing
+tests/offline_plan.tftest.hcl/create_mode_with_confirmation_writes_new_domain_records_without_overwrite,
+and they need to be cleaned up manually:
+  - aws_apigatewayv2_api.http
+  - aws_apigatewayv2_integration.api
+  - aws_apigatewayv2_route.default
+  - aws_apigatewayv2_stage.default
+  - aws_cloudwatch_log_group.api
+  - aws_cloudwatch_log_group.processor
+  - aws_dynamodb_table.audit
+  - aws_dynamodb_table.budget
+  - aws_dynamodb_table.contacts
+  - aws_dynamodb_table.drafts
+  - aws_dynamodb_table.imports
+  - aws_dynamodb_table.messages
+  - aws_dynamodb_table.threads
+  - aws_iam_role.api
+  - aws_iam_role.processor
+  - aws_iam_role_policy.api
+  - aws_iam_role_policy.processor
+  - aws_kms_alias.mail
+  - aws_kms_key.mail
+  - aws_lambda_function.api
+  - aws_lambda_function.processor
+  - aws_lambda_permission.apigw
+  - aws_lambda_permission.s3_invoke
+  - aws_route53_record.apex_spf[0]
+  - aws_route53_record.dkim[0]
+  - aws_route53_record.dkim[1]
+  - aws_route53_record.dkim[2]
+  - aws_route53_record.dmarc[0]
+  - aws_route53_record.mail_from_mx[0]
+  - aws_route53_record.mail_from_spf[0]
+  - aws_route53_record.mx_inbound[0]
+  - aws_s3_bucket.mail
+  - aws_s3_bucket_lifecycle_configuration.mail
+  - aws_s3_bucket_notification.raw
+  - aws_s3_bucket_ownership_controls.mail
+  - aws_s3_bucket_policy.mail
+  - aws_s3_bucket_public_access_block.mail
+  - aws_s3_bucket_server_side_encryption_configuration.mail
+  - aws_s3_bucket_versioning.mail
+  - aws_ses_active_receipt_rule_set.main[0]
+  - aws_ses_receipt_rule.store
+  - aws_ses_receipt_rule_set.main
+  - aws_sesv2_configuration_set.outbound
+  - aws_sesv2_email_identity.created[0]
+  - aws_sesv2_email_identity_mail_from_attributes.created[0]
+  - terraform_data.dns_guard[0]
+tests/offline_plan.tftest.hcl... fail
+
+Failure! 5 passed, 7 failed.
