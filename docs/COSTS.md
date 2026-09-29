@@ -59,7 +59,7 @@ If the account is left on Essentials, add a few cents of SES, not dollars.
 
 ## AI cost guard
 
-The pipeline truncates body text to `max_body_chars` (default 8,000) before the prompt, skips bulk mail, and refuses to call the provider once the UTC day's token counter reaches the budget. Embeddings count toward the same budget. The audit log is the place to see whether the cap is tight.
+The pipeline truncates body text to `max_body_chars` (default 8,000) before the prompt, skips bulk mail, and refuses to call the provider once the UTC day's token counter reaches the budget. Embeddings count toward the same budget. The cap is checked before each call and charged after it, so concurrent calls can overshoot it. [SECURITY.md](SECURITY.md#ai) says by how much. For a hard ceiling, set a spending limit at the model provider. The audit log is the place to see whether the cap is tight.
 
 Ollama (`llama3.2:1b` and `nomic-embed-text` on `http://100.96.1.90:11434`) is the way to keep the whole system near two dollars. Grok is the default provider because it is the better writer; point `llm_provider` at `ollama` if the bill matters more than the prose. Bedrock is the same interface if you would rather keep the AI invoice inside AWS. Check the Bedrock model price before choosing one. Haiku-class models stay in the "a few dollars" band at this volume; large models do not.
 

@@ -224,7 +224,13 @@ Tests: `packages/core/src/security.test.ts`, `packages/api/src/security.test.ts`
 ### AI
 
 - Provider keys come from the environment or SSM. They are not in the repo and not in Terraform state.
-- Daily token budget (atomic `ADD` in DynamoDB), truncation (`max_body_chars`), bulk skip.
+- Truncation (`max_body_chars`, 8,000 by default), bulk skip, and a daily token budget (Terraform `daily_token_budget`, 100,000 by default).
+- **The budget is a soft cap, not a hard limit.** It can overshoot, and here is how:
+  - Every model call reads the day's total first and refuses if it is already at or over the budget. The call's cost is known only after the provider answers. Then an atomic DynamoDB `ADD` records it. There is no reservation up front.
+  - So every call that starts while the total is still under the budget runs to completion. One call can overshoot by its own size: up to about 3,000 input tokens for an 8,000-character body plus the style guide, and 800 output tokens for analysis (600 for a rewrite). Calls that run at the same time each pass the check, so the overshoot is roughly that size times the number of calls in flight. That number is limited by processor concurrency (`processor_reserved_concurrency`, unreserved by default, so the account's Lambda limit) and API Gateway throttling. A burst of inbound mail near the limit can overshoot by tens of thousands of tokens.
+  - Tokens that the provider bills but never reports are not counted. That includes timeouts, network errors, and 5xx responses after generation, plus an embedding call that fails after the analysis succeeded. A reply that is not valid JSON is counted.
+  - The ADD is atomic, so concurrent calls never lose each other's counts. Only the check is racy.
+  - What this means: the budget protects against a slow drain, such as a newsletter flood or a prompt-injection loop, not against a spike. For a hard ceiling on money, set a spending limit or a prepaid balance at the model provider, and keep the AWS budget alarm from [COSTS.md](COSTS.md). Setting `processor_reserved_concurrency` to a small number, such as 2, also bounds the burst.
 - Audit row per attempt: time, message id, provider, model, action, token counts, outcome, SHA-256 of the prompt. Not the prompt, not the body.
 - Suggested replies are drafts. The phishing score is advisory; mail is never auto-deleted.
 
