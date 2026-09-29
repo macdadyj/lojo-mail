@@ -2,7 +2,19 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import test from "node:test";
 import { hasScope, tokenBookFromEnv, TokenBook } from "./auth.ts";
-import { DEV_PASSPHRASE, LoginLimiter, LoginRateLimited, Sessions, devSessions, hashPassphrase, verifyPassphrase } from "./session.ts";
+import { MemoryStore } from "@lojo/core";
+import {
+  DEV_PASSPHRASE,
+  LOGIN_FAILURES_PER_SOURCE,
+  LOGIN_WINDOW_MS,
+  LoginRateLimited,
+  LoginThrottle,
+  Sessions,
+  devSessions,
+  hashPassphrase,
+  sourceKey,
+  verifyPassphrase,
+} from "./session.ts";
 import { TEST_PASSPHRASE, testApp } from "./test-app.ts";
 
 test("admin covers every scope, send does not imply write, and body is separate", () => {
@@ -57,14 +69,32 @@ test("sessions are signed, expire after 12 hours, and cannot be forged", () => {
   assert.equal(sessions.verify(sessionToken), false);
 });
 
-test("five failed sign-ins lock the container out for 15 minutes", () => {
+test("failed sign-ins are throttled per source in a shared store, never globally", async () => {
   let clock = 0;
-  const limiter = new LoginLimiter(() => clock);
-  const sessions = new Sessions({ secret: randomBytes(32), passphraseHash: hashPassphrase(TEST_PASSPHRASE), now: () => clock, limiter });
-  for (let i = 0; i < 5; i += 1) assert.throws(() => sessions.login("wrong passphrase!!"), /Wrong passphrase/);
-  assert.throws(() => sessions.login(TEST_PASSPHRASE), LoginRateLimited);
-  clock += 15 * 60 * 1000;
-  assert.ok(sessions.login(TEST_PASSPHRASE).sessionToken);
+  const store = new MemoryStore();
+  const first = new LoginThrottle(store, { now: () => clock });
+  const secondContainer = new LoginThrottle(store, { now: () => clock });
+  const attacker = sourceKey("203.0.113.9");
+  for (let i = 0; i < LOGIN_FAILURES_PER_SOURCE; i += 1) {
+    await (i % 2 === 0 ? first : secondContainer).check(attacker);
+    await (i % 2 === 0 ? first : secondContainer).fail(attacker);
+  }
+  await assert.rejects(() => first.check(attacker), LoginRateLimited);
+  await assert.rejects(() => secondContainer.check(attacker), LoginRateLimited, "the count is shared across containers");
+  await first.check(sourceKey("198.51.100.4"));
+  clock += LOGIN_WINDOW_MS;
+  await first.check(attacker);
+});
+
+test("throttle keys: IPv4, IPv4-mapped, IPv6 grouped by /64, and garbage", () => {
+  assert.equal(sourceKey("203.0.113.9"), "203.0.113.9");
+  assert.equal(sourceKey("::ffff:203.0.113.9"), "203.0.113.9");
+  assert.equal(sourceKey("2001:db8:1:2:aaaa::1"), "2001:db8:1:2::/64");
+  assert.equal(sourceKey("2001:db8:1:2:bbbb:cccc:dddd:eeee"), "2001:db8:1:2::/64");
+  assert.equal(sourceKey("2001:db8::1"), "2001:db8:0:0::/64");
+  assert.equal(sourceKey("fe80::1%eth0"), "fe80:0:0:0::/64");
+  assert.equal(sourceKey(undefined), "unknown");
+  assert.equal(sourceKey("not an address"), "unknown");
 });
 
 test("the dev passphrase is refused in production", () => {
@@ -74,7 +104,7 @@ test("the dev passphrase is refused in production", () => {
   assert.equal(DEV_PASSPHRASE.length >= 12, true);
 });
 
-test("login over HTTP: 401 on a wrong passphrase, 429 when locked, then a human principal", async () => {
+test("login over HTTP: 401 on a wrong passphrase, then a human principal", async () => {
   const t = await testApp();
   const wrong = await t.call("/v1/session/login", { body: { passphrase: "not the passphrase" } });
   assert.equal(wrong.status, 401);
@@ -82,8 +112,23 @@ test("login over HTTP: 401 on a wrong passphrase, 429 when locked, then a human 
   const who = await t.call("/v1/session", { token });
   assert.deepEqual(who.json, { kind: "human", label: "jon", scopes: ["admin"] });
   assert.equal((await t.call("/v1/session", { token: "admin-token" })).json.kind, "token");
-  for (let i = 0; i < 5; i += 1) await t.call("/v1/session/login", { body: { passphrase: "nope nope nope" } });
-  const locked = await t.call("/v1/session/login", { body: { passphrase: TEST_PASSPHRASE } });
-  assert.equal(locked.status, 429);
-  assert.ok(locked.headers.get("retry-after"));
+});
+
+test("an attacker hammering sign-in gets 429 for its own address; Jon still signs in from his", async () => {
+  let clock = Date.parse("2026-09-29T12:00:00Z");
+  const t = await testApp({ now: () => new Date(clock) });
+  const attacker = { "x-test-source-ip": "203.0.113.9" };
+  const jon = { "x-test-source-ip": "198.51.100.4" };
+  for (let i = 0; i < LOGIN_FAILURES_PER_SOURCE; i += 1) {
+    assert.equal((await t.call("/v1/session/login", { body: { passphrase: "nope nope nope" }, headers: attacker })).status, 401);
+  }
+  const locked = await t.call("/v1/session/login", { body: { passphrase: TEST_PASSPHRASE }, headers: attacker });
+  assert.equal(locked.status, 429, "even the right passphrase waits out the window from that source");
+  assert.ok(Number(locked.headers.get("retry-after")) > 0);
+  const ownV6 = await t.call("/v1/session/login", { body: { passphrase: "nope nope nope" }, headers: { "x-test-source-ip": "2001:db8:1:2::1" } });
+  assert.equal(ownV6.status, 401);
+  const signedIn = await t.call("/v1/session/login", { body: { passphrase: TEST_PASSPHRASE }, headers: jon });
+  assert.equal(signedIn.status, 200, "no global lockout");
+  clock += LOGIN_WINDOW_MS;
+  assert.equal((await t.call("/v1/session/login", { body: { passphrase: TEST_PASSPHRASE }, headers: attacker })).status, 200);
 });

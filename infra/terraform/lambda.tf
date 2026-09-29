@@ -95,6 +95,35 @@ resource "aws_cloudwatch_metric_alarm" "processor_errors" {
   }
 }
 
+resource "aws_cloudwatch_log_metric_filter" "login_failures" {
+  name           = "${var.project}-login-failures"
+  log_group_name = aws_cloudwatch_log_group.api.name
+  pattern        = "\"login_failed\""
+
+  metric_transformation {
+    name          = "LoginFailures"
+    namespace     = var.project
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "login_failures" {
+  alarm_name          = "${var.project}-login-failures"
+  alarm_description   = "Failed web sign-ins across all sources. Sign-in is throttled per source, not globally, so this is the signal for distributed guessing. See docs/SECURITY.md, human sessions."
+  namespace           = var.project
+  metric_name         = "LoginFailures"
+  statistic           = "Sum"
+  period              = 3600
+  evaluation_periods  = 1
+  threshold           = var.login_failure_alarm_threshold
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = var.alarm_actions
+
+  depends_on = [aws_cloudwatch_log_metric_filter.login_failures]
+}
+
 resource "aws_lambda_function" "api" {
   function_name    = "${var.project}-api"
   role             = aws_iam_role.api.arn

@@ -35,7 +35,7 @@ terraform plan
 With the defaults (`ses_identity_mode = existing`, `manage_dns = false`, `manage_active_rule_set = true`, `aws_region = us-east-1`) the plan should:
 
 - Read the existing SES identity. It should not create one, and it should not create DKIM or MAIL FROM attributes.
-- Create KMS, S3, six DynamoDB tables, IAM, a configuration set, a receipt rule set, the active association, two Lambdas, an SQS dead-letter queue, two CloudWatch alarms, and an HTTP API.
+- Create KMS, S3, six DynamoDB tables, IAM, a configuration set, a receipt rule set, the active association, two Lambdas, an SQS dead-letter queue, a sign-in failure metric filter, three CloudWatch alarms, and an HTTP API.
 - Create **no** Route 53 records.
 
 `manage_dns = true` in existing mode fails the plan on purpose.
@@ -75,7 +75,7 @@ aws ssm put-parameter --region us-east-1 \
   --value 'paste-the-xai-key-here'
 ```
 
-The web sign-in passphrase is stored as an scrypt hash, never in the clear. Pick a long passphrase (12 characters minimum) in the password manager, then:
+The web sign-in passphrase is stored as an scrypt hash, never in the clear. Pick a long, random passphrase in the password manager (12 characters minimum; five or more diceware words is better, because sign-in is throttled per source address, not globally; see [SECURITY.md](SECURITY.md#principals)), then:
 
 ```bash
 npm run passphrase-hash          # prompts without echo; prints the hash
@@ -281,7 +281,7 @@ Add that origin to `web_origins` in `terraform.tfvars` and apply. That list driv
 - Follow [MIGRATION.md](MIGRATION.md) for Tuta.
 - Add the DMARC `rua` when you want reports. Reports arrive at `dmarc@cyberphysical.us`, skip the model, and are archived with the label `dmarc-report`.
 - Rotate a token, the passphrase hash, or the session secret by writing a new SSM value (`--overwrite`). The API caches its configuration for `LOJO_CONFIG_TTL_MS` (5 minutes by default), so the old value keeps working for up to that long in a warm container. Rotating the session secret signs everyone out.
-- Point `alarm_actions` at an SNS topic if you want the DLQ and error alarms to page you.
+- Point `alarm_actions` at an SNS topic if you want the DLQ, error, and sign-in failure alarms to page you. `login_failure_alarm_threshold` (default 20 per hour) sets when failed sign-ins across all sources trip the alarm. If it fires and it was not you, rotate the passphrase hash and the session secret.
 - To switch the domain later, set `domain` and `ses_identity_mode = create`, then repeat identity, DKIM, and DNS for that new name. Do not delete the `cyberphysical.us` identity until mail to it can die. `manage_dns` is allowed only in create mode, and only with the confirmation string, after an audit of the new zone.
 
 ## 11. Local demo, no AWS

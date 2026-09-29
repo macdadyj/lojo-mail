@@ -40,6 +40,9 @@ export interface MailStore {
 
   getBudget(day: string): Promise<number>;
   addBudget(day: string, tokens: number): Promise<number>;
+  /** Short-lived shared counters (login failures per source). Kept in the budget table with a TTL. */
+  getCounter(key: string): Promise<number>;
+  bumpCounter(key: string, expiresAt: Date): Promise<number>;
 
   /** Returns false when `ifAbsent` is set and the contact already exists. */
   putContact(contact: Contact, opts?: { ifAbsent?: boolean }): Promise<boolean>;

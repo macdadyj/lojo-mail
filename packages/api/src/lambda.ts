@@ -3,15 +3,14 @@ import { S3Client } from "@aws-sdk/client-s3";
 import { GetParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
 import { createLlmClient, DynamoMailStore, loadConfig, Mailbox, type EcPublicJwk, type LlmClient } from "@lojo/core";
 import { documentClient, dynamoLike, KmsKeyWrapper, S3BlobStore, tableNamesFromEnv, ttlCache } from "@lojo/pipeline/aws";
-import { handle } from "hono/aws-lambda";
+import { getConnInfo, handle } from "hono/aws-lambda";
 import styleGuide from "../../../config/style-guide.md";
 import { createApp } from "./app.ts";
 import { TokenBook, parseScopes } from "./auth.ts";
-import { LoginLimiter, Sessions } from "./session.ts";
+import { LoginThrottle, Sessions } from "./session.ts";
 import { SesSender } from "./ses.ts";
 
 const ssm = new SSMClient({});
-const loginLimiter = new LoginLimiter();
 
 /** Missing optional parameters are undefined; any other SSM error fails the boot so it is retried. */
 async function parameter(name: string): Promise<string | undefined> {
@@ -47,7 +46,7 @@ async function buildApp() {
 
   const secret = await parameter(env("LOJO_SESSION_SECRET_PARAM", "/lojo-mail/session-secret"));
   const passphraseHash = await parameter(env("LOJO_PASSPHRASE_HASH_PARAM", "/lojo-mail/human-passphrase-hash"));
-  const sessions = secret && passphraseHash ? new Sessions({ secret: Buffer.from(secret, "utf8"), passphraseHash, limiter: loginLimiter }) : null;
+  const sessions = secret && passphraseHash ? new Sessions({ secret: Buffer.from(secret, "utf8"), passphraseHash }) : null;
   if (!sessions) console.error("Human sign-in is disabled: session secret or passphrase hash parameter is missing");
 
   let llm: LlmClient | null = null;
@@ -66,8 +65,9 @@ async function buildApp() {
   const signingKey = await parameter(env("LOJO_PGP_SIGNING_KEY_PARAM", "/lojo-mail/pgp-signing-key"));
   const signingPassphrase = await parameter(env("LOJO_PGP_SIGNING_PASSPHRASE_PARAM", "/lojo-mail/pgp-signing-passphrase"));
 
+  const store = new DynamoMailStore(dynamoLike(documentClient()), tableNamesFromEnv());
   const mailbox = new Mailbox({
-    store: new DynamoMailStore(dynamoLike(documentClient()), tableNamesFromEnv()),
+    store,
     blobs: new S3BlobStore(new S3Client({}), bucket),
     keys: new KmsKeyWrapper(new KMSClient({}), keyId),
     config,
@@ -82,6 +82,9 @@ async function buildApp() {
     mailbox,
     tokens,
     sessions,
+    // The login-failure alarm is a CloudWatch metric filter on this line.
+    loginThrottle: new LoginThrottle(store, { onFailure: (source) => console.warn(JSON.stringify({ event: "login_failed", source })) }),
+    clientAddress: (c) => getConnInfo(c).remote.address,
     dev: false,
     info: {
       mailbox: config.mailbox,

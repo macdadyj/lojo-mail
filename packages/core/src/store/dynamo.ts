@@ -166,6 +166,23 @@ export class DynamoMailStore implements MailStore {
     return typeof next === "number" ? next : tokens;
   }
 
+  async getCounter(key: string): Promise<number> {
+    const item = await this.db.get(this.tables.budget, { day: `counter:${key}` });
+    const count = item?.count;
+    return typeof count === "number" ? count : 0;
+  }
+
+  /** `expiresAt` is epoch seconds, the table's TTL attribute; DynamoDB deletes the row some time after. */
+  async bumpCounter(key: string, expiresAt: Date): Promise<number> {
+    const updated = await this.db.update(
+      this.tables.budget,
+      { day: `counter:${key}` },
+      { add: { count: 1 }, set: { expiresAt: Math.floor(expiresAt.getTime() / 1000) } },
+    );
+    const next = updated?.count;
+    return typeof next === "number" ? next : 1;
+  }
+
   async putContact(contact: Contact, opts?: { ifAbsent?: boolean }): Promise<boolean> {
     const item = asItem({ ...contact, email: contact.email.toLowerCase(), kind: "contact" });
     return this.db.put(this.tables.contacts, item, opts?.ifAbsent ? { ifAbsent: "email" } : undefined);

@@ -539,3 +539,22 @@ run "create_mode_with_confirmation_writes_new_domain_records_without_overwrite" 
     error_message = "dkim_tokens output should plan in create mode"
   }
 }
+
+run "sign_in_is_throttled_per_source_and_alarms_globally" {
+  command = plan
+
+  assert {
+    condition     = aws_dynamodb_table.budget.ttl[0].enabled && aws_dynamodb_table.budget.ttl[0].attribute_name == "expiresAt"
+    error_message = "login-failure counters in the budget table need the expiresAt TTL"
+  }
+
+  assert {
+    condition     = aws_cloudwatch_log_metric_filter.login_failures.pattern == "\"login_failed\""
+    error_message = "the login-failure metric filter must match the API's login_failed log line"
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.login_failures.threshold == 20 && aws_cloudwatch_metric_alarm.login_failures.period == 3600
+    error_message = "the login-failure alarm should default to 20 failures per hour"
+  }
+}

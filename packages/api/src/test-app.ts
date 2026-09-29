@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { memoryWorld, reviewOf, type WorldOptions } from "@lojo/core/testing";
 import { createApp } from "./app.ts";
 import { TokenBook } from "./auth.ts";
-import { Sessions, hashPassphrase } from "./session.ts";
+import { LoginThrottle, Sessions, hashPassphrase } from "./session.ts";
 
 export const TEST_PASSPHRASE = "correct horse battery staple";
 
@@ -27,12 +27,14 @@ export async function testApp(opts: WorldOptions & { dev?: boolean; now?: () => 
     mailbox: world.mailbox,
     tokens,
     sessions,
+    loginThrottle: new LoginThrottle(world.store, opts.now ? { now: () => (opts.now as () => Date)().getTime() } : {}),
+    clientAddress: (c) => c.req.header("x-test-source-ip") ?? "192.0.2.10",
     dev: opts.dev ?? false,
     info: { mailbox: world.config.mailbox, domain: world.config.domain, llmProvider: "mock", dailyTokenBudget: world.config.dailyTokenBudget },
   });
 
-  const call = async (path: string, init: { method?: string; token?: string; body?: unknown } = {}) => {
-    const headers: Record<string, string> = {};
+  const call = async (path: string, init: { method?: string; token?: string; body?: unknown; headers?: Record<string, string> } = {}) => {
+    const headers: Record<string, string> = { ...init.headers };
     if (init.token) headers.authorization = `Bearer ${init.token}`;
     if (init.body !== undefined) headers["content-type"] = "application/json";
     const res = await app.request(path, {

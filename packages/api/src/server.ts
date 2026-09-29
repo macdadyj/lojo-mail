@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { serve } from "@hono/node-server";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import {
   createLlmClient,
   FsBlobStore,
@@ -19,7 +20,7 @@ import {
 import { createApp } from "./app.ts";
 import { tokenBookFromEnv } from "./auth.ts";
 import { seedDemo } from "./seed.ts";
-import { DEV_PASSPHRASE, devSessions } from "./session.ts";
+import { DEV_PASSPHRASE, LoginThrottle, devSessions } from "./session.ts";
 
 const production = process.env.NODE_ENV === "production";
 const host = process.env.LOJO_HOST ?? "127.0.0.1";
@@ -74,6 +75,8 @@ const app = createApp({
   mailbox,
   tokens: tokenBookFromEnv(process.env, production),
   sessions: devSessions(process.env, production),
+  loginThrottle: new LoginThrottle(store),
+  clientAddress: (c) => getConnInfo(c).remote.address,
   dev: !production,
   corsOrigin: ["http://127.0.0.1:5173", "http://localhost:5173"],
   info: {

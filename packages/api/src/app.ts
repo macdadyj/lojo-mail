@@ -3,13 +3,16 @@ import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
 import { hasScope, type Principal, type Scope, type TokenBook } from "./auth.ts";
-import { LoginRateLimited, type Sessions } from "./session.ts";
+import { LoginRateLimited, sourceKey, type LoginThrottle, type Sessions } from "./session.ts";
 
 interface AppDeps {
   mailbox: Mailbox;
   tokens: TokenBook;
   /** Human sign-in. Without it no route that needs a human can be reached. */
   sessions?: Sessions | null;
+  loginThrottle: LoginThrottle;
+  /** The caller's address as the platform reports it (API Gateway `sourceIp`, the socket locally). Never a request header. */
+  clientAddress: (c: Context<Env>) => string | undefined;
   dev: boolean;
   corsOrigin?: string[];
   info: { mailbox: string; domain: string; llmProvider: string; dailyTokenBudget: number };
@@ -125,12 +128,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/v1/session/login", async (c) => {
     if (!deps.sessions) return c.json({ error: "Human sign-in is not configured" }, 503);
     const input = await body<{ passphrase: string }>(c);
+    const source = sourceKey(deps.clientAddress(c));
+    try {
+      await deps.loginThrottle.check(source);
+    } catch (error) {
+      if (!(error instanceof LoginRateLimited)) throw error;
+      return c.json({ error: error.message }, 429, { "retry-after": String(error.retryAfterSeconds) });
+    }
     try {
       return c.json(deps.sessions.login(typeof input.passphrase === "string" ? input.passphrase : ""));
-    } catch (error) {
-      if (error instanceof LoginRateLimited) {
-        return c.json({ error: error.message }, 429, { "retry-after": String(error.retryAfterSeconds) });
-      }
+    } catch {
+      await deps.loginThrottle.fail(source);
       return c.json({ error: "Wrong passphrase" }, 401);
     }
   });

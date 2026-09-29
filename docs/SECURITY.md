@@ -120,7 +120,11 @@ Every request carries a bearer credential. The API resolves it to a principal wi
 - **API tokens** (`kind: "token"`) come from SSM (`/lojo-mail/api-token`, `/lojo-mail/api-token-send`) or dev env vars. They have scopes. The MCP server holds one of these. An API token cannot become a human session.
 - **Human sessions** (`kind: "human"`) come only from `POST /v1/session/login { passphrase }`.
   - The passphrase is checked against an scrypt hash in SSM `/lojo-mail/human-passphrase-hash` (created with `npm run passphrase-hash`, minimum 12 characters) using a constant-time comparison.
-  - After 5 failures in 15 minutes the container refuses logins for 15 minutes (HTTP 429).
+  - Failed sign-ins are throttled **per source**, never globally. There is no lockout that anyone else can trigger for Jon.
+    - Each failure bumps a counter in the DynamoDB budget table, keyed by a hash of the caller's address and the 15-minute window. The address is API Gateway's `sourceIp`, not a header the caller controls. IPv6 addresses are grouped by /64. Because the counter lives in DynamoDB, every Lambda container sees the same count. A TTL on `expiresAt` removes old counters.
+    - After 10 failures from one source in a window, that source gets HTTP 429 with `retry-after` until the window ends. Other sources, including Jon's, are unaffected.
+    - Every failure is logged as `login_failed`. A CloudWatch metric filter counts these across all sources, and an alarm fires at `login_failure_alarm_threshold` (default 20) failures in an hour. That catches guessing spread over many addresses.
+    - Residual risk: a distributed guesser is limited only by API Gateway throttling (10 requests per second), the scrypt cost, and the alarm. That is why the passphrase must be long and random: a 5-word diceware passphrase or longer. Concurrent failures from one source can overshoot the per-source limit by a few attempts, because the check and the increment are separate calls. Requests without a source address share one "unknown" bucket; API Gateway always supplies one.
   - The response is `hs_<base64url payload>.<base64url HMAC-SHA256>`, valid 12 hours. It is stateless. The HMAC secret is SSM `/lojo-mail/session-secret`, or a random value per process in dev. Rotating the secret ends every session.
   - Local dev reads the passphrase from `LOJO_HUMAN_PASSPHRASE`, with a documented dev default that is refused when `NODE_ENV=production`.
   - The web app keeps the session token in `sessionStorage` for the tab.

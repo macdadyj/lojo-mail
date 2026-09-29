@@ -211,6 +211,12 @@ resource "aws_dynamodb_table" "budget" {
     type = "S"
   }
 
+  # Login-failure counters (`counter:` keys) set this; daily token rows do not, so they stay.
+  ttl {
+    attribute_name = "expiresAt"
+    enabled        = true
+  }
+
   point_in_time_recovery {
     enabled = true
   }

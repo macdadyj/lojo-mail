@@ -170,8 +170,14 @@ variable "ollama_embed_model" {
 
 variable "alarm_actions" {
   type        = list(string)
-  description = "SNS topic ARNs for the processor alarms. Empty leaves the alarms visible in CloudWatch only."
+  description = "SNS topic ARNs for the processor and login-failure alarms. Empty leaves the alarms visible in CloudWatch only."
   default     = []
+}
+
+variable "login_failure_alarm_threshold" {
+  type        = number
+  description = "Failed web sign-ins per hour, across all sources, that raise the login-failure alarm."
+  default     = 20
 }
 
 variable "processor_reserved_concurrency" {

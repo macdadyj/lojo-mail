@@ -1,4 +1,6 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { isIPv4, isIPv6 } from "node:net";
+import type { MailStore } from "@lojo/core";
 
 export const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 export const MIN_PASSPHRASE_LENGTH = 12;
@@ -7,8 +9,8 @@ export const DEV_PASSPHRASE = "lojo-dev-passphrase";
 
 const SCRYPT = { N: 1 << 15, r: 8, p: 1, keylen: 32 };
 const SCRYPT_MAXMEM = 64 * 1024 * 1024;
-const LOCKOUT_FAILURES = 5;
-const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
+export const LOGIN_FAILURES_PER_SOURCE = 10;
+export const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 
 /** `scrypt$N$r$p$salt$hash`, base64url. What `npm run passphrase-hash` stores in SSM. */
 export function hashPassphrase(passphrase: string, salt: Buffer = randomBytes(16)): string {
@@ -38,29 +40,57 @@ export class LoginRateLimited extends Error {
   }
 }
 
-/** Per container. Five failures inside 15 minutes lock sign-in for 15 minutes. */
-export class LoginLimiter {
-  private failures: number[] = [];
-  private lockedUntil = 0;
+/**
+ * The throttle key for a caller. IPv6 callers are grouped by /64, because one
+ * host usually controls a whole /64. Unparseable input shares one "unknown" key.
+ */
+export function sourceKey(address: string | undefined): string {
+  const bare = (address ?? "").trim().replace(/%.*$/, "");
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(bare);
+  if (mapped?.[1]) return mapped[1];
+  if (isIPv4(bare)) return bare;
+  if (!isIPv6(bare)) return "unknown";
+  const [head = "", tail = ""] = bare.split("::");
+  const left = head ? head.split(":") : [];
+  const right = bare.includes("::") && tail ? tail.split(":") : [];
+  const groups = bare.includes("::") ? [...left, ...Array<string>(Math.max(0, 8 - left.length - right.length)).fill("0"), ...right] : left;
+  return `${groups
+    .slice(0, 4)
+    .map((group) => parseInt(group, 16).toString(16))
+    .join(":")}::/64`;
+}
 
-  constructor(private readonly now: () => number = Date.now) {}
+/**
+ * Failed sign-ins are counted per source in a store every container shares, in
+ * fixed 15-minute windows. A source over the limit gets 429 until its window
+ * ends. There is no global lockout, so nobody can lock Jon out from elsewhere;
+ * distributed guessing is bounded by API Gateway throttling and scrypt, and
+ * shows up in the login-failure alarm (see `onFailure`).
+ */
+export class LoginThrottle {
+  constructor(
+    private readonly counters: Pick<MailStore, "getCounter" | "bumpCounter">,
+    private readonly options: { now?: () => number; onFailure?: (source: string) => void } = {},
+  ) {}
 
-  check(): void {
-    const now = this.now();
-    if (now < this.lockedUntil) throw new LoginRateLimited(Math.ceil((this.lockedUntil - now) / 1000));
+  private window(source: string): { key: string; end: number } {
+    const now = this.options.now ? this.options.now() : Date.now();
+    const start = now - (now % LOGIN_WINDOW_MS);
+    const hashed = createHash("sha256").update(source).digest("hex").slice(0, 32);
+    return { key: `login-failures:${hashed}:${start}`, end: start + LOGIN_WINDOW_MS };
   }
 
-  fail(): void {
-    const now = this.now();
-    this.failures = [...this.failures.filter((at) => now - at < LOCKOUT_WINDOW_MS), now];
-    if (this.failures.length >= LOCKOUT_FAILURES) {
-      this.lockedUntil = now + LOCKOUT_WINDOW_MS;
-      this.failures = [];
-    }
+  async check(source: string): Promise<void> {
+    const { key, end } = this.window(source);
+    if ((await this.counters.getCounter(key)) < LOGIN_FAILURES_PER_SOURCE) return;
+    const now = this.options.now ? this.options.now() : Date.now();
+    throw new LoginRateLimited(Math.max(1, Math.ceil((end - now) / 1000)));
   }
 
-  succeed(): void {
-    this.failures = [];
+  async fail(source: string): Promise<void> {
+    const { key, end } = this.window(source);
+    await this.counters.bumpCounter(key, new Date(end + LOGIN_WINDOW_MS));
+    this.options.onFailure?.(source);
   }
 }
 
@@ -74,18 +104,15 @@ export interface SessionOptions {
   secret: Uint8Array;
   passphraseHash: string;
   now?: () => number;
-  /** Pass one in when Sessions is rebuilt on a config refresh, so failures keep counting. */
-  limiter?: LoginLimiter;
 }
 
+/** Passphrase check and stateless session tokens. Throttling is `LoginThrottle`, in front of this. */
 export class Sessions {
-  private readonly limiter: LoginLimiter;
   private readonly now: () => number;
 
   constructor(private readonly options: SessionOptions) {
     if (options.secret.byteLength < 32) throw new Error("Session secret must be at least 32 bytes");
     this.now = options.now ?? Date.now;
-    this.limiter = options.limiter ?? new LoginLimiter(this.now);
   }
 
   private sign(payload: string): string {
@@ -93,12 +120,7 @@ export class Sessions {
   }
 
   login(passphrase: string): { sessionToken: string; expiresAt: string } {
-    this.limiter.check();
-    if (!passphrase || !verifyPassphrase(passphrase, this.options.passphraseHash)) {
-      this.limiter.fail();
-      throw new Error("Wrong passphrase");
-    }
-    this.limiter.succeed();
+    if (!passphrase || !verifyPassphrase(passphrase, this.options.passphraseHash)) throw new Error("Wrong passphrase");
     const iat = this.now();
     const body: SessionPayload = { sub: "jon", iat, exp: iat + SESSION_TTL_MS };
     const payload = Buffer.from(JSON.stringify(body)).toString("base64url");
