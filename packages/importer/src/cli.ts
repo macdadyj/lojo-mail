@@ -71,7 +71,7 @@ let save: () => void = () => undefined;
 
 if (target === "aws") {
   const bucket = process.env.LOJO_BUCKET;
-  if (!bucket) fail("--target aws needs LOJO_BUCKET (terraform output mail_bucket) and AWS credentials in the environment.");
+  if (!bucket) fail("--target aws needs LOJO_BUCKET (terraform output bucket) and AWS credentials in the environment.");
   if (!values["public-key"]) fail("--target aws needs --public-key with the envelope public JWK that is in SSM.");
   publicJwk = readPublicKey(values["public-key"]);
   store = new DynamoMailStore(dynamoLike(documentClient()), tableNamesFromEnv());
