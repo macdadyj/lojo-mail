@@ -204,7 +204,7 @@ Tests: `packages/core/src/security.test.ts`, `packages/api/src/security.test.ts`
 - Outbound SESv2 configuration set `tls_policy = REQUIRE`.
 - MTA-STS (`mode: testing` until stable) and TLS-RPT are in the DNS plan. MTA-STS only helps once the policy file is served over HTTPS.
 - S3 bucket policy denies any request where `aws:SecureTransport` is false.
-- API is HTTPS at API Gateway, with stage throttling. The PWA must be served over HTTPS in production because it holds the private key. The production build adds a Content-Security-Policy meta tag (`script-src 'self'`, `style-src 'self'`, `connect-src` limited to the page, the `VITE_LOJO_API_URL` origin, and the S3 origin that serves presigned attachment downloads).
+- API is HTTPS at API Gateway, with stage throttling. The PWA must be served over HTTPS in production because it holds the private key. The production build adds a Content-Security-Policy meta tag: `script-src 'self'`, `style-src 'self'`, and `connect-src` limited to the page, the `VITE_LOJO_API_URL` origin, and the exact mail-bucket origin (`VITE_LOJO_BLOB_ORIGIN`, from Terraform output `web_blob_origin`). There is no S3 wildcard, so an attacker's own bucket is not a place the page can send data. The build refuses to run without an exact bucket origin. It also writes `dist/_headers` with the same policy plus `frame-ancestors 'none'` and `X-Frame-Options: DENY`, which the host must send as HTTP headers because browsers ignore `frame-ancestors` in a meta tag. The app also refuses to start inside a frame. That blocks clickjacking of the approve button.
 
 ### At rest
 

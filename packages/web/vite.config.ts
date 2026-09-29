@@ -1,39 +1,19 @@
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
-
-/** Presigned attachment downloads come straight from the mail bucket. */
-const DEFAULT_BLOB_ORIGIN = "https://*.s3.us-east-1.amazonaws.com";
-
-function origin(url: string, name: string): string {
-  try {
-    return new URL(url).origin;
-  } catch {
-    throw new Error(`${name} must be an absolute URL, got ${JSON.stringify(url)}`);
-  }
-}
+import { securityHeaders } from "./build/csp.ts";
 
 /** Build-only: the dev server needs an inline React refresh preamble that this policy would block. */
 function contentSecurityPolicy(env: Record<string, string>): Plugin {
-  const connect = ["'self'"];
-  if (env.VITE_LOJO_API_URL) connect.push(origin(env.VITE_LOJO_API_URL, "VITE_LOJO_API_URL"));
-  connect.push(env.VITE_LOJO_BLOB_ORIGIN ? env.VITE_LOJO_BLOB_ORIGIN : DEFAULT_BLOB_ORIGIN);
-  const policy = [
-    "default-src 'self'",
-    "script-src 'self'",
-    "style-src 'self'",
-    "img-src 'self' data:",
-    "font-src 'self'",
-    `connect-src ${connect.join(" ")}`,
-    "manifest-src 'self'",
-    "worker-src 'self'",
-    "object-src 'none'",
-    "base-uri 'none'",
-    "form-action 'none'",
-  ].join("; ");
+  const headers = securityHeaders(env);
   return {
     name: "lojo-csp",
     apply: "build",
-    transformIndexHtml: () => [{ tag: "meta", attrs: { "http-equiv": "Content-Security-Policy", content: policy }, injectTo: "head-prepend" }],
+    transformIndexHtml: () => [
+      { tag: "meta", attrs: { "http-equiv": "Content-Security-Policy", content: headers.metaPolicy }, injectTo: "head-prepend" },
+    ],
+    generateBundle() {
+      this.emitFile({ type: "asset", fileName: "_headers", source: headers.headersFile });
+    },
   };
 }
 

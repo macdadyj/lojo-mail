@@ -6,6 +6,11 @@ output "bucket" {
   value = aws_s3_bucket.mail.bucket
 }
 
+output "web_blob_origin" {
+  description = "Exact origin of presigned attachment URLs. Pass as VITE_LOJO_BLOB_ORIGIN when building the web app."
+  value       = "https://${aws_s3_bucket.mail.bucket}.s3.${var.aws_region}.amazonaws.com"
+}
+
 output "kms_key_arn" {
   value = aws_kms_key.mail.arn
 }

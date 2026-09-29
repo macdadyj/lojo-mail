@@ -558,3 +558,12 @@ run "sign_in_is_throttled_per_source_and_alarms_globally" {
     error_message = "the login-failure alarm should default to 20 failures per hour"
   }
 }
+
+run "web_blob_origin_is_the_exact_presigned_url_origin" {
+  command = plan
+
+  assert {
+    condition     = output.web_blob_origin == "https://lojo-mail-test.s3.us-east-1.amazonaws.com"
+    error_message = "web_blob_origin must be the one bucket origin presigned URLs use, for the web CSP"
+  }
+}

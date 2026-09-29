@@ -5,6 +5,8 @@ import "./styles.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing root");
+// Backstop for hosts that drop the frame-ancestors header: never render inside a frame.
+if (window.top !== window.self) throw new Error("refusing to run inside a frame");
 createRoot(root).render(
   <StrictMode>
     <App />

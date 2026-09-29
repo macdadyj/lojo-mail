@@ -267,11 +267,22 @@ Rolling back code, not receiving: check out the previous commit, `npm run build:
 Build it against the API and host it on an HTTPS origin you already have:
 
 ```bash
-VITE_LOJO_API_URL=$(terraform -chdir=infra/terraform output -raw api_endpoint) npm run build:web
+VITE_LOJO_API_URL=$(terraform -chdir=infra/terraform output -raw api_endpoint) \
+VITE_LOJO_BLOB_ORIGIN=$(terraform -chdir=infra/terraform output -raw web_blob_origin) \
+  npm run build:web
 # upload packages/web/dist/ to the HTTPS origin
 ```
 
-Add that origin to `web_origins` in `terraform.tfvars` and apply. That list drives the API's CORS and the bucket's CORS for presigned attachment downloads. The build's Content-Security-Policy only allows the API origin it was built with, so rebuild if the API URL changes. Settings has an API URL override for local testing.
+Add that origin to `web_origins` in `terraform.tfvars` and apply. That list drives the API's CORS and the bucket's CORS for presigned attachment downloads.
+
+The build's Content-Security-Policy allows connections only to the page's own origin, the API origin, and the one mail-bucket origin that presigned attachment URLs use. There is no S3 wildcard. The build fails if `VITE_LOJO_API_URL` is set without `VITE_LOJO_BLOB_ORIGIN`, or if either one is a wildcard or not https. Rebuild if the API URL or bucket changes. Settings has an API URL override for local testing, but the policy still limits connections to the built-in origins.
+
+The policy is in a `<meta>` tag, and browsers ignore `frame-ancestors` there. The host must send the headers in `dist/_headers`:
+
+- `Content-Security-Policy` with the full policy, including `frame-ancestors 'none'`;
+- `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`.
+
+Netlify and Cloudflare Pages read `_headers` as it is. On CloudFront, copy the same values into a response headers policy. After deploy, check with `curl -sI https://<web origin>/ | grep -i -E 'content-security|x-frame'`. As a backstop, the app refuses to start inside a frame.
 
 ## 10. Day-two
 

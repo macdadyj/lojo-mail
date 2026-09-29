@@ -12,7 +12,7 @@
   "scripts": {
     "dev": "tsx scripts/dev.ts",
     "test": "node scripts/run-tests.mjs",
-    "typecheck": "tsc -p packages/core --noEmit && tsc -p packages/pipeline --noEmit && tsc -p packages/api --noEmit && tsc -p packages/mcp --noEmit && tsc -p packages/web --noEmit && tsc -p packages/importer --noEmit",
+    "typecheck": "tsc -p packages/core --noEmit && tsc -p packages/pipeline --noEmit && tsc -p packages/api --noEmit && tsc -p packages/mcp --noEmit && tsc -p packages/web --noEmit && tsc -p packages/web/tsconfig.build.json --noEmit && tsc -p packages/importer --noEmit",
     "lint": "eslint .",
     "keygen": "tsx scripts/keygen.ts",
     "wkd-hash": "tsx scripts/wkd-hash.ts",
