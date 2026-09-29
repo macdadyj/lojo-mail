@@ -88,6 +88,15 @@ export interface DraftPatch {
   pgp?: PgpMode;
 }
 
+/** What Jon saw on screen when he pressed Approve. The API mints only if the stored draft still matches it. */
+export interface ReviewedDraft {
+  to: string[];
+  cc: string[];
+  subject: string;
+  text: string;
+  pgp: PgpMode;
+}
+
 export interface AttachmentPayload {
   meta: AttachmentMeta;
   bytes?: Uint8Array;
@@ -563,7 +572,7 @@ export class Mailbox {
     return { draft: updated, text };
   }
 
-  private contentHash(draft: Draft, text: string): string {
+  private contentHash(draft: Pick<Draft, "to" | "cc" | "subject" | "inReplyTo" | "pgp">, text: string): string {
     return approvalContentHash({
       from: this.deps.config.mailbox,
       to: draft.to,
@@ -577,19 +586,35 @@ export class Mailbox {
 
   /**
    * Human sessions only. Returns a one-time token bound to this draft's exact
-   * content. Only its hash is stored.
+   * content, and only if that content is what Jon reviewed: a `write` token
+   * can edit the draft between the page loading and the click, so the stored
+   * draft alone is not proof of what he approved. Only the token's hash is stored.
    */
-  async mintApproval(draftId: string, actor: Actor): Promise<{ approvalToken: string; expiresAt: string }> {
+  async mintApproval(draftId: string, actor: Actor, reviewed: ReviewedDraft): Promise<{ approvalToken: string; expiresAt: string }> {
     if (actor !== "human") throw new MailError("Only a signed-in human can approve a send", "forbidden");
     const draft = await this.requireDraft(draftId);
     if (!EDITABLE.has(draft.status)) throw new MailError(`Draft is ${draft.status}`, "invalid");
-    const text = await this.readDraftText(draft);
+    const stored = this.contentHash(draft, await this.readDraftText(draft));
+    const seen = this.contentHash(
+      {
+        to: addresses(reviewed.to),
+        cc: addresses(reviewed.cc),
+        subject: cleanHeaderValue(reviewed.subject),
+        ...(draft.inReplyTo ? { inReplyTo: draft.inReplyTo } : {}),
+        pgp: reviewed.pgp,
+      },
+      reviewed.text,
+    );
+    if (!sameHash(stored, seen)) {
+      await this.audit("send.approval_refused", "content_changed", { messageId: draftId });
+      throw new MailError("The draft changed since you reviewed it. Check the current version and approve again.", "conflict");
+    }
     const token = newApprovalToken();
     const expiresAt = new Date(this.now().getTime() + APPROVAL_TTL_MS).toISOString();
     await this.deps.store.putDraft({
       ...withoutApproval(draft),
       approvalTokenHash: hashApprovalToken(token),
-      approvalContentHash: this.contentHash(draft, text),
+      approvalContentHash: stored,
       approvalExpiresAt: expiresAt,
     });
     await this.audit("send.approval_minted", "ok", { messageId: draftId });

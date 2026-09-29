@@ -16,7 +16,7 @@ test("[P0-6] production API (no private key): a send token alone cannot send; a 
   assert.equal(t.sender.sent.length, 0);
 
   const human = await t.login();
-  const approvalToken = String((await t.call(`/v1/drafts/${draft.id}/approval`, { token: human, method: "POST" })).json.approvalToken);
+  const approvalToken = String((await t.call(`/v1/drafts/${draft.id}/approval`, { token: human, body: await t.review(draft.id) })).json.approvalToken);
   const sent = await t.call(`/v1/drafts/${draft.id}/approve-and-send`, { token: human, body: { approvalToken } });
   assert.equal(sent.status, 200, `send in production returned ${sent.status} ${sent.text}`);
   assert.equal(t.sender.sent[0]?.text, "Signed copy attached.");

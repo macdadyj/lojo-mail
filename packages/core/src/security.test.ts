@@ -10,7 +10,7 @@ import { buildRawMessage } from "./mime/compose.ts";
 import { parseMime } from "./mime/parse.ts";
 import { decryptText, generateTestKey } from "./openpgp/mail.ts";
 import { DYNAMO_ITEM_LIMIT_BYTES } from "./store/memory-dynamo.ts";
-import { fixture, malicious, memoryWorld } from "./testing.ts";
+import { fixture, malicious, memoryWorld, reviewOf } from "./testing.ts";
 import type { SealedBody } from "./types.ts";
 
 /** A worst-case model that obeys instructions embedded in the email. */
@@ -33,7 +33,7 @@ function obedientLlm(): MockLlm {
 }
 
 async function approveAndSend(w: Awaited<ReturnType<typeof memoryWorld>>, draftId: string) {
-  const { approvalToken } = await w.mailbox.mintApproval(draftId, "human");
+  const { approvalToken } = await w.mailbox.mintApproval(draftId, "human", await reviewOf(w.mailbox, draftId));
   return w.mailbox.approveAndSend(draftId, approvalToken);
 }
 
@@ -253,7 +253,7 @@ test("[P1-5] OpenPGP send: every recipient and Jon can decrypt, and the message 
 
   await w.store.putContact({ email: "carol@example.com" });
   const partial = await w.mailbox.createDraft({ to: ["ada@example.com", "carol@example.com"], subject: "s", text: "t" });
-  const { approvalToken } = await w.mailbox.mintApproval(partial.id, "human");
+  const { approvalToken } = await w.mailbox.mintApproval(partial.id, "human", await reviewOf(w.mailbox, partial.id));
   await assert.rejects(() => w.mailbox.approveAndSend(partial.id, approvalToken), /No OpenPGP key for carol@example.com/);
   assert.equal(w.sender.sent.length, 0);
 });

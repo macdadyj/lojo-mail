@@ -276,7 +276,7 @@ Add that origin to `web_origins` in `terraform.tfvars` and apply. That list driv
 ## 10. Day-two
 
 - Open the PWA over HTTPS, sign in with the passphrase, load the envelope private key in Settings, and confirm a real message opens.
-- Drafts that an assistant submitted appear under Drafts → "Waiting for your approval". Open one, check it, and press Approve and send.
+- Drafts that an assistant submitted appear under Drafts → "Waiting for your approval". Open one, check it, including the Encryption setting, and press Approve and send. If the assistant edits it while you have it open, nothing is sent: the page shows the new version and you approve again.
 - Put a budget alarm on the `Project=lojo-mail` tag. See [COSTS.md](COSTS.md).
 - Follow [MIGRATION.md](MIGRATION.md) for Tuta.
 - Add the DMARC `rua` when you want reports. Reports arrive at `dmarc@cyberphysical.us`, skip the model, and are archived with the label `dmarc-report`.

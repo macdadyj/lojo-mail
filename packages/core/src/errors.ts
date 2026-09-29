@@ -1,4 +1,4 @@
-export type MailErrorCode = "not_found" | "locked" | "forbidden" | "invalid" | "budget";
+export type MailErrorCode = "not_found" | "locked" | "forbidden" | "invalid" | "budget" | "conflict";
 
 export class MailError extends Error {
   readonly code: MailErrorCode;

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { memoryWorld, type WorldOptions } from "@lojo/core/testing";
+import { memoryWorld, reviewOf, type WorldOptions } from "@lojo/core/testing";
 import { createApp } from "./app.ts";
 import { TokenBook } from "./auth.ts";
 import { Sessions, hashPassphrase } from "./session.ts";
@@ -56,5 +56,8 @@ export async function testApp(opts: WorldOptions & { dev?: boolean; now?: () => 
     return String(res.json.sessionToken);
   };
 
-  return { ...world, app, tokens, sessions, call, login };
+  /** The body the web app posts to `/approval` for the draft as it is stored now. */
+  const review = (draftId: string) => reviewOf(world.mailbox, draftId);
+
+  return { ...world, app, tokens, sessions, call, login, review };
 }

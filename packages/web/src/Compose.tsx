@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "./api.ts";
+import { ApiError, api } from "./api.ts";
 import { statusLabel, type Draft, type DraftView, type Message } from "./types.ts";
 import { openMessage } from "./unlock.ts";
 
@@ -8,9 +8,10 @@ interface Fields {
   cc: string;
   subject: string;
   text: string;
+  pgp: Draft["pgp"];
 }
 
-const EMPTY: Fields = { to: "", cc: "", subject: "", text: "" };
+const EMPTY: Fields = { to: "", cc: "", subject: "", text: "", pgp: "auto" };
 
 function list(value: string): string[] {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
@@ -22,11 +23,16 @@ function fieldsOf(view: DraftView): Fields {
     cc: view.draft.cc.map((item) => item.email).join(", "),
     subject: view.draft.subject,
     text: view.text ?? "",
+    pgp: view.draft.pgp,
   };
 }
 
 function same(a: Fields, b: Fields): boolean {
-  return a.to === b.to && a.cc === b.cc && a.subject === b.subject && a.text === b.text;
+  return a.to === b.to && a.cc === b.cc && a.subject === b.subject && a.text === b.text && a.pgp === b.pgp;
+}
+
+function payloadOf(fields: Fields) {
+  return { to: list(fields.to), cc: list(fields.cc), subject: fields.subject, text: fields.text, pgp: fields.pgp };
 }
 
 export function Compose({ draftId }: { draftId?: string }) {
@@ -64,13 +70,13 @@ export function Compose({ draftId }: { draftId?: string }) {
       .finally(() => setBusy(false));
   }, [draftId]);
 
-  function set(name: keyof Fields, value: string) {
+  function set<K extends keyof Fields>(name: K, value: Fields[K]) {
     setFields((current) => ({ ...current, [name]: value }));
   }
 
   async function save(): Promise<string> {
     if (draft && saved && same(fields, saved)) return draft.id;
-    const payload = JSON.stringify({ to: list(fields.to), cc: list(fields.cc), subject: fields.subject, text: fields.text });
+    const payload = JSON.stringify(payloadOf(fields));
     const view = draft
       ? await api<DraftView>(`/v1/drafts/${draft.id}`, { method: "POST", body: payload })
       : await api<DraftView>("/v1/drafts", { method: "POST", body: payload });
@@ -104,10 +110,22 @@ export function Compose({ draftId }: { draftId?: string }) {
       setStatus("Rewritten. Still a draft.");
     });
 
+  async function approve(id: string, reviewed: ReturnType<typeof payloadOf>): Promise<string> {
+    try {
+      const minted = await api<{ approvalToken: string }>(`/v1/drafts/${id}/approval`, { method: "POST", body: JSON.stringify(reviewed) });
+      return minted.approvalToken;
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.status !== 409) throw err;
+      show(await api<DraftView>(`/v1/drafts/${id}?text=1`));
+      throw new Error("This draft changed after you opened it. The current version is shown now. Check it and approve again.");
+    }
+  }
+
   const approveAndSend = () =>
     run("Send", async () => {
+      const reviewed = payloadOf(fields);
       const id = await save();
-      const { approvalToken } = await api<{ approvalToken: string }>(`/v1/drafts/${id}/approval`, { method: "POST" });
+      const approvalToken = await approve(id, reviewed);
       const sent = await api<{ messageId: string }>(`/v1/drafts/${id}/approve-and-send`, {
         method: "POST",
         body: JSON.stringify({ approvalToken }),
@@ -155,6 +173,14 @@ export function Compose({ draftId }: { draftId?: string }) {
       <input id="subject" value={fields.subject} disabled={closed} onChange={(event) => set("subject", event.target.value)} />
       <label htmlFor="body">Message</label>
       <textarea id="body" value={fields.text} disabled={closed} onChange={(event) => set("text", event.target.value)} />
+      <label htmlFor="pgp">Encryption</label>
+      <select id="pgp" value={fields.pgp} disabled={closed} onChange={(event) => set("pgp", event.target.value === "off" ? "off" : "auto")}>
+        <option value="auto">OpenPGP when every recipient has a key</option>
+        <option value="off">Off: send unencrypted</option>
+      </select>
+      {fields.pgp === "off" ? (
+        <p className="muted">Encryption is off. This goes out in plain text, even to recipients who have an OpenPGP key.</p>
+      ) : null}
       <label htmlFor="instruction">Rewrite instruction</label>
       <input id="instruction" value={instruction} disabled={closed} onChange={(event) => setInstruction(event.target.value)} />
       <div className="actions flush">
@@ -166,8 +192,9 @@ export function Compose({ draftId }: { draftId?: string }) {
         <button className="primary" type="submit" disabled={busy || closed}>Approve and send</button>
       </div>
       <p className="muted">
-        Approve and send saves this draft, asks the API for a one-time approval bound to exactly these recipients and this
-        text, and sends. Assistants can't do this step; any edit after approval needs a new one.
+        Approve and send saves this draft and asks the API for a one-time approval bound to exactly the recipients,
+        subject, text, and encryption shown here, then sends. If anything changed since you opened the draft, nothing is
+        approved and the current version is shown instead. Assistants can't do this step.
       </p>
       {status ? <p className="muted">{status}</p> : null}
       {error ? <p className="error">{error}</p> : null}

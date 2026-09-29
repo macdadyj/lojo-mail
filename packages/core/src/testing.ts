@@ -5,7 +5,7 @@ import { loadConfig } from "./config.ts";
 import { generateIdentity } from "./crypto/envelope.ts";
 import { LocalKeyWrapper } from "./crypto/server-seal.ts";
 import { ingestRaw, type IngestOptions, type IngestResult } from "./ingest.ts";
-import { Mailbox, type MailboxDeps } from "./mailbox.ts";
+import { Mailbox, type MailboxDeps, type ReviewedDraft } from "./mailbox.ts";
 import { MemorySender } from "./send.ts";
 import { MemoryStore } from "./store/memory.ts";
 import type { LojoConfig } from "./types.ts";
@@ -66,3 +66,15 @@ export async function memoryWorld(opts: WorldOptions = {}) {
 }
 
 export type MemoryWorld = Awaited<ReturnType<typeof memoryWorld>>;
+
+/** What the web app sends when Jon approves the draft exactly as it is stored now. */
+export async function reviewOf(mailbox: Mailbox, draftId: string): Promise<ReviewedDraft> {
+  const { draft, text } = await mailbox.getDraft(draftId, { withText: true });
+  return {
+    to: draft.to.map((item) => item.email),
+    cc: draft.cc.map((item) => item.email),
+    subject: draft.subject,
+    text: text ?? "",
+    pgp: draft.pgp,
+  };
+}

@@ -1,4 +1,4 @@
-import { FOLDERS, MailError, type Actor, type Folder, type Mailbox, type PgpMode } from "@lojo/core";
+import { FOLDERS, MailError, type Actor, type Folder, type Mailbox, type PgpMode, type ReviewedDraft } from "@lojo/core";
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
@@ -21,7 +21,7 @@ type Requirement = Scope | "human";
 
 const PUBLIC_PATHS = new Set(["/v1/health", "/v1/session/login"]);
 
-function statusFor(error: MailError): 400 | 403 | 404 | 423 {
+function statusFor(error: MailError): 400 | 403 | 404 | 409 | 423 {
   switch (error.code) {
     case "not_found":
       return 404;
@@ -29,6 +29,8 @@ function statusFor(error: MailError): 400 | 403 | 404 | 423 {
       return 423;
     case "forbidden":
       return 403;
+    case "conflict":
+      return 409;
     case "invalid":
     case "budget":
       return 400;
@@ -239,9 +241,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const draft = await mailbox.discardDraft(c.req.param("id"));
     return c.json(await mailbox.getDraft(draft.id));
   });
-  app.post("/v1/drafts/:id/approval", need("human"), async (c) =>
-    c.json(await mailbox.mintApproval(c.req.param("id"), actorOf(c.get("principal")))),
-  );
+  app.post("/v1/drafts/:id/approval", need("human"), async (c) => {
+    const input = await body<ReviewedDraft>(c);
+    const to = strings(input.to, "to");
+    const cc = strings(input.cc, "cc");
+    const pgp = pgpMode(input.pgp);
+    if (!to || !cc || !pgp || typeof input.subject !== "string" || typeof input.text !== "string") {
+      throw new MailError("Send the reviewed to, cc, subject, text, and pgp", "invalid");
+    }
+    const reviewed: ReviewedDraft = { to, cc, subject: input.subject, text: input.text, pgp };
+    return c.json(await mailbox.mintApproval(c.req.param("id"), actorOf(c.get("principal")), reviewed));
+  });
   app.post("/v1/drafts/:id/approve-and-send", need("send"), async (c) => {
     const input = await body<{ approvalToken: string }>(c);
     const token = typeof input.approvalToken === "string" ? input.approvalToken : "";

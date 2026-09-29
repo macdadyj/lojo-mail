@@ -47,7 +47,7 @@ test("an agent with send scope cannot send: it can only submit for approval", as
   const submitted = await callTool("submit_for_approval", { draftId: created.draft.id }, w.ctx);
   assert.match(submitted, /pending_approval/);
   assert.equal(w.sender.sent.length, 0);
-  const denied = await w.call(`/v1/drafts/${created.draft.id}/approval`, { token: w.token, method: "POST" });
+  const denied = await w.call(`/v1/drafts/${created.draft.id}/approval`, { token: w.token, body: await w.review(created.draft.id) });
   assert.equal(denied.status, 403);
 });
 

@@ -62,7 +62,7 @@ flowchart LR
 2. An SES receipt rule requires TLS, scans for spam/virus, and writes the raw MIME object into S3 under `raw/`. The S3 action names no KMS key; the bucket's default SSE-KMS (customer-managed key, bucket key on) encrypts it at rest, so the processor reads it with a plain `GetObject`. The rule names `lojo@<domain>` and `dmarc@<domain>` only. Other SES identities in the account stay untouched.
 3. An S3 event invokes the processor Lambda. The function parses MIME, reads the SES verdict headers, seals the body and each attachment to Jon's public key into `objects/`, writes metadata to DynamoDB, runs the AI pipeline, and deletes the `raw/` object. AI failure never fails receipt. Any other failure throws; S3's async invoke retries twice, then the event lands in an SQS dead-letter queue with its `raw/` key, and a CloudWatch alarm fires. `docs/RUNBOOK.md` has the redrive.
 4. The HTTP API and the MCP server read that index. Bodies stay sealed until something that holds Jon's private key opens them, which in production is only the browser.
-5. Outbound mail is built by the API and sent with SESv2 only with a one-time approval token that a human web session minted for that exact content. The AI pipeline has no sender dependency, and the MCP server has no send tool.
+5. Outbound mail is built by the API and sent with SESv2 only with a one-time approval token that a human web session minted for that exact content, after the server checked that the content is what Jon had on screen. The AI pipeline has no sender dependency, and the MCP server has no send tool.
 
 ## Components
 

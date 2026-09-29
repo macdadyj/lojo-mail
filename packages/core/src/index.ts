@@ -43,7 +43,7 @@ export { newId, sha256, utcDay, normalizeMessageId } from "./ids.ts";
 export { ingestRaw, messageIdFor, refreshThread, threadParticipants } from "./ingest.ts";
 export type { IngestDeps, IngestOptions, IngestResult } from "./ingest.ts";
 export { Mailbox } from "./mailbox.ts";
-export type { AttachmentPayload, DraftInput, DraftPatch, MailboxDeps, ViewOptions } from "./mailbox.ts";
+export type { AttachmentPayload, DraftInput, DraftPatch, MailboxDeps, ReviewedDraft, ViewOptions } from "./mailbox.ts";
 export { isBulk } from "./mime/bulk.ts";
 export { buildRawMessage, cleanEmail, cleanHeaderValue, encodeHeaderText, formatAddress } from "./mime/compose.ts";
 export { htmlToText, snippetFrom } from "./mime/html.ts";

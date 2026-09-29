@@ -13,7 +13,7 @@ async function withDraft(opts: Parameters<typeof testApp>[0] = {}) {
 test("a human mints an approval and the web sends with it", async () => {
   const t = await withDraft();
   const human = await t.login();
-  const minted = await t.call(`/v1/drafts/${t.draft.id}/approval`, { token: human, method: "POST" });
+  const minted = await t.call(`/v1/drafts/${t.draft.id}/approval`, { token: human, body: await t.review(t.draft.id) });
   assert.equal(minted.status, 200);
   const approvalToken = String(minted.json.approvalToken);
   assert.match(approvalToken, /^apv_/);
@@ -34,7 +34,7 @@ test("a send token with no approval gets 403", async () => {
 test("an API token cannot mint an approval, whatever its scopes", async () => {
   const t = await withDraft();
   for (const token of ["read-token", "write-token", "send-token", "body-token", "admin-token"]) {
-    const res = await t.call(`/v1/drafts/${t.draft.id}/approval`, { token, method: "POST" });
+    const res = await t.call(`/v1/drafts/${t.draft.id}/approval`, { token, body: await t.review(t.draft.id) });
     assert.equal(res.status, 403, token);
   }
   assert.equal((await t.store.getDraft(t.draft.id))?.approvalTokenHash, undefined);
@@ -43,7 +43,7 @@ test("an API token cannot mint an approval, whatever its scopes", async () => {
 test("a human-minted token also works for a send-scoped caller, once", async () => {
   const t = await withDraft();
   const human = await t.login();
-  const approvalToken = String((await t.call(`/v1/drafts/${t.draft.id}/approval`, { token: human, method: "POST" })).json.approvalToken);
+  const approvalToken = String((await t.call(`/v1/drafts/${t.draft.id}/approval`, { token: human, body: await t.review(t.draft.id) })).json.approvalToken);
   assert.equal((await t.call(`/v1/drafts/${t.draft.id}/approve-and-send`, { token: "write-token", body: { approvalToken } })).status, 403);
   assert.equal((await t.call(`/v1/drafts/${t.draft.id}/approve-and-send`, { token: "send-token", body: { approvalToken } })).status, 200);
   const replay = await t.call(`/v1/drafts/${t.draft.id}/approve-and-send`, { token: "send-token", body: { approvalToken } });
@@ -54,7 +54,7 @@ test("a human-minted token also works for a send-scoped caller, once", async () 
 test("an approval for different content is rejected", async () => {
   const t = await withDraft();
   const human = await t.login();
-  const approvalToken = String((await t.call(`/v1/drafts/${t.draft.id}/approval`, { token: human, method: "POST" })).json.approvalToken);
+  const approvalToken = String((await t.call(`/v1/drafts/${t.draft.id}/approval`, { token: human, body: await t.review(t.draft.id) })).json.approvalToken);
   const edited = await t.call(`/v1/drafts/${t.draft.id}`, { token: "write-token", body: { text: "Different words." } });
   assert.equal(edited.status, 200);
   const res = await t.call(`/v1/drafts/${t.draft.id}/approve-and-send`, { token: "send-token", body: { approvalToken } });
@@ -62,11 +62,43 @@ test("an approval for different content is rejected", async () => {
   assert.equal(t.sender.sent.length, 0);
 });
 
+test("a write-token edit after Jon opened the draft gets 409 instead of an approval", async () => {
+  const t = await withDraft();
+  const human = await t.login();
+  const reviewed = await t.review(t.draft.id);
+  for (const edit of [{ text: "Wire the deposit to the new account." }, { pgp: "off" }, { cc: ["mina@example.com"] }]) {
+    const changed = await t.call(`/v1/drafts/${t.draft.id}`, { token: "write-token", body: edit });
+    assert.equal(changed.status, 200, changed.text);
+    const res = await t.call(`/v1/drafts/${t.draft.id}/approval`, { token: human, body: reviewed });
+    assert.equal(res.status, 409, JSON.stringify(edit));
+    assert.equal(res.json.code, "conflict");
+    assert.equal((await t.store.getDraft(t.draft.id))?.approvalTokenHash, undefined);
+    const restored = await t.call(`/v1/drafts/${t.draft.id}`, { token: human, body: reviewed });
+    assert.equal(restored.status, 200, restored.text);
+  }
+  const minted = await t.call(`/v1/drafts/${t.draft.id}/approval`, { token: human, body: reviewed });
+  assert.equal(minted.status, 200, minted.text);
+  assert.equal(t.sender.sent.length, 0);
+});
+
+test("minting needs the reviewed content", async () => {
+  const t = await withDraft();
+  const human = await t.login();
+  const reviewed = await t.review(t.draft.id);
+  const { pgp: _pgp, ...withoutPgp } = reviewed;
+  const bodies: unknown[] = [undefined, {}, withoutPgp, { ...reviewed, pgp: "maybe" }, { ...reviewed, to: "mina@example.com" }, { ...reviewed, text: 1 }];
+  for (const body of bodies) {
+    const res = await t.call(`/v1/drafts/${t.draft.id}/approval`, body === undefined ? { token: human, method: "POST" } : { token: human, body });
+    assert.equal(res.status, 400, JSON.stringify(body));
+  }
+  assert.equal((await t.store.getDraft(t.draft.id))?.approvalTokenHash, undefined);
+});
+
 test("an expired approval is rejected", async () => {
   let clock = Date.parse("2026-09-29T12:00:00Z");
   const t = await withDraft({ now: () => new Date(clock) });
   const human = await t.login();
-  const approvalToken = String((await t.call(`/v1/drafts/${t.draft.id}/approval`, { token: human, method: "POST" })).json.approvalToken);
+  const approvalToken = String((await t.call(`/v1/drafts/${t.draft.id}/approval`, { token: human, body: await t.review(t.draft.id) })).json.approvalToken);
   clock += APPROVAL_TTL_MS + 1;
   const res = await t.call(`/v1/drafts/${t.draft.id}/approve-and-send`, { token: human, body: { approvalToken } });
   assert.equal(res.status, 403);

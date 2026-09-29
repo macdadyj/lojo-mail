@@ -128,7 +128,11 @@ Every request carries a bearer credential. The API resolves it to a principal wi
 ### Approval flow
 
 1. A draft exists. Any `write` principal can create or edit it. An agent can move it to `pending_approval` with `submit_for_approval`. The web Drafts view shows those as an approval queue.
-2. `POST /v1/drafts/:id/approval` — **human session only**. Any API token gets 403, even with `admin` or `send`. It returns a one-time `apv_…` token (32 random bytes), valid 10 minutes, bound to the draft id and to the SHA-256 of the canonical content: from, to, cc, subject, text, In-Reply-To, and PGP mode. The draft stores only `approvalTokenHash`, `approvalContentHash`, `approvalExpiresAt`, and `approvalUsedAt`. The raw token is never stored.
+2. `POST /v1/drafts/:id/approval { to, cc, subject, text, pgp }` — **human session only**. Any API token gets 403, even with `admin` or `send`.
+   - The body is what Jon reviewed: the recipients, subject, text, and encryption setting on his screen when he pressed the button. The server hashes it with the same canonicalization as the stored draft (addresses trimmed and compared case-insensitively, header line breaks stripped). If the stored draft differs in any of those, or in PGP mode, it returns **409** `conflict`, stores nothing, and audits `send.approval_refused`. The web app then reloads the draft and asks Jon to check it again.
+   - Why: a `write` token can edit a draft at any time. Without this step the token would bind to whatever the server held at mint time. An agent that swapped the text, a recipient, or turned PGP off after Jon opened the page would get its version approved, because the web app does not re-save fields Jon did not touch.
+   - On a match it returns a one-time `apv_…` token (32 random bytes), valid 10 minutes, bound to the draft id and to the SHA-256 of the canonical content: from, to, cc, subject, text, In-Reply-To, and PGP mode. The draft stores only `approvalTokenHash`, `approvalContentHash`, `approvalExpiresAt`, and `approvalUsedAt`. The raw token is never stored.
+   - Drafts are written as whole items, so the approval fields are only ever stored next to the content they were minted for. An edit that races the mint either overwrites the approval (the send then fails) or is overwritten by the approved content.
 3. `POST /v1/drafts/:id/approve-and-send { approvalToken }` needs the `send` scope **and** a valid token:
    - the token hash matches,
    - it has not expired,
@@ -137,13 +141,15 @@ Every request carries a bearer credential. The API resolves it to a principal wi
 4. The draft is claimed with a conditional write (`MailStore.claimDraftForSend`). Two concurrent sends with the same token cannot both win. A replay fails.
 5. If SES rejects the message, the draft goes back to `edited`, the approval is cleared, and Jon must approve again.
 
-The web app mints and sends in one click, so for Jon the flow is still one button. An MCP agent never sees an approval token.
+The web app mints and sends in one click, so for Jon the flow is still one button. The compose screen shows the encryption setting next to the body, and warns when it is off. An MCP agent never sees an approval token.
 
 Tests (`packages/api/src/approval.test.ts`, `packages/core/src/approval.test.ts`, `packages/mcp/src/tools.test.ts`):
 
 - An agent with `send` scope cannot send; `approve_and_send` is an unknown MCP tool.
 - A send token with no approval token gets 403.
 - An approval for different content is rejected.
+- A text, recipient, subject, or PGP change after Jon opened the draft gets 409 at mint time, and no approval is stored.
+- Minting without the reviewed content, or with a malformed one, gets 400.
 - Replay is rejected.
 - An expired approval is rejected (injected clock).
 - An API token cannot mint an approval.
