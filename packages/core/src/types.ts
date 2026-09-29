@@ -165,6 +165,7 @@ export interface MessagePatch {
   ai?: AiPublic | null;
   embedding?: number[] | null;
   envelope?: EnvelopeBlob;
+  threadId?: string;
 }
 
 export interface LojoConfig {
