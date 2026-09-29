@@ -1,16 +1,15 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
-import type { DynamoLike, TableNames } from "@lojo/core";
+import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DEFAULT_TABLE_NAMES, type Condition, type DynamoLike, type Item, type TableNames } from "@lojo/core";
 
 export function tableNamesFromEnv(env: NodeJS.ProcessEnv = process.env): TableNames {
   return {
-    messages: env.LOJO_TABLE_MESSAGES ?? "lojo-mail-messages",
-    threads: env.LOJO_TABLE_THREADS ?? "lojo-mail-threads",
-    drafts: env.LOJO_TABLE_DRAFTS ?? "lojo-mail-drafts",
-    audit: env.LOJO_TABLE_AUDIT ?? "lojo-mail-audit",
-    contacts: env.LOJO_TABLE_CONTACTS ?? "lojo-mail-contacts",
-    budget: env.LOJO_TABLE_BUDGET ?? "lojo-mail-budget",
-    imports: env.LOJO_TABLE_IMPORTS ?? "lojo-mail-imports",
+    messages: env.LOJO_TABLE_MESSAGES ?? DEFAULT_TABLE_NAMES.messages,
+    threads: env.LOJO_TABLE_THREADS ?? DEFAULT_TABLE_NAMES.threads,
+    drafts: env.LOJO_TABLE_DRAFTS ?? DEFAULT_TABLE_NAMES.drafts,
+    audit: env.LOJO_TABLE_AUDIT ?? DEFAULT_TABLE_NAMES.audit,
+    contacts: env.LOJO_TABLE_CONTACTS ?? DEFAULT_TABLE_NAMES.contacts,
+    budget: env.LOJO_TABLE_BUDGET ?? DEFAULT_TABLE_NAMES.budget,
   };
 }
 
@@ -23,73 +22,124 @@ export function documentClient(env: NodeJS.ProcessEnv = process.env): DynamoDBDo
   return DynamoDBDocumentClient.from(client, { marshallOptions: { removeUndefinedValues: true } });
 }
 
+class Expression {
+  readonly names: Record<string, string> = {};
+  readonly values: Record<string, unknown> = {};
+  private next = 0;
+
+  name(field: string): string {
+    const token = `#n${this.next}`;
+    this.names[token] = field;
+    this.next += 1;
+    return token;
+  }
+
+  value(value: unknown): string {
+    const token = `:v${this.next}`;
+    this.values[token] = value;
+    this.next += 1;
+    return token;
+  }
+
+  condition(condition: Condition | undefined): string | undefined {
+    if (!condition) return undefined;
+    const clauses: string[] = [];
+    for (const field of condition.exists ?? []) clauses.push(`attribute_exists(${this.name(field)})`);
+    for (const field of condition.notExists ?? []) clauses.push(`attribute_not_exists(${this.name(field)})`);
+    for (const [field, value] of Object.entries(condition.equals ?? {})) clauses.push(`${this.name(field)} = ${this.value(value)}`);
+    for (const [field, options] of Object.entries(condition.oneOf ?? {})) {
+      const name = this.name(field);
+      clauses.push(`${name} IN (${options.map((option) => this.value(option)).join(", ")})`);
+    }
+    return clauses.length > 0 ? clauses.join(" AND ") : undefined;
+  }
+
+  attributes(): { ExpressionAttributeNames?: Record<string, string>; ExpressionAttributeValues?: Record<string, unknown> } {
+    return {
+      ...(Object.keys(this.names).length > 0 ? { ExpressionAttributeNames: this.names } : {}),
+      ...(Object.keys(this.values).length > 0 ? { ExpressionAttributeValues: this.values } : {}),
+    };
+  }
+}
+
+function conditionFailed(error: unknown): boolean {
+  return error instanceof Error && error.name === "ConditionalCheckFailedException";
+}
+
+/** Get, Put, Query, and Update only. The IAM policy grants nothing else. */
 export function dynamoLike(doc: DynamoDBDocumentClient): DynamoLike {
   return {
     async get(table, key) {
       const out = await doc.send(new GetCommand({ TableName: table, Key: key }));
-      return (out.Item as Record<string, unknown> | undefined) ?? null;
+      return (out.Item as Item | undefined) ?? null;
     },
-    async put(table, item, ifAbsentKey) {
+    async put(table, item, opts) {
+      const expr = new Expression();
+      const condition = opts?.ifAbsent ? expr.condition({ notExists: [opts.ifAbsent] }) : undefined;
       try {
-        await doc.send(
-          new PutCommand({
-            TableName: table,
-            Item: item,
-            ...(ifAbsentKey
-              ? {
-                  ConditionExpression: "attribute_not_exists(#k)",
-                  ExpressionAttributeNames: { "#k": ifAbsentKey },
-                }
-              : {}),
-          }),
-        );
+        await doc.send(new PutCommand({ TableName: table, Item: item, ...(condition ? { ConditionExpression: condition, ...expr.attributes() } : {}) }));
         return true;
       } catch (error) {
-        if (error instanceof Error && error.name === "ConditionalCheckFailedException") return false;
+        if (conditionFailed(error)) return false;
         throw error;
       }
     },
     async query(table, opts) {
-      const out = await doc.send(
-        new QueryCommand({
-          TableName: table,
-          IndexName: opts.index,
-          KeyConditionExpression: "#k = :v",
-          ExpressionAttributeNames: { "#k": opts.keyName },
-          ExpressionAttributeValues: { ":v": opts.keyValue },
-          Limit: opts.limit,
-          ScanIndexForward: !opts.descending,
-        }),
-      );
-      return (out.Items as Record<string, unknown>[] | undefined) ?? [];
+      const items: Item[] = [];
+      let start: Record<string, unknown> | undefined;
+      do {
+        const remaining = opts.limit === undefined ? undefined : opts.limit - items.length;
+        const out = await doc.send(
+          new QueryCommand({
+            TableName: table,
+            IndexName: opts.index,
+            KeyConditionExpression: "#k = :v",
+            ExpressionAttributeNames: { "#k": opts.keyName },
+            ExpressionAttributeValues: { ":v": opts.keyValue },
+            ScanIndexForward: !opts.descending,
+            ...(remaining === undefined ? {} : { Limit: remaining }),
+            ...(start ? { ExclusiveStartKey: start } : {}),
+          }),
+        );
+        items.push(...((out.Items as Item[] | undefined) ?? []));
+        start = out.LastEvaluatedKey;
+      } while (start && (opts.limit === undefined || items.length < opts.limit));
+      return items;
     },
-    async scan(table, limit) {
-      const out = await doc.send(new ScanCommand({ TableName: table, Limit: limit }));
-      return (out.Items as Record<string, unknown>[] | undefined) ?? [];
-    },
-    async update(table, key, patch) {
+    async update(table, key, opts) {
+      const expr = new Expression();
       const sets: string[] = [];
-      const names: Record<string, string> = {};
-      const values: Record<string, unknown> = {};
-      let i = 0;
-      for (const [field, value] of Object.entries(patch)) {
-        const name = `#f${i}`;
-        const placeholder = `:v${i}`;
-        names[name] = field;
-        values[placeholder] = value;
-        sets.push(`${name} = ${placeholder}`);
-        i += 1;
+      const removes: string[] = [];
+      const adds: string[] = [];
+      for (const [field, value] of Object.entries(opts.set ?? {})) {
+        if (value === undefined) removes.push(expr.name(field));
+        else sets.push(`${expr.name(field)} = ${expr.value(value)}`);
       }
-      if (sets.length === 0) return;
-      await doc.send(
-        new UpdateCommand({
-          TableName: table,
-          Key: key,
-          UpdateExpression: `SET ${sets.join(", ")}`,
-          ExpressionAttributeNames: names,
-          ExpressionAttributeValues: values,
-        }),
-      );
+      for (const field of opts.remove ?? []) removes.push(expr.name(field));
+      for (const [field, amount] of Object.entries(opts.add ?? {})) adds.push(`${expr.name(field)} ${expr.value(amount)}`);
+      const clauses = [
+        ...(sets.length > 0 ? [`SET ${sets.join(", ")}`] : []),
+        ...(removes.length > 0 ? [`REMOVE ${removes.join(", ")}`] : []),
+        ...(adds.length > 0 ? [`ADD ${adds.join(", ")}`] : []),
+      ];
+      const condition = expr.condition(opts.condition);
+      if (clauses.length === 0) return this.get(table, key);
+      try {
+        const out = await doc.send(
+          new UpdateCommand({
+            TableName: table,
+            Key: key,
+            UpdateExpression: clauses.join(" "),
+            ...(condition ? { ConditionExpression: condition } : {}),
+            ...expr.attributes(),
+            ReturnValues: "ALL_NEW",
+          }),
+        );
+        return (out.Attributes as Item | undefined) ?? null;
+      } catch (error) {
+        if (conditionFailed(error)) return null;
+        throw error;
+      }
     },
   };
 }
