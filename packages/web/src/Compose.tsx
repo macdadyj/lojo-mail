@@ -1,131 +1,186 @@
 import { useEffect, useState } from "react";
 import { api } from "./api.ts";
-import type { DraftRow, Message } from "./types.ts";
-import { openDraftText, openMessage } from "./unlock.ts";
+import { statusLabel, type Draft, type DraftView, type Message } from "./types.ts";
+import { openMessage } from "./unlock.ts";
+
+interface Fields {
+  to: string;
+  cc: string;
+  subject: string;
+  text: string;
+}
+
+const EMPTY: Fields = { to: "", cc: "", subject: "", text: "" };
+
+function list(value: string): string[] {
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function fieldsOf(view: DraftView): Fields {
+  return {
+    to: view.draft.to.map((item) => item.email).join(", "),
+    cc: view.draft.cc.map((item) => item.email).join(", "),
+    subject: view.draft.subject,
+    text: view.text ?? "",
+  };
+}
+
+function same(a: Fields, b: Fields): boolean {
+  return a.to === b.to && a.cc === b.cc && a.subject === b.subject && a.text === b.text;
+}
 
 export function Compose({ draftId }: { draftId?: string }) {
-  const [to, setTo] = useState("");
-  const [subject, setSubject] = useState("");
-  const [text, setText] = useState("");
-  const [id, setId] = useState(draftId);
+  const [fields, setFields] = useState<Fields>(EMPTY);
+  const [saved, setSaved] = useState<Fields | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [instruction, setInstruction] = useState("Make it shorter.");
+  const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.hash.split("?")[1] ?? "");
-    const reply = params.get("reply");
-    if (!reply) return;
-    api<DraftRow["draft"]>(`/v1/messages/${reply}/draft-reply`, { method: "POST" })
-      .then(async (draft) => {
-        setId(draft.id);
-        setSubject(draft.subject);
-        setTo(draft.to.map((item) => item.email).join(", "));
-        const rows = await api<{ drafts: DraftRow[] }>("/v1/drafts");
-        const row = rows.drafts.find((item) => item.draft.id === draft.id);
-        setText(row ? ((await openDraftText(row)) ?? "") : "");
-      })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not draft a reply"));
-  }, []);
+  function show(view: DraftView) {
+    const next = fieldsOf(view);
+    setDraft(view.draft);
+    setFields(next);
+    setSaved(next);
+  }
 
   useEffect(() => {
-    if (!draftId) return;
-    api<{ drafts: DraftRow[] }>("/v1/drafts")
-      .then(async (body) => {
-        const row = body.drafts.find((item) => item.draft.id === draftId);
-        if (!row) return;
-        setId(row.draft.id);
-        setSubject(row.draft.subject);
-        setTo(row.draft.to.map((item) => item.email).join(", "));
-        setText((await openDraftText(row)) ?? "");
+    if (draftId) {
+      api<DraftView>(`/v1/drafts/${encodeURIComponent(draftId)}?text=1`)
+        .then(show)
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not open the draft"));
+      return;
+    }
+    const reply = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("reply");
+    if (!reply) return;
+    setBusy(true);
+    draftReply(reply)
+      .then((view) => {
+        show(view);
+        window.history.replaceState(null, "", `#/compose/${view.draft.id}`);
       })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not open the draft"));
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not draft a reply"))
+      .finally(() => setBusy(false));
   }, [draftId]);
 
-  async function ensureDraft(): Promise<string> {
-    if (id) return id;
-    const created = await api<{ id: string }>("/v1/drafts", {
-      method: "POST",
-      body: JSON.stringify({
-        to: to.split(",").map((item) => item.trim()).filter(Boolean),
-        subject,
-        text,
-      }),
+  function set(name: keyof Fields, value: string) {
+    setFields((current) => ({ ...current, [name]: value }));
+  }
+
+  async function save(): Promise<string> {
+    if (draft && saved && same(fields, saved)) return draft.id;
+    const payload = JSON.stringify({ to: list(fields.to), cc: list(fields.cc), subject: fields.subject, text: fields.text });
+    const view = draft
+      ? await api<DraftView>(`/v1/drafts/${draft.id}`, { method: "POST", body: payload })
+      : await api<DraftView>("/v1/drafts", { method: "POST", body: payload });
+    show(view);
+    return view.draft.id;
+  }
+
+  async function run(label: string, action: () => Promise<void>) {
+    setBusy(true);
+    setError(null);
+    setStatus(null);
+    try {
+      await action();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `${label} failed`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const saveDraft = () =>
+    run("Save", async () => {
+      await save();
+      setStatus("Saved. Nothing is sent until you approve.");
     });
-    setId(created.id);
-    return created.id;
-  }
 
-  async function rewrite() {
-    setError(null);
-    try {
-      const draft = await ensureDraft();
-      const updated = await api<{ text: string }>(`/v1/drafts/${draft}/rewrite`, {
-        method: "POST",
-        body: JSON.stringify({ instruction }),
-      });
-      setText(updated.text);
+  const rewrite = () =>
+    run("Rewrite", async () => {
+      const id = await save();
+      show(await api<DraftView>(`/v1/drafts/${id}/rewrite`, { method: "POST", body: JSON.stringify({ instruction }) }));
       setStatus("Rewritten. Still a draft.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Rewrite failed");
-    }
-  }
+    });
 
-  async function send() {
-    setError(null);
-    try {
-      const draft = await ensureDraft();
-      await api(`/v1/drafts/${draft}`, { method: "POST", body: JSON.stringify({ text }) });
-      const sent = await api<{ messageId: string }>(`/v1/drafts/${draft}/approve-and-send`, { method: "POST" });
-      setStatus(`Sent ${sent.messageId}. Nothing is mailed until this step.`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Send failed");
-    }
-  }
+  const approveAndSend = () =>
+    run("Send", async () => {
+      const id = await save();
+      const { approvalToken } = await api<{ approvalToken: string }>(`/v1/drafts/${id}/approval`, { method: "POST" });
+      const sent = await api<{ messageId: string }>(`/v1/drafts/${id}/approve-and-send`, {
+        method: "POST",
+        body: JSON.stringify({ approvalToken }),
+      });
+      show(await api<DraftView>(`/v1/drafts/${id}?text=1`));
+      setStatus(`Sent (${sent.messageId}).`);
+    });
+
+  const discard = () =>
+    run("Discard", async () => {
+      if (!draft) return;
+      await api(`/v1/drafts/${draft.id}/discard`, { method: "POST" });
+      window.location.hash = "#/drafts";
+    });
+
+  const closed = draft?.status === "sent" || draft?.status === "sending" || draft?.status === "discarded";
 
   return (
     <form
       className="panel"
       onSubmit={(event) => {
         event.preventDefault();
-        void send();
+        void approveAndSend();
       }}
     >
       <header>
         <h2>Write</h2>
         <a className="back" href="#/inbox">Back</a>
       </header>
-      <p className="muted">A draft is not mail. Sending asks the API, which checks the send scope.</p>
+      {draft ? (
+        <div className="meta">
+          <span className={draft.status === "pending_approval" ? "chip now" : "chip"}>{statusLabel(draft.status)}</span>
+          {draft.origin === "ai" ? <span className="chip">AI</span> : null}
+          {draft.origin === "agent" ? <span className="chip">assistant</span> : null}
+        </div>
+      ) : null}
+      {draft?.status === "pending_approval" ? (
+        <p className="muted">An assistant wrote this and asked you to approve it. Check the recipients and the text before you send.</p>
+      ) : null}
       <label htmlFor="to">To</label>
-      <input id="to" value={to} onChange={(event) => setTo(event.target.value)} placeholder="ada@example.com" />
+      <input id="to" value={fields.to} disabled={closed} onChange={(event) => set("to", event.target.value)} placeholder="ada@example.com" />
+      <label htmlFor="cc">Cc</label>
+      <input id="cc" value={fields.cc} disabled={closed} onChange={(event) => set("cc", event.target.value)} />
       <label htmlFor="subject">Subject</label>
-      <input id="subject" value={subject} onChange={(event) => setSubject(event.target.value)} />
+      <input id="subject" value={fields.subject} disabled={closed} onChange={(event) => set("subject", event.target.value)} />
       <label htmlFor="body">Message</label>
-      <textarea id="body" value={text} onChange={(event) => setText(event.target.value)} />
+      <textarea id="body" value={fields.text} disabled={closed} onChange={(event) => set("text", event.target.value)} />
       <label htmlFor="instruction">Rewrite instruction</label>
-      <input id="instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} />
-      <div className="actions" style={{ padding: "16px 0 0" }}>
-        <button className="ghost" type="button" onClick={() => void rewrite()}>Rewrite</button>
-        <button className="primary" type="submit">Approve and send</button>
+      <input id="instruction" value={instruction} disabled={closed} onChange={(event) => setInstruction(event.target.value)} />
+      <div className="actions flush">
+        <button className="ghost" type="button" disabled={busy || closed} onClick={() => void rewrite()}>Rewrite</button>
+        <button className="ghost" type="button" disabled={busy || closed} onClick={() => void saveDraft()}>Save draft</button>
+        {draft ? (
+          <button className="ghost" type="button" disabled={busy || closed} onClick={() => void discard()}>Discard</button>
+        ) : null}
+        <button className="primary" type="submit" disabled={busy || closed}>Approve and send</button>
       </div>
+      <p className="muted">
+        Approve and send saves this draft, asks the API for a one-time approval bound to exactly these recipients and this
+        text, and sends. Assistants can't do this step; any edit after approval needs a new one.
+      </p>
       {status ? <p className="muted">{status}</p> : null}
       {error ? <p className="error">{error}</p> : null}
-      <ReplyHint />
     </form>
   );
 }
 
-function ReplyHint() {
-  const [hint, setHint] = useState<string | null>(null);
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.hash.split("?")[1] ?? "");
-    const reply = params.get("reply");
-    if (!reply) return;
-    api<Message>(`/v1/messages/${reply}`)
-      .then((message) => openMessage(message))
-      .then((message) => setHint(message.subject))
-      .catch(() => setHint(null));
-  }, []);
-  if (!hint) return null;
-  return <p className="muted">Replying in “{hint}”.</p>;
+/** When the server can't read the body, the browser opens it and sends the text along. */
+async function draftReply(messageId: string): Promise<DraftView> {
+  const message = await api<Message>(`/v1/messages/${encodeURIComponent(messageId)}`);
+  const sourceText = message.locked ? (await openMessage(message)).text : undefined;
+  return api<DraftView>(`/v1/messages/${encodeURIComponent(messageId)}/draft-reply`, {
+    method: "POST",
+    body: JSON.stringify(sourceText !== undefined ? { sourceText } : {}),
+  });
 }

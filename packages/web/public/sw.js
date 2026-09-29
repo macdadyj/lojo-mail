@@ -1,13 +1,18 @@
-const CACHE = "lojo-mail-shell-v1";
+const CACHE = "lojo-mail-shell-v2";
 const SHELL = ["/", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
 });
 
+self.addEventListener("activate", (event) => {
+  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))));
+});
+
+// Only the app shell is cached. API responses and presigned attachment downloads are never stored.
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith("/v1") || event.request.method !== "GET") return;
+  if (url.origin !== self.location.origin || url.pathname.startsWith("/v1") || event.request.method !== "GET") return;
   event.respondWith(
     fetch(event.request)
       .then((response) => {

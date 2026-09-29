@@ -1,23 +1,39 @@
 import { useEffect, useState } from "react";
 import { api } from "./api.ts";
-import { person, when, type Message } from "./types.ts";
-import { openMessage } from "./unlock.ts";
+import { person, when, type ActionItem, type AttachmentMeta, type Message } from "./types.ts";
+import { downloadAttachment, openMessage } from "./unlock.ts";
+
+function uniqueItems(items: ActionItem[]): ActionItem[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = `${item.text.trim().toLowerCase()}|${item.deadline ?? ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function size(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export function Reader({ threadId, onChanged }: { threadId: string; onChanged: () => void }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [label, setLabel] = useState("");
 
-  async function loadThread(): Promise<void> {
+  async function fetchThread(): Promise<Message[]> {
     const body = await api<{ messages: Message[] }>(`/v1/threads/${encodeURIComponent(threadId)}`);
-    setMessages(await Promise.all(body.messages.map((message) => openMessage(message))));
+    return Promise.all(body.messages.map((message) => openMessage(message)));
   }
 
   useEffect(() => {
     let cancel = false;
-    api<{ messages: Message[] }>(`/v1/threads/${encodeURIComponent(threadId)}`)
-      .then(async (body) => {
-        const opened = await Promise.all(body.messages.map((message) => openMessage(message)));
+    setError(null);
+    fetchThread()
+      .then((opened) => {
         if (!cancel) setMessages(opened);
       })
       .catch((err: unknown) => {
@@ -31,15 +47,13 @@ export function Reader({ threadId, onChanged }: { threadId: string; onChanged: (
   const latest = messages[messages.length - 1];
   const title = messages[0]?.subject ?? latest?.subject;
   const summary = messages.map((message) => message.summary).find(Boolean);
-  const actions = messages.flatMap((message) => message.actionItems ?? []);
+  const actions = uniqueItems(messages.flatMap((message) => message.actionItems ?? []));
   const phish = messages.find((message) => (message.ai?.phishingScore ?? 0) >= 40);
 
   async function archive() {
     const inbox = messages.filter((message) => message.folder === "inbox");
     const targets = inbox.length > 0 ? inbox : latest ? [latest] : [];
-    await Promise.all(
-      targets.map((message) => api(`/v1/messages/${message.id}/archive`, { method: "POST" })),
-    );
+    await Promise.all(targets.map((message) => api(`/v1/messages/${message.id}/archive`, { method: "POST" })));
     onChanged();
     window.location.hash = "#/inbox";
   }
@@ -55,11 +69,20 @@ export function Reader({ threadId, onChanged }: { threadId: string; onChanged: (
     );
     setLabel("");
     onChanged();
-    await loadThread();
+    setMessages(await fetchThread());
   }
 
-  if (error) return <p className="error">{error}</p>;
-  if (!latest) return <p className="empty">Opening…</p>;
+  async function download(message: Message, attachment: AttachmentMeta) {
+    setError(null);
+    try {
+      await downloadAttachment(message.id, attachment);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Download failed");
+    }
+  }
+
+  if (!latest) return error ? <p className="error">{error}</p> : <p className="empty">Opening…</p>;
+  const replyTo = [...messages].reverse().find((message) => message.origin !== "sent") ?? latest;
 
   return (
     <>
@@ -67,14 +90,15 @@ export function Reader({ threadId, onChanged }: { threadId: string; onChanged: (
         <h2>{title}</h2>
         <a className="back" href="#/inbox">Back</a>
       </header>
+      {error ? <p className="error">{error}</p> : null}
       {summary ? (
         <div className="summary">
           <strong>Summary</strong>
           <p>{summary}</p>
           {actions.length > 0 ? (
             <ul>
-              {actions.map((item, index) => (
-                <li key={`${item.text}-${item.deadline ?? ""}-${index}`}>
+              {actions.map((item) => (
+                <li key={`${item.text}|${item.deadline ?? ""}`}>
                   {item.text}
                   {item.deadline ? ` · ${item.deadline}` : ""}
                 </li>
@@ -95,17 +119,29 @@ export function Reader({ threadId, onChanged }: { threadId: string; onChanged: (
           {message.pgpEncrypted ? <div className="chip">OpenPGP</div> : null}
           <pre>
             {message.locked
-              ? "Locked. Paste the envelope private key in Settings to read the body in this browser."
+              ? "Locked. Load the envelope private key in Settings to read this message in this browser."
               : message.text}
           </pre>
+          {message.attachments.length > 0 ? (
+            <ul className="attachments">
+              {message.attachments.map((attachment) => (
+                <li key={attachment.id}>
+                  <button className="ghost" type="button" onClick={() => void download(message, attachment)}>
+                    {attachment.filename || "attachment"}
+                  </button>
+                  <span className="muted">{size(attachment.size)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </article>
       ))}
       <div className="actions">
-        <a className="primary" href={`#/compose?reply=${latest.id}`} style={{ textDecoration: "none", borderRadius: 999, padding: "8px 14px" }}>
+        <a className="button primary" href={`#/compose?reply=${encodeURIComponent(replyTo.id)}`}>
           Draft reply
         </a>
         <button className="ghost" type="button" onClick={() => void archive()}>Archive</button>
-        <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Add a label" style={{ width: 160 }} />
+        <input className="label-input" value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Add a label" />
         <button className="ghost" type="button" onClick={() => void addLabel()}>Label</button>
       </div>
     </>

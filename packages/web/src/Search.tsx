@@ -35,7 +35,7 @@ export function Search() {
         <option value="keyword">Keyword, including the body when unlocked</option>
         <option value="semantic">Semantic</option>
       </select>
-      <div className="actions" style={{ padding: "16px 0" }}>
+      <div className="actions flush">
         <button className="primary" type="submit">Search</button>
       </div>
       {error ? <p className="error">{error}</p> : null}
