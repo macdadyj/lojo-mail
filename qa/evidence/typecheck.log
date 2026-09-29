@@ -1,0 +1,4 @@
+
+> lojo-mail@0.1.0 typecheck
+> tsc -p packages/core --noEmit && tsc -p packages/pipeline --noEmit && tsc -p packages/api --noEmit && tsc -p packages/mcp --noEmit && tsc -p packages/web --noEmit && tsc -p packages/importer --noEmit
+

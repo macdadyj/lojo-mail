@@ -1,0 +1,199 @@
+
+> lojo-mail@0.1.0 test
+> node scripts/run-tests.mjs
+
+TAP version 13
+# Subtest: inbox requires a token and returns the seeded message
+ok 1 - inbox requires a token and returns the seeded message
+  ---
+  duration_ms: 40.982923
+  ...
+# Subtest: a read token cannot approve or relabel
+ok 2 - a read token cannot approve or relabel
+  ---
+  duration_ms: 9.558572
+  ...
+# Subtest: send token approves a draft and a write token can archive
+ok 3 - send token approves a draft and a write token can archive
+  ---
+  duration_ms: 10.395508
+  ...
+# Subtest: ses payload uses raw content when the body is armored
+ok 4 - ses payload uses raw content when the body is armored
+  ---
+  duration_ms: 0.24857
+  ...
+# Subtest: admin covers every scope and send does not imply write
+ok 5 - admin covers every scope and send does not imply write
+  ---
+  duration_ms: 0.539854
+  ...
+# Subtest: production refuses the well-known dev tokens
+ok 6 - production refuses the well-known dev tokens
+  ---
+  duration_ms: 0.285757
+  ...
+# Subtest: local defaults include a read-only token and a send token
+ok 7 - local defaults include a read-only token and a send token
+  ---
+  duration_ms: 0.5383
+  ...
+# Subtest: grok client posts to the OpenAI-compatible endpoint
+ok 8 - grok client posts to the OpenAI-compatible endpoint
+  ---
+  duration_ms: 10.372499
+  ...
+# Subtest: ollama client reads chat and embed payloads
+ok 9 - ollama client reads chat and embed payloads
+  ---
+  duration_ms: 1.018327
+  ...
+# Subtest: factory refuses grok without a key and accepts mock
+ok 10 - factory refuses grok without a key and accepts mock
+  ---
+  duration_ms: 0.314458
+  ...
+# Subtest: envelope round-trips json and hides plaintext
+ok 11 - envelope round-trips json and hides plaintext
+  ---
+  duration_ms: 8.136532
+  ...
+# Subtest: a different private key cannot open the envelope
+ok 12 - a different private key cannot open the envelope
+  ---
+  duration_ms: 4.364878
+  ...
+# Subtest: ingest seals the body, audits the call, and does not send
+ok 13 - ingest seals the body, audits the call, and does not send
+  ---
+  duration_ms: 25.400643
+  ...
+# Subtest: re-ingest of the same Message-ID is a no-op
+ok 14 - re-ingest of the same Message-ID is a no-op
+  ---
+  duration_ms: 11.48447
+  ...
+# Subtest: bulk mail skips the model
+ok 15 - bulk mail skips the model
+  ---
+  duration_ms: 4.463912
+  ...
+# Subtest: a spent token budget stores the mail and skips the model
+ok 16 - a spent token budget stores the mail and skips the model
+  ---
+  duration_ms: 3.868047
+  ...
+# Subtest: a failing model does not lose the message
+ok 17 - a failing model does not lose the message
+  ---
+  duration_ms: 5.110071
+  ...
+# Subtest: pgp mail is stored and not sent to the model
+ok 18 - pgp mail is stored and not sent to the model
+  ---
+  duration_ms: 2.835502
+  ...
+# Subtest: reply lands on the parent thread and keyword search needs the key for body terms
+ok 19 - reply lands on the parent thread and keyword search needs the key for body terms
+  ---
+  duration_ms: 17.722903
+  ...
+# Subtest: approveAndSend is the only path that touches the sender
+ok 20 - approveAndSend is the only path that touches the sender
+  ---
+  duration_ms: 6.897077
+  ...
+# Subtest: semantic search uses stored embeddings
+ok 21 - semantic search uses stored embeddings
+  ---
+  duration_ms: 4.600083
+  ...
+# Subtest: dynamo adapter round-trips a message and import ledger
+ok 22 - dynamo adapter round-trips a message and import ledger
+  ---
+  duration_ms: 15.360612
+  ...
+# Subtest: parses a personal message, html, attachments, and armored pgp
+ok 23 - parses a personal message, html, attachments, and armored pgp
+  ---
+  duration_ms: 33.865582
+  ...
+# Subtest: htmlToText drops tags and scripts
+ok 24 - htmlToText drops tags and scripts
+  ---
+  duration_ms: 0.895508
+  ...
+# Subtest: bulk mail is detected from list headers
+ok 25 - bulk mail is detected from list headers
+  ---
+  duration_ms: 2.51568
+  ...
+# Subtest: phishing heuristics flag mismatched reply-to and urgent language
+ok 26 - phishing heuristics flag mismatched reply-to and urgent language
+  ---
+  duration_ms: 20.608658
+  ...
+# Subtest: thread assignment joins a reply to its parent
+ok 27 - thread assignment joins a reply to its parent
+  ---
+  duration_ms: 2.495701
+  ...
+# Subtest: WKD local-part hash is stable z-base32 of SHA-1
+ok 28 - WKD local-part hash is stable z-base32 of SHA-1
+  ---
+  duration_ms: 0.921507
+  ...
+# Subtest: openpgp encrypts for a recipient key
+ok 29 - openpgp encrypts for a recipient key
+  ---
+  duration_ms: 125.842107
+  ...
+# Subtest: mbox split and contact parsers
+ok 30 - mbox split and contact parsers
+  ---
+  duration_ms: 0.939677
+  ...
+# Subtest: import is idempotent, maps folders, and relinks threads
+ok 31 - import is idempotent, maps folders, and relinks threads
+  ---
+  duration_ms: 30.323661
+  ...
+# Subtest: the tool list covers the mailbox surface
+ok 32 - the tool list covers the mailbox surface
+  ---
+  duration_ms: 0.589325
+  ...
+# Subtest: a read-only token can search and cannot send
+ok 33 - a read-only token can search and cannot send
+  ---
+  duration_ms: 25.415088
+  ...
+# Subtest: send scope delivers a draft exactly once
+ok 34 - send scope delivers a draft exactly once
+  ---
+  duration_ms: 12.511807
+  ...
+# Subtest: write scope can label and archive
+ok 35 - write scope can label and archive
+  ---
+  duration_ms: 5.257447
+  ...
+# Subtest: audited zone shape is already on SES us-east-1 and is not a cutover
+ok 36 - audited zone shape is already on SES us-east-1 and is not a cutover
+  ---
+  duration_ms: 3.187869
+  ...
+# Subtest: a non-SES apex MX is still a blocker
+ok 37 - a non-SES apex MX is still a blocker
+  ---
+  duration_ms: 0.25361
+  ...
+1..37
+# tests 37
+# suites 0
+# pass 37
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1286.358081

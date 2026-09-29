@@ -1,0 +1,11 @@
+$ npm run build:lambda && node -e "require(\"./packages/pipeline/dist/processor.cjs\")"
+TypeError [ERR_INVALID_ARG_VALUE]: The argument 'filename' must be a file URL object, file URL string, or absolute path string. Received undefined
+    at Object.<anonymous> (/workspace/packages/pipeline/dist/processor.cjs:113656:48)
+
+$ node -e "require(\"./packages/api/dist/api.cjs\")"
+TypeError [ERR_INVALID_ARG_VALUE]: The argument 'filename' must be a file URL object, file URL string, or absolute path string. Received undefined
+    at Object.<anonymous> (/workspace/packages/api/dist/api.cjs:108880:48)
+
+# offending bundled lines (openpgp node build):
+112196:var import_meta = {};
+113656:  nodeRequire: (0, import_module.createRequire)(import_meta.url),

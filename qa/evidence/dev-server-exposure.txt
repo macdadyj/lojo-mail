@@ -1,0 +1,7 @@
+# Dev API bind address (from /proc/net/tcp6: port 0x2253 = 8787 on :: = all interfaces)
+$ curl http://172.30.0.2:8787/v1/settings -H 'authorization: Bearer dev-only-change-me'
+{"mailbox":"lojo@cyberphysical.us","domain":"cyberphysical.us","llmProvider":"mock","dailyTokenBudget":100000,"budgetUsed":4646,"unlocked":true,"dev":true}
+
+# NODE_ENV=production PORT=8799 tsx src/server.ts, then the "refused" dev token:
+$ curl -X POST http://127.0.0.1:8799/v1/drafts ... -H 'authorization: Bearer dev-send-change-me'
+{"id":"drf_9f64152b319ba9130350b068","to":[{"email":"x@example.com"}],"cc":[],"subject":"s","status":"edited","aiGenerated":false,"envelope":{"v":1,"alg":"P-256

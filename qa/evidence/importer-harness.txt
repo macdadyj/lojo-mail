@@ -1,0 +1,167 @@
+{
+ "first": {
+  "imported": 10,
+  "skipped": 1,
+  "contacts": 0,
+  "errors": []
+ },
+ "stored": 10,
+ "rfcIds": [
+  "dup-1@example.com",
+  "generated.122f1f87e3d6ddfd9e4043cbc5df955e879ccfcae0a72fb11661a60de949ebbd",
+  "jp-1@example.jp",
+  "large-1@example.com",
+  "latin1-1@example.fr",
+  "mbox-1@example.com",
+  "mbox-2@example.com",
+  "proj-1@example.com",
+  "reply-1@tuta.io",
+  "utf8-1@example.com"
+ ]
+}
+✔ [report] first run (1.248643ms)
+✔ [control] cross-folder duplicate is stored once (0.126506ms)
+✔ [control] re-run is idempotent (no new messages, threads, or contacts) (462.973186ms)
+✔ [control] UTF-8 8-bit body and RFC 2047 subject survive (2.415714ms)
+✔ [control] ISO-2022-JP subject/body decode (2.138089ms)
+✖ [P1] Latin-1 8-bit body is corrupted (file read as UTF-8 string before parsing) (3.540483ms)
+✔ [control] message without Message-ID gets a stable synthetic key (0.642785ms)
+✔ [control] 20 MB attachment round-trips byte-for-byte through the envelope (188.272465ms)
+✖ [P0 on AWS] the 20 MB message would not fit a DynamoDB item (envelope is stored inline) (113.586527ms)
+✔ [control] folders: Sent via From, custom folder becomes label + archive (0.362579ms)
+✖ [P2] imported history lands unread and floods triage (0.69473ms)
+✖ [P2] mbox: an unescaped body line starting with 'From ' truncates the message and drops text (10.219442ms)
+✖ [P2] mbox: '>From ' escaping (mboxrd) is not reversed (1.846863ms)
+✖ [P1] CLI: re-run through `npm run import` reuses the JSON store and is idempotent; no path to DynamoDB (695.566461ms)
+✖ [P2] CLI: --public-key path not ending in public.jwk gets the PRIVATE key written into it (319.235004ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 8
+ℹ fail 7
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4287.291664
+
+✖ failing tests:
+
+test at qa/harness/importer.test.ts:41:2585
+✖ [P1] Latin-1 8-bit body is corrupted (file read as UTF-8 string before parsing) (3.540483ms)
+  AssertionError [ERR_ASSERTION]: body decoded as "Le cafï¿½ est prï¿½t. ï¿½ bientï¿½t."
+      at TestContext.<anonymous> (/workspace/qa/harness/importer.test.ts:152:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'Le cafï¿½ est prï¿½t. ï¿½ bientï¿½t.',
+    expected: /Le café est prêt\. À bientôt\./,
+    operator: 'match'
+  }
+
+test at qa/harness/importer.test.ts:41:3454
+✖ [P0 on AWS] the 20 MB message would not fit a DynamoDB item (envelope is stored inline) (113.586527ms)
+  AssertionError [ERR_ASSERTION]: item is 35.6 MB
+      at TestContext.<anonymous> (/workspace/qa/harness/importer.test.ts:171:10)
+      at Test.runInAsyncScope (node:async_hooks:211:14)
+      at Test.run (node:internal/test_runner/test:979:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:677:18)
+      at Test.postRun (node:internal/test_runner/test:1090:19)
+      at Test.run (node:internal/test_runner/test:1018:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '=='
+  }
+
+test at qa/harness/importer.test.ts:41:4042
+✖ [P2] imported history lands unread and floods triage (0.69473ms)
+  AssertionError [ERR_ASSERTION]: 5 historical inbox messages imported as unread
+  
+  5 !== 0
+  
+      at TestContext.<anonymous> (/workspace/qa/harness/importer.test.ts:184:10)
+      at Test.runInAsyncScope (node:async_hooks:211:14)
+      at Test.run (node:internal/test_runner/test:979:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:677:18)
+      at Test.postRun (node:internal/test_runner/test:1090:19)
+      at Test.run (node:internal/test_runner/test:1018:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 5,
+    expected: 0,
+    operator: 'strictEqual'
+  }
+
+test at qa/harness/importer.test.ts:41:4258
+✖ [P2] mbox: an unescaped body line starting with 'From ' truncates the message and drops text (10.219442ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /From the desk of Mina/. Input:
+  
+  'First paragraph.'
+  
+      at TestContext.<anonymous> (/workspace/qa/harness/importer.test.ts:189:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'First paragraph.',
+    expected: /From the desk of Mina/,
+    operator: 'match'
+  }
+
+test at qa/harness/importer.test.ts:41:4512
+✖ [P2] mbox: '>From ' escaping (mboxrd) is not reversed (1.846863ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /^>From /m. Input:
+  
+  '>From here the quoted line was escaped by the exporter.'
+  
+      at TestContext.<anonymous> (/workspace/qa/harness/importer.test.ts:195:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '>From here the quoted line was escaped by the exporter.',
+    expected: /^>From /m,
+    operator: 'doesNotMatch'
+  }
+
+test at qa/harness/importer.test.ts:41:4673
+✖ [P1] CLI: re-run through `npm run import` reuses the JSON store and is idempotent; no path to DynamoDB (695.566461ms)
+  AssertionError [ERR_ASSERTION]: MIGRATION.md says LOJO_STORE=dynamo imports into AWS; the CLI ignores it and only writes the local JSON snapshot
+      at TestContext.<anonymous> (/workspace/qa/harness/importer.test.ts:221:12)
+      at Test.runInAsyncScope (node:async_hooks:211:14)
+      at Test.run (node:internal/test_runner/test:979:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:677:18)
+      at Test.postRun (node:internal/test_runner/test:1090:19)
+      at Test.run (node:internal/test_runner/test:1018:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'fail'
+  }
+
+test at qa/harness/importer.test.ts:41:5969
+✖ [P2] CLI: --public-key path not ending in public.jwk gets the PRIVATE key written into it (319.235004ms)
+  AssertionError [ERR_ASSERTION]: the file named as the public key now contains the private scalar d
+  + actual - expected
+  
+  + 'nxiAcGPw0TZd8bvH3QanyVC70-drH912v7CcsCtfh1o'
+  - undefined
+  
+      at TestContext.<anonymous> (/workspace/qa/harness/importer.test.ts:241:12)
+      at Test.runInAsyncScope (node:async_hooks:211:14)
+      at Test.run (node:internal/test_runner/test:979:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:677:18)
+      at Test.postRun (node:internal/test_runner/test:1090:19)
+      at Test.run (node:internal/test_runner/test:1018:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'nxiAcGPw0TZd8bvH3QanyVC70-drH912v7CcsCtfh1o',
+    expected: undefined,
+    operator: 'strictEqual'
+  }
