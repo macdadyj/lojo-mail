@@ -10,5 +10,8 @@
     "@lojo/core": "*",
     "@modelcontextprotocol/sdk": "^1.17.4",
     "zod": "^3.25.56"
+  },
+  "devDependencies": {
+    "@lojo/api": "*"
   }
 }

@@ -1,10 +1,11 @@
-export type Scope = "read" | "write" | "send" | "admin";
+export type Scope = "read" | "write" | "send" | "body" | "admin";
 
 export function asScope(value: string): Scope {
   switch (value) {
     case "read":
     case "write":
     case "send":
+    case "body":
     case "admin":
       return value;
     default:
@@ -18,6 +19,7 @@ export function hasScope(scopes: readonly Scope[], required: Scope): boolean {
     case "read":
     case "write":
     case "send":
+    case "body":
     case "admin":
       return scopes.includes(required);
     default: {
@@ -29,20 +31,10 @@ export function hasScope(scopes: readonly Scope[], required: Scope): boolean {
 
 export function parseScopes(value: string | undefined): Scope[] {
   if (!value) return ["read"];
-  const scopes: Scope[] = [];
-  for (const part of value.split(",")) {
-    const token = part.trim();
-    if (!token) continue;
-    switch (token) {
-      case "read":
-      case "write":
-      case "send":
-      case "admin":
-        scopes.push(token);
-        break;
-      default:
-        throw new Error(`Unknown scope ${token}`);
-    }
-  }
+  const scopes = value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => asScope(part));
   return scopes.length > 0 ? scopes : ["read"];
 }

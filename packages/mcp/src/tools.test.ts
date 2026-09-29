@@ -1,67 +1,85 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import { generateIdentity, ingestRaw, loadConfig, Mailbox, MemorySender, MemoryStore, MockLlm } from "@lojo/core";
-import { callTool, tools } from "./tools.ts";
+import { fixture } from "@lojo/core/testing";
+import { agentWorld } from "./test-agent.ts";
+import { UNTRUSTED_PREAMBLE, callTool, tools } from "./tools.ts";
 
-async function ctx(scopes: Array<"read" | "write" | "send" | "admin">) {
-  const { publicJwk, privateJwk } = await generateIdentity();
-  const store = new MemoryStore();
-  const config = loadConfig({ LOJO_LLM_PROVIDER: "mock" });
-  const llm = new MockLlm();
-  const sender = new MemorySender();
-  const mailbox = new Mailbox({ store, config, publicJwk, privateJwk, llm, sender, styleGuide: "Sign off with Jon." });
-  const raw = readFileSync(new URL("../../../fixtures/emails/personal.eml", import.meta.url));
-  await ingestRaw(raw, { store, publicJwk, llm, config, styleGuide: "Sign off with Jon." });
-  return { mailbox, scopes, sender, store };
-}
-
-test("the tool list covers the mailbox surface", () => {
+test("the tool list has no send, approve, trash, or full export", () => {
   const names = tools.map((tool) => tool.name);
-  for (const name of [
-    "search_mail",
-    "read_thread",
-    "list_inbox",
-    "summarize_thread",
-    "draft_reply",
-    "create_draft",
-    "approve_and_send",
-    "label_message",
+  assert.deepEqual(names.sort(), [
     "archive_message",
-    "move_message",
-    "get_action_items",
+    "create_draft",
+    "draft_reply",
     "export_mailbox",
-  ]) {
-    assert.ok(names.includes(name), name);
-  }
-  assert.equal(tools.find((tool) => tool.name === "approve_and_send")?.scope, "send");
-  assert.equal(tools.find((tool) => tool.name === "list_inbox")?.scope, "read");
+    "get_action_items",
+    "label_message",
+    "list_inbox",
+    "move_message",
+    "read_thread",
+    "search_mail",
+    "submit_for_approval",
+    "summarize_thread",
+  ]);
+  assert.ok(tools.every((tool) => tool.scope === "read" || tool.scope === "write"));
+  assert.equal(tools.find((tool) => tool.name === "search_mail")?.scope, "read");
+  assert.equal(tools.find((tool) => tool.name === "summarize_thread")?.scope, "write");
 });
 
-test("a read-only token can search and cannot send", async () => {
-  const context = await ctx(["read"]);
-  const listed = await callTool("list_inbox", { triage: true }, context);
-  assert.match(listed, /Lease renewal/);
-  await assert.rejects(() => callTool("approve_and_send", { draftId: "nope" }, context), /Missing send scope/);
-  assert.equal(context.sender.sent.length, 0);
-});
-
-test("send scope delivers a draft exactly once", async () => {
-  const context = await ctx(["send"]);
-  const draft = (await context.store.listDrafts())[0];
+test("approve_and_send is an unknown tool, even with send scope", async () => {
+  const w = await agentWorld(["read", "write", "send"], { unlocked: false });
+  await w.ingest(fixture("personal.eml"));
+  const draft = (await w.store.listDrafts())[0];
   assert.ok(draft);
-  const sent = await callTool("approve_and_send", { draftId: draft.id }, context);
-  assert.match(sent, /messageId/);
-  assert.equal(context.sender.sent.length, 1);
+  await assert.rejects(() => callTool("approve_and_send", { draftId: draft.id }, w.ctx), /Unknown tool approve_and_send/);
+  assert.equal(w.sender.sent.length, 0);
 });
 
-test("write scope can label and archive", async () => {
-  const context = await ctx(["write", "read"]);
-  const message = (await context.store.listMessages())[0];
-  assert.ok(message);
-  await callTool("label_message", { messageId: message.id, labels: ["home"] }, context);
-  const archived = await callTool("archive_message", { messageId: message.id }, context);
-  assert.match(archived, /archive/);
-  const items = await callTool("get_action_items", {}, context);
-  assert.equal(items.startsWith("[") || items.startsWith("{") || items === "[]", true);
+test("an agent with send scope cannot send: it can only submit for approval", async () => {
+  const w = await agentWorld(["read", "write", "send"]);
+  const { message } = await w.ingest(fixture("personal.eml"));
+  const created = JSON.parse(
+    (await callTool("create_draft", { to: ["mina@example.com"], subject: "Re: lease", text: "Will do.", threadId: message.threadId }, w.ctx))
+      .split("\n")
+      .slice(2, -1)
+      .join("\n"),
+  ) as { draft: { id: string; origin: string } };
+  assert.equal(created.draft.origin, "agent");
+  const submitted = await callTool("submit_for_approval", { draftId: created.draft.id }, w.ctx);
+  assert.match(submitted, /pending_approval/);
+  assert.equal(w.sender.sent.length, 0);
+  const denied = await w.call(`/v1/drafts/${created.draft.id}/approval`, { token: w.token, method: "POST" });
+  assert.equal(denied.status, 403);
+});
+
+test("a read-only token can list and cannot draft or move", async () => {
+  const w = await agentWorld(["read"]);
+  const { message } = await w.ingest(fixture("personal.eml"));
+  const listed = await callTool("list_inbox", { triage: true }, w.ctx);
+  assert.match(listed, /Lease renewal/);
+  assert.ok(listed.startsWith(UNTRUSTED_PREAMBLE));
+  await assert.rejects(() => callTool("create_draft", { to: ["mina@example.com"], subject: "s", text: "t" }, w.ctx), /Missing write scope/);
+  await assert.rejects(() => callTool("move_message", { messageId: message.id, folder: "archive" }, w.ctx), /Missing write scope/);
+});
+
+test("write scope can label, archive, and move to spam but not trash", async () => {
+  const w = await agentWorld(["read", "write"]);
+  const { message } = await w.ingest(fixture("personal.eml"));
+  await callTool("label_message", { messageId: message.id, labels: ["home"] }, w.ctx);
+  assert.match(await callTool("archive_message", { messageId: message.id }, w.ctx), /archive/);
+  assert.match(await callTool("move_message", { messageId: message.id, folder: "inbox" }, w.ctx), /inbox/);
+  await assert.rejects(() => callTool("move_message", { messageId: message.id, folder: "trash" }, w.ctx));
+  assert.equal((await w.store.getMessage(message.id))?.folder, "inbox");
+});
+
+test("includeContext needs the body scope", async () => {
+  const locked = await agentWorld(["read"], { unlocked: false });
+  const { message } = await locked.ingest(fixture("personal.eml"));
+  await assert.rejects(() => callTool("read_thread", { threadId: message.threadId, includeContext: true }, locked.ctx), /body scope/);
+  const plain = await callTool("read_thread", { threadId: message.threadId }, locked.ctx);
+  assert.doesNotMatch(plain, /CODEWORD-ZEBRA/);
+
+  const body = await agentWorld(["read", "body"], { unlocked: false });
+  const second = await body.ingest(fixture("personal.eml"));
+  const withContext = await callTool("read_thread", { threadId: second.message.threadId, includeContext: true }, body.ctx);
+  assert.match(withContext, /CODEWORD-ZEBRA/);
 });

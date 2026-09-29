@@ -1,73 +1,88 @@
-import type { Folder } from "@lojo/core";
-import type { MailClient } from "./tools.ts";
+import type { AgentFolder, DraftRequest, MailClient } from "./tools.ts";
 
+type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
+
+/** Talks to the API with an API token, so every call is an agent call: no approvals, no trash, no full export. */
 export class HttpMailClient implements MailClient {
   constructor(
     private readonly baseUrl: string,
     private readonly token: string,
+    private readonly fetchImpl: FetchLike = fetch,
   ) {}
 
   private async request(method: string, path: string, body?: unknown): Promise<unknown> {
-    const response = await fetch(`${this.baseUrl.replace(/\/$/, "")}${path}`, {
+    const response = await this.fetchImpl(`${this.baseUrl.replace(/\/$/, "")}${path}`, {
       method,
       headers: {
         authorization: `Bearer ${this.token}`,
-        "content-type": "application/json",
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await response.text();
-    if (!response.ok) throw new Error(text || `HTTP ${response.status}`);
+    if (!response.ok) {
+      let message = text;
+      try {
+        message = (JSON.parse(text) as { error?: string }).error ?? text;
+      } catch {
+        message = text;
+      }
+      throw new Error(message || `HTTP ${response.status}`);
+    }
     if (!text) return null;
     return JSON.parse(text) as unknown;
   }
 
-  async search(query: string, mode?: "keyword" | "semantic"): Promise<unknown> {
-    const payload = (await this.request("POST", "/v1/search", { query, mode })) as { messages: unknown };
+  private id(value: string): string {
+    return encodeURIComponent(value);
+  }
+
+  async search(query: string, mode: "keyword" | "semantic", includeContext: boolean): Promise<unknown> {
+    const payload = (await this.request("POST", "/v1/search", { query, mode, context: includeContext })) as { messages: unknown };
     return payload.messages;
   }
 
-  readThread(threadId: string): Promise<unknown> {
-    return this.request("GET", `/v1/threads/${encodeURIComponent(threadId)}`);
+  readThread(threadId: string, includeContext: boolean): Promise<unknown> {
+    return this.request("GET", `/v1/threads/${this.id(threadId)}${includeContext ? "?context=1" : ""}`);
   }
 
-  async triage(limit?: number): Promise<unknown> {
+  async triage(limit: number): Promise<unknown> {
     const payload = (await this.request("GET", "/v1/triage")) as { messages: unknown };
-    return Array.isArray(payload.messages) ? payload.messages.slice(0, limit ?? 50) : payload.messages;
+    return Array.isArray(payload.messages) ? payload.messages.slice(0, limit) : payload.messages;
   }
 
-  async listInbox(limit?: number): Promise<unknown> {
+  async listInbox(limit: number): Promise<unknown> {
     const payload = (await this.request("GET", "/v1/inbox")) as { messages: unknown };
-    return Array.isArray(payload.messages) ? payload.messages.slice(0, limit ?? 50) : payload.messages;
+    return Array.isArray(payload.messages) ? payload.messages.slice(0, limit) : payload.messages;
   }
 
   async summarizeThread(threadId: string): Promise<string> {
-    const payload = (await this.request("POST", `/v1/threads/${encodeURIComponent(threadId)}/summarize`)) as { summary?: string };
+    const payload = (await this.request("POST", `/v1/threads/${this.id(threadId)}/summarize`)) as { summary?: string };
     return payload.summary ?? "";
   }
 
   draftReply(messageId: string): Promise<unknown> {
-    return this.request("POST", `/v1/messages/${encodeURIComponent(messageId)}/draft-reply`);
+    return this.request("POST", `/v1/messages/${this.id(messageId)}/draft-reply`);
   }
 
-  createDraft(input: { to: string[]; cc?: string[]; subject: string; text: string; threadId?: string }): Promise<unknown> {
+  createDraft(input: DraftRequest): Promise<unknown> {
     return this.request("POST", "/v1/drafts", input);
   }
 
-  approveAndSend(draftId: string): Promise<{ messageId: string }> {
-    return this.request("POST", `/v1/drafts/${encodeURIComponent(draftId)}/approve-and-send`) as Promise<{ messageId: string }>;
+  submitForApproval(draftId: string): Promise<unknown> {
+    return this.request("POST", `/v1/drafts/${this.id(draftId)}/submit`);
   }
 
   setLabels(messageId: string, labels: string[]): Promise<unknown> {
-    return this.request("POST", `/v1/messages/${encodeURIComponent(messageId)}/labels`, { labels });
+    return this.request("POST", `/v1/messages/${this.id(messageId)}/labels`, { labels });
   }
 
   archive(messageId: string): Promise<unknown> {
-    return this.request("POST", `/v1/messages/${encodeURIComponent(messageId)}/archive`);
+    return this.request("POST", `/v1/messages/${this.id(messageId)}/archive`);
   }
 
-  move(messageId: string, folder: Folder): Promise<unknown> {
-    return this.request("POST", `/v1/messages/${encodeURIComponent(messageId)}/move`, { folder });
+  move(messageId: string, folder: AgentFolder): Promise<unknown> {
+    return this.request("POST", `/v1/messages/${this.id(messageId)}/move`, { folder });
   }
 
   async actionItems(): Promise<unknown> {
@@ -75,8 +90,7 @@ export class HttpMailClient implements MailClient {
     return payload.items;
   }
 
-  async exportAll(): Promise<string> {
-    const payload = await this.request("GET", "/v1/export");
-    return JSON.stringify(payload);
+  exportIndex(): Promise<unknown> {
+    return this.request("GET", "/v1/export/index");
   }
 }

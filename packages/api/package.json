@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./session": "./src/session.ts"
+    "./session": "./src/session.ts",
+    "./testing": "./src/test-app.ts"
   },
   "scripts": {
     "build": "esbuild src/lambda.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/api.mjs --loader:.md=text --banner:js=\"import { createRequire as lojoCreateRequire } from 'node:module'; const require = lojoCreateRequire(import.meta.url);\"",
