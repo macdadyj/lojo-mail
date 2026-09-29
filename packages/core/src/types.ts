@@ -162,6 +162,8 @@ export interface Draft {
   subject: string;
   status: DraftStatus;
   origin: DraftOrigin;
+  /** Who wrote the current content, when it was changed after creation. */
+  lastEditedBy?: DraftOrigin;
   aiGenerated: boolean;
   pgp: PgpMode;
   /** Draft text, sealed with a KMS data key under `{ purpose: "draft", draftId }`. */

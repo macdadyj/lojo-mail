@@ -482,6 +482,7 @@ export class Mailbox {
       subject: patch.subject !== undefined ? cleanHeaderValue(patch.subject) : draft.subject,
       pgp: patch.pgp ?? draft.pgp,
       status: "edited",
+      lastEditedBy: actor,
       updatedAt: this.now().toISOString(),
     };
     if (patch.text !== undefined) updated.sealed = await this.sealDraftText(id, patch.text);
@@ -615,6 +616,7 @@ export class Mailbox {
     const updated: Draft = {
       ...withoutApproval(draft),
       status: "edited",
+      lastEditedBy: "ai",
       sealed: await this.sealDraftText(draftId, text),
       updatedAt: this.now().toISOString(),
     };

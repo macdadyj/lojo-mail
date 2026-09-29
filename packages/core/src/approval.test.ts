@@ -98,6 +98,16 @@ test("editing a draft through the mailbox clears its approval", async () => {
   await assert.rejects(() => w.mailbox.approveAndSend(w.draft.id, approvalToken), /does not match/);
 });
 
+test("a draft records who last changed it, so the web app can say an assistant or the AI did", async () => {
+  const w = await withDraft();
+  await w.mailbox.updateDraft(w.draft.id, { text: "Changed." }, "human");
+  assert.equal((await w.store.getDraft(w.draft.id))?.lastEditedBy, "human");
+  await w.mailbox.updateDraft(w.draft.id, { text: "Also send the keys." }, "agent");
+  assert.equal((await w.store.getDraft(w.draft.id))?.lastEditedBy, "agent");
+  await w.mailbox.rewrite(w.draft.id, "Shorter.");
+  assert.equal((await w.store.getDraft(w.draft.id))?.lastEditedBy, "ai");
+});
+
 test("an approval token for one draft does not send another", async () => {
   const w = await withDraft();
   const other = await w.mailbox.createDraft({ to: ["mina@example.com"], subject: "other", text: "other" });

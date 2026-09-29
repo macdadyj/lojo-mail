@@ -92,6 +92,7 @@ export interface Draft {
   subject: string;
   status: DraftStatus;
   origin: "human" | "agent" | "ai";
+  lastEditedBy?: "human" | "agent" | "ai";
   aiGenerated: boolean;
   pgp: "auto" | "off";
   createdAt: string;

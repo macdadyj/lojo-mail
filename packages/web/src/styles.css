@@ -174,6 +174,9 @@ input, textarea, select {
 }
 textarea { min-height: 220px; resize: vertical; line-height: 1.45; }
 .error { color: var(--now); padding: 12px 22px; }
+.notice { margin: 12px 0; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); font-size: 14px; }
+.notice.warn { background: var(--danger-bg); color: var(--now); }
+.notice p { margin: 0; }
 .empty { padding: 28px 22px; color: var(--muted); }
 .back { display: none; }
 

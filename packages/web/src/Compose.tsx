@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "./api.ts";
+import { RECHECK_DELAY_MS, authorNotice, changedFields, type Fields } from "./review.ts";
 import { statusLabel, type Draft, type DraftView, type Message } from "./types.ts";
 import { openMessage } from "./unlock.ts";
 
-interface Fields {
-  to: string;
-  cc: string;
-  subject: string;
-  text: string;
-  pgp: Draft["pgp"];
+class DraftConflict extends Error {
+  constructor(readonly changed: string[]) {
+    super("This draft changed after you opened it. Nothing was approved or sent. The current version is shown now.");
+  }
 }
 
 const EMPTY: Fields = { to: "", cc: "", subject: "", text: "", pgp: "auto" };
@@ -43,6 +42,13 @@ export function Compose({ draftId }: { draftId?: string }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<{ changed: string[]; armed: boolean } | null>(null);
+
+  useEffect(() => {
+    if (!conflict || conflict.armed) return;
+    const timer = window.setTimeout(() => setConflict((current) => (current ? { ...current, armed: true } : current)), RECHECK_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [conflict]);
 
   function show(view: DraftView) {
     const next = fieldsOf(view);
@@ -91,6 +97,7 @@ export function Compose({ draftId }: { draftId?: string }) {
     try {
       await action();
     } catch (err) {
+      if (err instanceof DraftConflict) return;
       setError(err instanceof Error ? err.message : `${label} failed`);
     } finally {
       setBusy(false);
@@ -110,22 +117,31 @@ export function Compose({ draftId }: { draftId?: string }) {
       setStatus("Rewritten. Still a draft.");
     });
 
-  async function approve(id: string, reviewed: ReturnType<typeof payloadOf>): Promise<string> {
+  async function approve(id: string, reviewed: Fields): Promise<string> {
     try {
-      const minted = await api<{ approvalToken: string }>(`/v1/drafts/${id}/approval`, { method: "POST", body: JSON.stringify(reviewed) });
+      const minted = await api<{ approvalToken: string }>(`/v1/drafts/${id}/approval`, { method: "POST", body: JSON.stringify(payloadOf(reviewed)) });
       return minted.approvalToken;
     } catch (err) {
       if (!(err instanceof ApiError) || err.status !== 409) throw err;
-      show(await api<DraftView>(`/v1/drafts/${id}?text=1`));
-      throw new Error("This draft changed after you opened it. The current version is shown now. Check it and approve again.");
+      const current = await api<DraftView>(`/v1/drafts/${id}?text=1`);
+      show(current);
+      throw new DraftConflict(changedFields(reviewed, fieldsOf(current)));
     }
   }
 
   const approveAndSend = () =>
     run("Send", async () => {
-      const reviewed = payloadOf(fields);
+      if (conflict && !conflict.armed) return;
+      const reviewed = fields;
       const id = await save();
-      const approvalToken = await approve(id, reviewed);
+      let approvalToken: string;
+      try {
+        approvalToken = await approve(id, reviewed);
+      } catch (err) {
+        if (err instanceof DraftConflict) setConflict({ changed: err.changed, armed: false });
+        throw err;
+      }
+      setConflict(null);
       const sent = await api<{ messageId: string }>(`/v1/drafts/${id}/approve-and-send`, {
         method: "POST",
         body: JSON.stringify({ approvalToken }),
@@ -144,13 +160,7 @@ export function Compose({ draftId }: { draftId?: string }) {
   const closed = draft?.status === "sent" || draft?.status === "sending" || draft?.status === "discarded";
 
   return (
-    <form
-      className="panel"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void approveAndSend();
-      }}
-    >
+    <form className="panel" onSubmit={(event) => event.preventDefault()}>
       <header>
         <h2>Write</h2>
         <a className="back" href="#/inbox">Back</a>
@@ -162,8 +172,15 @@ export function Compose({ draftId }: { draftId?: string }) {
           {draft.origin === "agent" ? <span className="chip">assistant</span> : null}
         </div>
       ) : null}
-      {draft?.status === "pending_approval" ? (
-        <p className="muted">An assistant wrote this and asked you to approve it. Check the recipients and the text before you send.</p>
+      {draft && authorNotice(draft) ? <p className="notice">{authorNotice(draft)}</p> : null}
+      {conflict ? (
+        <div className="notice warn" role="alert">
+          <p>
+            This draft changed after you opened it. Nothing was approved or sent.
+            {conflict.changed.length > 0 ? ` Changed: ${conflict.changed.join(", ")}.` : ""} Read the current version below
+            before you approve it.
+          </p>
+        </div>
       ) : null}
       <label htmlFor="to">To</label>
       <input id="to" value={fields.to} disabled={closed} onChange={(event) => set("to", event.target.value)} placeholder="ada@example.com" />
@@ -189,7 +206,9 @@ export function Compose({ draftId }: { draftId?: string }) {
         {draft ? (
           <button className="ghost" type="button" disabled={busy || closed} onClick={() => void discard()}>Discard</button>
         ) : null}
-        <button className="primary" type="submit" disabled={busy || closed}>Approve and send</button>
+        <button className="primary" type="button" disabled={busy || closed || (conflict !== null && !conflict.armed)} onClick={() => void approveAndSend()}>
+          {conflict ? (conflict.armed ? "Approve this version and send" : "Read the changes first…") : "Approve and send"}
+        </button>
       </div>
       <p className="muted">
         Approve and send saves this draft and asks the API for a one-time approval bound to exactly the recipients,
