@@ -1,0 +1,35 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+coverage/
+.DS_Store
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/crash.log
+infra/terraform/override.tf
+infra/terraform/override.tf.json
+infra/terraform/*.auto.tfvars
+!infra/terraform/terraform.tfvars.example
+
+# Builds
+packages/pipeline/dist/
+packages/api/dist/
+packages/web/dist/
+packages/web/dev-dist/
+*.zip
+
+# Local mailbox / keys — never commit private material
+keys/*.pem
+keys/*.key
+keys/*private*
+keys/*.asc
+!keys/README.md
+data/
+*.mbox
+imports/

@@ -1,0 +1,24 @@
+# Copy to terraform.tfvars (gitignored) before plan/apply.
+# Defaults already match lojo@cyberphysical.us in us-west-2.
+# Leave the two manage_* flags false until docs/RUNBOOK.md says otherwise.
+
+aws_region = "us-west-2"
+domain     = "cyberphysical.us"
+local_part = "lojo"
+
+manage_dns               = false
+dns_cutover_confirmation = ""
+zone_id                  = ""
+manage_active_rule_set   = false
+
+llm_provider       = "grok"
+daily_token_budget = 100000
+
+# After `npm run build:lambda`:
+# processor_bundle = "../../packages/pipeline/dist/handler.cjs"
+# api_bundle       = "../../packages/api/dist/api.cjs"
+
+web_origins = [
+  "http://127.0.0.1:5173",
+  "http://localhost:5173",
+]

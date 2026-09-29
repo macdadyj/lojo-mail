@@ -1,0 +1,22 @@
+{
+  "comment": "Synthetic stand-in for a 17-record zone. Not the live cyberphysical.us zone. Used to prove the audit flags existing mail records instead of assuming the zone is mail-free.",
+  "ResourceRecordSets": [
+    { "Name": "cyberphysical.us.", "Type": "SOA", "TTL": 900, "ResourceRecords": [{ "Value": "ns-1.awsdns-00.com. hostmaster.cyberphysical.us. 1 7200 900 1209600 86400" }] },
+    { "Name": "cyberphysical.us.", "Type": "NS", "TTL": 172800, "ResourceRecords": [{ "Value": "ns-1.awsdns-00.com." }, { "Value": "ns-2.awsdns-00.org." }] },
+    { "Name": "cyberphysical.us.", "Type": "A", "TTL": 300, "ResourceRecords": [{ "Value": "203.0.113.10" }] },
+    { "Name": "cyberphysical.us.", "Type": "AAAA", "TTL": 300, "ResourceRecords": [{ "Value": "2001:db8::10" }] },
+    { "Name": "cyberphysical.us.", "Type": "CAA", "TTL": 300, "ResourceRecords": [{ "Value": "0 issue \"letsencrypt.org\"" }] },
+    { "Name": "cyberphysical.us.", "Type": "MX", "TTL": 3600, "ResourceRecords": [{ "Value": "10 mx1.old-mail.example." }] },
+    { "Name": "cyberphysical.us.", "Type": "TXT", "TTL": 300, "ResourceRecords": [{ "Value": "\"v=spf1 include:_spf.old-mail.example ~all\"" }] },
+    { "Name": "cyberphysical.us.", "Type": "TXT", "TTL": 300, "ResourceRecords": [{ "Value": "\"google-site-verification=synthetic\"" }] },
+    { "Name": "www.cyberphysical.us.", "Type": "CNAME", "TTL": 300, "ResourceRecords": [{ "Value": "cyberphysical.us." }] },
+    { "Name": "blog.cyberphysical.us.", "Type": "CNAME", "TTL": 300, "ResourceRecords": [{ "Value": "sites.example.net." }] },
+    { "Name": "_dmarc.cyberphysical.us.", "Type": "TXT", "TTL": 300, "ResourceRecords": [{ "Value": "\"v=DMARC1; p=none; rua=mailto:dmarc@cyberphysical.us\"" }] },
+    { "Name": "selector1._domainkey.cyberphysical.us.", "Type": "CNAME", "TTL": 300, "ResourceRecords": [{ "Value": "selector1.old-mail.example." }] },
+    { "Name": "mail.cyberphysical.us.", "Type": "MX", "TTL": 300, "ResourceRecords": [{ "Value": "10 mx1.old-mail.example." }] },
+    { "Name": "autodiscover.cyberphysical.us.", "Type": "CNAME", "TTL": 300, "ResourceRecords": [{ "Value": "autodiscover.old-mail.example." }] },
+    { "Name": "files.cyberphysical.us.", "Type": "A", "TTL": 300, "ResourceRecords": [{ "Value": "203.0.113.20" }] },
+    { "Name": "_github-pages-challenge-example.cyberphysical.us.", "Type": "TXT", "TTL": 300, "ResourceRecords": [{ "Value": "\"synthetic-challenge\"" }] },
+    { "Name": "calendar.cyberphysical.us.", "Type": "CNAME", "TTL": 300, "ResourceRecords": [{ "Value": "ghs.example.com." }] }
+  ]
+}
