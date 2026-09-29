@@ -1,0 +1,19 @@
+{
+  "name": "@lojo/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/lambda.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/api.cjs --loader:.md=text",
+    "start": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sesv2": "^3.830.0",
+    "@aws-sdk/client-ssm": "^3.830.0",
+    "@hono/node-server": "^1.14.4",
+    "@lojo/core": "*",
+    "@lojo/pipeline": "*",
+    "esbuild": "^0.25.5",
+    "hono": "^4.7.10"
+  }
+}

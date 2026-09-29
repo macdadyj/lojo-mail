@@ -75,6 +75,14 @@ export class Mailbox {
     return Boolean(this.deps.privateJwk);
   }
 
+  unlock(privateJwk: EcPrivateJwk): void {
+    this.deps.privateJwk = privateJwk;
+  }
+
+  lock(): void {
+    this.deps.privateJwk = undefined;
+  }
+
   private requireKey(): EcPrivateJwk {
     if (!this.deps.privateJwk) throw new MailError("Mailbox is locked", "locked");
     return this.deps.privateJwk;
@@ -424,6 +432,11 @@ export class Mailbox {
 
   async listAudit(limit = 50) {
     return this.deps.store.listAudit(limit);
+  }
+
+  async labels(): Promise<string[]> {
+    const messages = await this.deps.store.listMessages({ limit: 1000 });
+    return [...new Set(messages.flatMap((message) => message.labels))].sort();
   }
 
   private async requireMessage(id: string): Promise<StoredMessage> {

@@ -1,0 +1,14 @@
+{
+  "name": "@lojo/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "lojo-mail-mcp": "./src/server.ts"
+  },
+  "dependencies": {
+    "@lojo/core": "*",
+    "@modelcontextprotocol/sdk": "^1.17.4",
+    "zod": "^3.25.56"
+  }
+}
