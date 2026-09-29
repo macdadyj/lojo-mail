@@ -15,6 +15,9 @@ locals {
     LOJO_LOCAL_PART         = var.local_part
     LOJO_REGION             = var.aws_region
     LOJO_BUCKET             = aws_s3_bucket.mail.bucket
+    LOJO_KMS_KEY_ID         = aws_kms_key.mail.arn
+    LOJO_AI_CONTEXT_DAYS    = tostring(var.ai_context_days)
+    LOJO_DMARC_LOCAL_PART   = var.dmarc_rua_local_part
     LOJO_LLM_PROVIDER       = var.llm_provider
     LOJO_DAILY_TOKEN_BUDGET = tostring(var.daily_token_budget)
     LOJO_MAX_BODY_CHARS     = tostring(var.max_body_chars)
@@ -34,7 +37,6 @@ locals {
     LOJO_TABLE_AUDIT        = aws_dynamodb_table.audit.name
     LOJO_TABLE_CONTACTS     = aws_dynamodb_table.contacts.name
     LOJO_TABLE_BUDGET       = aws_dynamodb_table.budget.name
-    LOJO_TABLE_IMPORTS      = aws_dynamodb_table.imports.name
     LOJO_CONFIG_SET         = aws_sesv2_configuration_set.outbound.configuration_set_name
   }
 }

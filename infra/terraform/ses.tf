@@ -32,6 +32,8 @@ locals {
     data.aws_sesv2_email_identity.existing[*].dkim_signing_attributes,
   ))
   dkim_tokens = tolist(local.dkim_attributes[0].tokens)
+
+  receipt_rule_arn_pattern = "arn:aws:ses:${var.aws_region}:${local.account_id}:receipt-rule-set/${var.project}:receipt-rule/*"
 }
 
 resource "aws_sesv2_configuration_set" "outbound" {
@@ -66,7 +68,6 @@ resource "aws_ses_receipt_rule" "store" {
     position          = 1
     bucket_name       = aws_s3_bucket.mail.bucket
     object_key_prefix = "raw/"
-    kms_key_arn       = aws_kms_key.mail.arn
   }
 
   depends_on = [aws_s3_bucket_policy.mail]

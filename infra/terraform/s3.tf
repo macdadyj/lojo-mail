@@ -75,6 +75,32 @@ resource "aws_s3_bucket_lifecycle_configuration" "mail" {
     expiration {
       days = var.raw_retention_days
     }
+
+    # The processor's DeleteObject leaves a noncurrent version behind.
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
+
+  dynamic "rule" {
+    for_each = var.ai_context_days > 0 ? [1] : []
+
+    content {
+      id     = "ai-context-retention"
+      status = "Enabled"
+
+      filter {
+        prefix = "ai-context/"
+      }
+
+      expiration {
+        days = var.ai_context_days
+      }
+
+      noncurrent_version_expiration {
+        noncurrent_days = 1
+      }
+    }
   }
 
   rule {
@@ -130,6 +156,12 @@ data "aws_iam_policy_document" "mail_bucket" {
       variable = "AWS:SourceAccount"
       values   = [local.account_id]
     }
+
+    condition {
+      test     = "StringLike"
+      variable = "AWS:SourceArn"
+      values   = [local.receipt_rule_arn_pattern]
+    }
   }
 }
 
@@ -138,4 +170,16 @@ resource "aws_s3_bucket_policy" "mail" {
   policy = data.aws_iam_policy_document.mail_bucket.json
 
   depends_on = [aws_s3_bucket_public_access_block.mail]
+}
+
+# The PWA downloads large sealed attachments with a presigned GET.
+resource "aws_s3_bucket_cors_configuration" "mail" {
+  bucket = aws_s3_bucket.mail.id
+
+  cors_rule {
+    allowed_methods = ["GET"]
+    allowed_origins = var.web_origins
+    allowed_headers = []
+    max_age_seconds = 3600
+  }
 }

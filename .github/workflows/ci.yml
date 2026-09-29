@@ -20,6 +20,7 @@ jobs:
       - run: npm run secrets:check
       - run: npm run build:lambda
       - run: npm run bundles:check
+      - run: npm run build:web
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.9.8

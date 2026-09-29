@@ -30,11 +30,69 @@ resource "aws_lambda_function" "processor" {
   timeout          = 60
   memory_size      = 512
 
-  environment {
-    variables = local.common_env
+  reserved_concurrent_executions = var.processor_reserved_concurrency
+
+  dead_letter_config {
+    target_arn = aws_sqs_queue.processor_dlq.arn
   }
 
-  depends_on = [aws_cloudwatch_log_group.processor]
+  environment {
+    variables = merge(local.common_env, {
+      LOJO_DELETE_RAW = "1"
+    })
+  }
+
+  depends_on = [aws_cloudwatch_log_group.processor, aws_iam_role_policy.processor]
+}
+
+# S3 invokes the processor asynchronously. After the retries, the event goes to
+# the DLQ with its raw/ key; docs/RUNBOOK.md has the redrive command.
+resource "aws_sqs_queue" "processor_dlq" {
+  name                      = "${var.project}-processor-dlq"
+  message_retention_seconds = 1209600
+  sqs_managed_sse_enabled   = true
+}
+
+resource "aws_lambda_function_event_invoke_config" "processor" {
+  function_name                = aws_lambda_function.processor.function_name
+  maximum_retry_attempts       = 2
+  maximum_event_age_in_seconds = 21600
+}
+
+resource "aws_cloudwatch_metric_alarm" "processor_dlq" {
+  alarm_name          = "${var.project}-processor-dlq-not-empty"
+  alarm_description   = "Inbound mail failed processing and is waiting in the DLQ. See docs/RUNBOOK.md, Redrive."
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  statistic           = "Maximum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = var.alarm_actions
+
+  dimensions = {
+    QueueName = aws_sqs_queue.processor_dlq.name
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "processor_errors" {
+  alarm_name          = "${var.project}-processor-errors"
+  alarm_description   = "The processor threw. S3 retries twice before the DLQ."
+  namespace           = "AWS/Lambda"
+  metric_name         = "Errors"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = var.alarm_actions
+
+  dimensions = {
+    FunctionName = aws_lambda_function.processor.function_name
+  }
 }
 
 resource "aws_lambda_function" "api" {
@@ -51,7 +109,7 @@ resource "aws_lambda_function" "api" {
     variables = local.common_env
   }
 
-  depends_on = [aws_cloudwatch_log_group.api]
+  depends_on = [aws_cloudwatch_log_group.api, aws_iam_role_policy.api]
 }
 
 resource "aws_lambda_permission" "s3_invoke" {

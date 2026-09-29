@@ -10,6 +10,10 @@ output "kms_key_arn" {
   value = aws_kms_key.mail.arn
 }
 
+output "processor_dlq_url" {
+  value = aws_sqs_queue.processor_dlq.url
+}
+
 output "api_endpoint" {
   value = aws_apigatewayv2_api.http.api_endpoint
 }
@@ -24,7 +28,7 @@ output "ses_identity_arn" {
 
 output "dkim_tokens" {
   description = "Already published when ses_identity_mode is existing. Do not create new CNAMEs from these."
-  value       = local.dkim_tokens
+  value       = nonsensitive(local.dkim_tokens)
 }
 
 output "dns_plan" {
@@ -51,6 +55,5 @@ output "tables" {
     audit    = aws_dynamodb_table.audit.name
     contacts = aws_dynamodb_table.contacts.name
     budget   = aws_dynamodb_table.budget.name
-    imports  = aws_dynamodb_table.imports.name
   }
 }

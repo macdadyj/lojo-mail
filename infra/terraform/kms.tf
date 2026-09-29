@@ -17,17 +17,19 @@ resource "aws_kms_key" "mail" {
         Sid       = "SesUseOfKey"
         Effect    = "Allow"
         Principal = { Service = "ses.amazonaws.com" }
+        # SES writes raw/ into the bucket, whose default SSE-KMS uses this key.
         Action = [
+          "kms:GenerateDataKey*",
           "kms:Encrypt",
           "kms:Decrypt",
-          "kms:ReEncrypt*",
-          "kms:GenerateDataKey*",
-          "kms:DescribeKey",
         ]
         Resource = "*"
         Condition = {
           StringEquals = {
             "aws:SourceAccount" = local.account_id
+          }
+          StringLike = {
+            "aws:SourceArn" = local.receipt_rule_arn_pattern
           }
         }
       },

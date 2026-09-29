@@ -44,8 +44,24 @@ variable "project" {
 
 variable "raw_retention_days" {
   type        = number
-  description = "Days to keep raw MIME (plaintext under KMS) before expiration."
-  default     = 365
+  description = "Safety net for raw MIME (plaintext under bucket SSE-KMS). The processor deletes raw/ after indexing; this only catches objects it could not process. Keep it longer than you'd take to notice and redrive the DLQ."
+  default     = 7
+
+  validation {
+    condition     = var.raw_retention_days >= 1
+    error_message = "raw_retention_days must be at least 1."
+  }
+}
+
+variable "ai_context_days" {
+  type        = number
+  description = "Days to keep the KMS-sealed AI-context copy of inbound bodies (for server-side summaries and draft replies). 0 disables the copy."
+  default     = 30
+
+  validation {
+    condition     = var.ai_context_days >= 0
+    error_message = "ai_context_days must be 0 or more."
+  }
 }
 
 variable "log_retention_days" {
@@ -121,8 +137,9 @@ variable "max_body_chars" {
 }
 
 variable "bedrock_model_id" {
-  type    = string
-  default = "anthropic.claude-3-haiku-20240307-v1:0"
+  type        = string
+  description = "Bedrock model or cross-region inference profile id. Check the Bedrock model catalog for current ids before apply."
+  default     = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 }
 
 variable "grok_base_url" {
@@ -151,15 +168,39 @@ variable "ollama_embed_model" {
   default = "nomic-embed-text"
 }
 
+variable "alarm_actions" {
+  type        = list(string)
+  description = "SNS topic ARNs for the processor alarms. Empty leaves the alarms visible in CloudWatch only."
+  default     = []
+}
+
+variable "processor_reserved_concurrency" {
+  type        = number
+  description = "Reserved concurrency for the processor. -1 leaves it unreserved. New accounts often have a total limit of 10, and reserving from that can fail apply."
+  default     = -1
+}
+
+variable "api_throttle_rate" {
+  type        = number
+  description = "Steady-state requests per second for the HTTP API stage."
+  default     = 10
+}
+
+variable "api_throttle_burst" {
+  type        = number
+  description = "Burst requests for the HTTP API stage."
+  default     = 20
+}
+
 variable "processor_bundle" {
   type        = string
-  description = "Path to the processor zip. Defaults to a placeholder that fails closed."
+  description = "Path to the built processor bundle (packages/pipeline/dist/processor.mjs). Defaults to a placeholder that fails closed."
   default     = ""
 }
 
 variable "api_bundle" {
   type        = string
-  description = "Path to the API zip. Defaults to a placeholder that fails closed."
+  description = "Path to the built API bundle (packages/api/dist/api.mjs). Defaults to a placeholder that fails closed."
   default     = ""
 }
 

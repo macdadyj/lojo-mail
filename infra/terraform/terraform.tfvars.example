@@ -16,10 +16,20 @@ manage_active_rule_set   = true
 llm_provider       = "grok"
 daily_token_budget = 100000
 
+# Raw MIME is deleted after indexing; this only expires what failed.
+raw_retention_days = 7
+# Server-readable AI-context copies. 0 turns them off.
+ai_context_days = 30
+
+# SNS topic ARNs for the processor DLQ and error alarms.
+alarm_actions = []
+
 # After `npm run build:lambda`:
 # processor_bundle = "../../packages/pipeline/dist/processor.mjs"
 # api_bundle       = "../../packages/api/dist/api.mjs"
 
+# Add the PWA's HTTPS origin before deploying it; this also sets S3 CORS for
+# presigned attachment downloads.
 web_origins = [
   "http://127.0.0.1:5173",
   "http://localhost:5173",

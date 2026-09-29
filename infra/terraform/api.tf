@@ -4,7 +4,7 @@ resource "aws_apigatewayv2_api" "http" {
 
   cors_configuration {
     allow_origins = var.web_origins
-    allow_methods = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
+    allow_methods = ["GET", "POST", "OPTIONS"]
     allow_headers = ["authorization", "content-type"]
     max_age       = 3600
   }
@@ -27,4 +27,9 @@ resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.http.id
   name        = "$default"
   auto_deploy = true
+
+  default_route_settings {
+    throttling_rate_limit  = var.api_throttle_rate
+    throttling_burst_limit = var.api_throttle_burst
+  }
 }
