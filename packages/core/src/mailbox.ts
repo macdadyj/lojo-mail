@@ -234,6 +234,21 @@ export class Mailbox {
     return draft;
   }
 
+  async updateDraft(id: string, text: string): Promise<Draft> {
+    const draft = await this.requireDraft(id);
+    const updated: Draft = {
+      ...draft,
+      status: draft.status === "sent" || draft.status === "discarded" ? draft.status : "edited",
+      envelope: await sealJson({ text }, this.deps.publicJwk),
+      updatedAt: new Date().toISOString(),
+    };
+    if (updated.status === "sent" || updated.status === "discarded") {
+      throw new MailError(`Draft is ${updated.status}`, "invalid");
+    }
+    await this.deps.store.putDraft(updated);
+    return updated;
+  }
+
   async draftReply(messageId: string): Promise<Draft> {
     const message = await this.requireMessage(messageId);
     const opened = await this.openMessage(message);

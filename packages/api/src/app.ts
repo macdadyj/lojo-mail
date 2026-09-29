@@ -86,6 +86,11 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(draft, 201);
   });
   app.post("/v1/messages/:id/draft-reply", async (c) => c.json(await deps.mailbox.draftReply(c.req.param("id")), 201));
+  app.post("/v1/drafts/:id", async (c) => {
+    const body = await c.req.json<{ text?: string }>();
+    if (body.text === undefined) throw new MailError("text is required", "invalid");
+    return c.json(await deps.mailbox.updateDraft(c.req.param("id"), body.text));
+  });
   app.post("/v1/drafts/:id/rewrite", async (c) => {
     const body = await c.req.json<{ instruction?: string }>();
     if (!body.instruction) throw new MailError("instruction is required", "invalid");
