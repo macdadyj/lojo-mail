@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { generateIdentity, loadConfig, MemoryStore } from "@lojo/core";
+import { generateIdentity, loadConfig, MemoryBlobStore, MemoryStore } from "@lojo/core";
 import { parseContactsCsv, parseVcards } from "./contacts.ts";
 import { importMailbox } from "./import-mailbox.ts";
 import { splitMbox } from "./mbox.ts";
@@ -64,6 +64,7 @@ test("import is idempotent, maps folders, and relinks threads", async () => {
   const store = new MemoryStore();
   const deps = {
     store,
+    blobs: new MemoryBlobStore(),
     publicJwk,
     llm: null,
     config: loadConfig({ LOJO_LLM_PROVIDER: "mock" }),
@@ -81,6 +82,9 @@ test("import is idempotent, maps folders, and relinks threads", async () => {
   assert.ok(parentMsg?.labels.includes("projects") || parentMsg?.folder === "archive");
   assert.equal(childMsg?.folder, "inbox");
   assert.equal(parentMsg?.threadId, childMsg?.threadId);
+  assert.equal((await store.listThreads()).length, 1, "the thread emptied by relinking is retired");
+  assert.equal(childMsg?.unread, false);
+  assert.equal(childMsg?.origin, "import");
 
   const second = await importMailbox({ input: root, contactsPath: join(root, "contacts.vcf"), folderMap: map, deps });
   assert.equal(second.imported, 0);

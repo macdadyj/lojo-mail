@@ -107,6 +107,10 @@ export class DynamoMailStore implements MailStore {
     return items.map((item) => withoutKind<Thread>(item));
   }
 
+  async retireThread(id: string): Promise<void> {
+    await this.db.update(this.tables.threads, { id }, { remove: ["kind"], set: { messageIds: [], unreadCount: 0 }, condition: { exists: ["id"] } });
+  }
+
   async putDraft(draft: Draft): Promise<void> {
     await this.db.put(this.tables.drafts, asItem({ ...draft, kind: "draft" }));
   }

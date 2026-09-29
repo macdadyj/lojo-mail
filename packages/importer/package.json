@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@lojo/core": "*"
+    "@aws-sdk/client-s3": "^3.830.0",
+    "@lojo/core": "*",
+    "@lojo/pipeline": "*"
   }
 }

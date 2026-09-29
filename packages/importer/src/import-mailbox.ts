@@ -1,16 +1,18 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import {
   assignThreadIds,
   FOLDERS,
   ingestRaw,
+  refreshThread,
   type Folder,
   type IngestDeps,
+  type IngestOptions,
   type MailStore,
   type StoredMessage,
 } from "@lojo/core";
 import { parseContactsCsv, parseVcards } from "./contacts.ts";
-import { splitMbox } from "./mbox.ts";
+import { readMbox } from "./mbox.ts";
 
 export interface ImportReport {
   imported: number;
@@ -31,7 +33,7 @@ function isFolder(value: string): value is Folder {
 }
 
 function walk(dir: string, out: Array<{ file: string; folder?: string }> = []): Array<{ file: string; folder?: string }> {
-  for (const entry of readdirSync(dir)) {
+  for (const entry of readdirSync(dir).sort()) {
     const path = join(dir, entry);
     const stat = statSync(path);
     if (stat.isDirectory()) walk(path, out);
@@ -40,24 +42,45 @@ function walk(dir: string, out: Array<{ file: string; folder?: string }> = []): 
   return out;
 }
 
+/** An mbox file is named after its folder (`Archive.mbox`); an .eml takes its directory's name. */
+function folderNameFor(file: string, directory: string | undefined): string | undefined {
+  if (extname(file).toLowerCase() === ".mbox") return basename(file, extname(file));
+  return directory;
+}
+
+/** Where an exported folder lands. Unknown custom folders become an archive label. */
+export function placement(folderName: string | undefined, folderMap: Record<string, string>): Pick<IngestOptions, "folder" | "labels"> {
+  if (!folderName || folderName === "." || folderName === "emails") return {};
+  const mapped = folderMap[folderName] ?? folderMap[folderName.toLowerCase()];
+  if (mapped && isFolder(mapped)) return { folder: mapped };
+  return { folder: "archive", labels: [folderName.trim().toLowerCase()] };
+}
+
+async function* messagesIn(file: string): AsyncGenerator<Buffer> {
+  if (extname(file).toLowerCase() === ".mbox") {
+    yield* readMbox(file);
+    return;
+  }
+  yield readFileSync(file);
+}
+
 export async function importMailbox(options: ImportInput): Promise<ImportReport> {
   const report: ImportReport = { imported: 0, skipped: 0, contacts: 0, errors: [] };
-  const stat = statSync(options.input);
-  const files = stat.isDirectory()
+  const files = statSync(options.input).isDirectory()
     ? walk(options.input)
     : [{ file: options.input, folder: undefined as string | undefined }];
 
+  const imported: StoredMessage[] = [];
   for (const item of files) {
-    const raw = readFileSync(item.file, "utf8");
-    const chunks = extname(item.file).toLowerCase() === ".mbox" ? splitMbox(raw) : [raw];
-    for (const chunk of chunks) {
+    const where = placement(folderNameFor(item.file, item.folder), options.folderMap);
+    for await (const raw of messagesIn(item.file)) {
       try {
-        const result = await ingestRaw(chunk, { ...options.deps, llm: options.deps.llm });
+        const result = await ingestRaw(raw, options.deps, { origin: "import", ...where });
         if (result.duplicate) {
           report.skipped += 1;
           continue;
         }
-        await applyFolder(options.deps.store, result.message, item.folder, options.folderMap);
+        imported.push(result.message);
         report.imported += 1;
       } catch (error) {
         report.errors.push(`${item.file}: ${error instanceof Error ? error.message : "import failed"}`);
@@ -65,7 +88,7 @@ export async function importMailbox(options: ImportInput): Promise<ImportReport>
     }
   }
 
-  await relinkThreads(options.deps.store);
+  await relinkThreads(options.deps.store, imported);
 
   if (options.contactsPath) {
     const raw = readFileSync(options.contactsPath, "utf8");
@@ -79,62 +102,24 @@ export async function importMailbox(options: ImportInput): Promise<ImportReport>
   return report;
 }
 
-async function applyFolder(
-  store: MailStore,
-  message: StoredMessage,
-  folderName: string | undefined,
-  folderMap: Record<string, string>,
-): Promise<void> {
-  if (!folderName || folderName === "." || folderName === "emails") return;
-  const mapped = folderMap[folderName] ?? folderMap[folderName.toLowerCase()];
-  if (mapped && isFolder(mapped)) {
-    await store.updateMessage(message.id, { folder: mapped });
-    return;
-  }
-  const label = folderName.trim().toLowerCase();
-  const labels = message.labels.includes(label) ? message.labels : [...message.labels, label];
-  await store.updateMessage(message.id, { folder: "archive", labels });
-}
-
-async function relinkThreads(store: MailStore): Promise<void> {
-  const messages = await store.listMessages({ limit: 10000 });
+/** Exports are not in date order, so a reply can arrive before its parent. Re-thread what this run added. */
+async function relinkThreads(store: MailStore, imported: StoredMessage[]): Promise<void> {
+  if (imported.length === 0) return;
   const assigned = assignThreadIds(
-    messages.map((message) => ({
-      rfcMessageId: message.rfcMessageId,
-      references: message.references,
-      inReplyTo: message.inReplyTo,
-    })),
+    imported.map((message) => ({ rfcMessageId: message.rfcMessageId, references: message.references, inReplyTo: message.inReplyTo })),
   );
-  for (const message of messages) {
+  const touched = new Map<string, string>();
+  for (const message of imported) {
     const threadId = assigned.get(message.rfcMessageId);
+    touched.set(message.threadId, message.subject);
     if (threadId && threadId !== message.threadId) {
       await store.updateMessage(message.id, { threadId });
+      touched.set(threadId, message.subject);
     }
   }
-  const grouped = new Map<string, StoredMessage[]>();
-  const refreshed = await store.listMessages({ limit: 10000 });
-  for (const message of refreshed) {
-    const list = grouped.get(message.threadId) ?? [];
-    list.push(message);
-    grouped.set(message.threadId, list);
-  }
-  for (const [threadId, group] of grouped) {
-    const sorted = [...group].sort((a, b) => (a.date < b.date ? 1 : -1));
-    const latest = sorted[0];
-    if (!latest) continue;
-    await store.putThread({
-      id: threadId,
-      subject: latest.subject,
-      participants: [...new Set(group.flatMap((message) => [message.from.email, ...message.to.map((item) => item.email)]))],
-      lastDate: latest.date,
-      unreadCount: group.filter((message) => message.unread).length,
-      messageIds: [...sorted].reverse().map((message) => message.id),
-      folder: group.some((message) => message.folder === "inbox") ? "inbox" : latest.folder,
-    });
-  }
+  for (const [threadId, subject] of touched) await refreshThread(store, threadId, subject);
 }
 
 export function loadFolderMap(raw: string): Record<string, string> {
-  const parsed = JSON.parse(raw) as Record<string, string>;
-  return parsed;
+  return JSON.parse(raw) as Record<string, string>;
 }

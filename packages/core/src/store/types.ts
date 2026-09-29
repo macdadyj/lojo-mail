@@ -22,6 +22,8 @@ export interface MailStore {
   putThread(thread: Thread): Promise<void>;
   getThread(id: string): Promise<Thread | null>;
   listThreads(limit?: number): Promise<Thread[]>;
+  /** Drops an emptied thread out of the listing index. There is no DeleteItem. */
+  retireThread(id: string): Promise<void>;
 
   putDraft(draft: Draft): Promise<void>;
   getDraft(id: string): Promise<Draft | null>;

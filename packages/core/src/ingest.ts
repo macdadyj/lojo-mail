@@ -137,7 +137,10 @@ async function resolveThreadId(
 
 export async function refreshThread(store: MailStore, threadId: string, fallbackSubject: string): Promise<Thread | null> {
   const messages = await store.listThreadMessages(threadId);
-  if (messages.length === 0) return null;
+  if (messages.length === 0) {
+    await store.retireThread(threadId);
+    return null;
+  }
   const sorted = [...messages].sort((a, b) => (a.date < b.date ? 1 : -1));
   const latest = sorted[0];
   if (!latest) return null;
