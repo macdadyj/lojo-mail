@@ -32,7 +32,11 @@ Do this before changing MX records for `cyberphysical.us`. The new address does 
 
 ## Import
 
-The importer is idempotent. It records the RFC `Message-ID` (or a SHA-256 of the raw file when a message has none) in an import ledger. A second run skips those keys and does not duplicate threads.
+The importer is idempotent. Each message's id is derived from a SHA-256 of its raw bytes, and writes are conditional, so a second run skips everything it already has and does not duplicate threads or contacts. The same message exported into two folders is stored once.
+
+### Local first
+
+Try the import locally before touching AWS:
 
 ```bash
 npm run import -- \
@@ -42,16 +46,31 @@ npm run import -- \
   --store data/mailbox.json
 ```
 
-`--store` is a JSON file for a local mailbox you can open with `npm run dev`. To import into AWS later, set `LOJO_STORE=dynamo` and the table names from Terraform output, with credentials in the environment. The script never embeds credentials.
+`--store` is a JSON index plus a `data/mailbox.json.blobs/` directory of sealed bodies and attachments. On the first run the importer generates an envelope keypair next to it (`data/mailbox.json.public.jwk` and `data/mailbox.json.private.jwk`, mode 600). Pass `--public-key keys/envelope.public.jwk` to seal to Jon's real key instead. The importer refuses a `--public-key` file that contains a private key. Browse the result with `LOJO_STORE_FILE=data/mailbox.json npm run dev`; the server is locked, so load the private JWK in Settings to read bodies.
 
-Behavior:
+### Into AWS
 
-- Folder names map through `config/tuta-folder-map.json`. Unknown folders become labels, and the message is filed in `archive` so it does not flood the inbox. Edit the map before the first real import.
-- De-duplication is by `Message-ID`, then by hash of the raw bytes.
-- Threads are reconstructed from `References` and `In-Reply-To`, then by a normalized subject fallback only when those headers are absent **and** the participants match. Re-running the import does not create a second thread for the same root.
-- Attachments are kept inside the envelope.
+After `terraform apply`, with credentials for the apply principal in the environment (never in a file in the repo):
+
+```bash
+export LOJO_BUCKET=$(terraform -chdir=infra/terraform output -raw bucket)
+npm run import -- --target aws \
+  --input imports/tuta \
+  --contacts imports/tuta/contacts.vcf \
+  --public-key keys/envelope.public.jwk
+```
+
+`--target aws` (or `LOJO_STORE=dynamo`) writes sealed bodies and attachments to `s3://$LOJO_BUCKET/objects/` and the index to the DynamoDB tables. Table names default to the Terraform names (`lojo-mail-messages`, …); override them with `LOJO_TABLE_MESSAGES` and friends if you changed `project`. `--public-key` is required and must be the same public JWK that is in SSM, or the web app will not be able to open the imported mail. The command exits with a clear error if the bucket or key is missing.
+
+### Behavior
+
+- Folders come from the export. Each directory (or each `.mbox` file, by its name) maps through `config/tuta-folder-map.json`. Unknown folders become a label, and the message is filed in `archive` so it does not flood the inbox. Edit the map before the first real import.
+- Imported history is marked read, so it does not flood triage.
+- Threads are rebuilt from `References` and `In-Reply-To` across this run and earlier ones. There is no subject-based fallback; a message without those headers starts its own thread.
+- Files are read as bytes, so Latin-1 and other 8-bit bodies decode correctly.
+- Every body and attachment is sealed to the envelope public key and stored as its own object. A 20 MB attachment is fine.
 - The importer does **not** call the LLM unless you pass `--analyze`. Bulk historical mail would burn the token budget and send years of mail to a provider. `--analyze` uses `LOJO_LLM_PROVIDER` (Grok needs `LOJO_GROK_API_KEY`; Ollama and Bedrock use their usual settings). If Grok is selected and the key is missing, the importer says so and uses the mock model. Default is off.
-- Prefer `.eml` files. A classic mbox splits on any line that starts with `From `, which can cut a message whose body contains that prefix.
+- mbox files are streamed, so a large export does not have to fit in memory. The splitter follows mboxrd: a new message starts only at a `From ` line with a date that follows a blank line, and `>From ` escapes are reversed. `.eml` files are still the safer export when the client offers them.
 
 ## Cutover plan
 

@@ -59,7 +59,7 @@ There are three kinds of key. Each has one owner.
 | Envelope public key | Anyone | SSM `/lojo-mail/envelope-public-jwk` (String) | Sealing bodies, attachments, and the sent copy |
 | KMS key `alias/lojo-mail` | AWS account | KMS | S3 and DynamoDB at rest; wrapping per-draft and per-message AI-context data keys |
 
-**The envelope private key is never in AWS.** It is not in SSM, not in Lambda environment variables, not in the repo, and not written to disk by any server. The deployed API cannot open a sealed body. The browser fetches the envelope and opens it locally. Local dev (`npm run dev`) generates a throwaway keypair for the synthetic demo and holds it in the dev server process; that server binds to `127.0.0.1` only. Do not "make production easier" by putting the private key in SSM. That would turn every API bug into a mailbox leak.
+**The envelope private key is never in AWS.** It is not in SSM, not in Lambda environment variables, not in the repo, and not written to disk by any server. The deployed API cannot open a sealed body. The browser fetches the envelope and opens it locally. Local dev (`npm run dev`) generates a throwaway keypair for the synthetic demo and holds it in the dev server process; that server binds to `127.0.0.1` only. Pointed at an imported store (`LOJO_STORE_FILE`), the dev server is locked like production and never reads the private key file. Do not "make production easier" by putting the private key in SSM. That would turn every API bug into a mailbox leak.
 
 ### Envelope (`lojo-env-v2`)
 
@@ -194,7 +194,7 @@ Tests: `packages/core/src/security.test.ts`, `packages/api/src/security.test.ts`
 - Outbound SESv2 configuration set `tls_policy = REQUIRE`.
 - MTA-STS (`mode: testing` until stable) and TLS-RPT are in the DNS plan. MTA-STS only helps once the policy file is served over HTTPS.
 - S3 bucket policy denies any request where `aws:SecureTransport` is false.
-- API is HTTPS at API Gateway, with stage throttling. The PWA must be served over HTTPS in production because it holds the private key. The build adds a Content-Security-Policy (`script-src 'self'`, `connect-src` limited to the API origin).
+- API is HTTPS at API Gateway, with stage throttling. The PWA must be served over HTTPS in production because it holds the private key. The production build adds a Content-Security-Policy meta tag (`script-src 'self'`, `style-src 'self'`, `connect-src` limited to the page, the `VITE_LOJO_API_URL` origin, and the S3 origin that serves presigned attachment downloads).
 
 ### At rest
 
@@ -205,8 +205,8 @@ Tests: `packages/core/src/security.test.ts`, `packages/api/src/security.test.ts`
 
 ### IAM
 
-- Processor: `s3:GetObject` and `s3:DeleteObject` on `raw/*`, `s3:PutObject` on `objects/*` and `ai-context/*`, KMS `GenerateDataKey` for the `draft` and `ai-context` contexts, KMS through S3/DynamoDB only for storage, DynamoDB `GetItem`/`PutItem`/`UpdateItem`/`Query` on the tables and their indexes, `sqs:SendMessage` on its DLQ, `ssm:GetParameter` on `/lojo-mail/*`, logs, and `bedrock:InvokeModel` only when `llm_provider = bedrock`. No SES send.
-- API: the same DynamoDB actions, `s3:GetObject` on `objects/*` and `ai-context/*`, KMS as described under key custody, `ses:SendEmail`/`ses:SendRawEmail` constrained by `ses:FromAddress`, SSM read, logs, Bedrock only when selected. No write to `raw/*`.
+- Processor: `s3:GetObject` and `s3:DeleteObject` on `raw/*`, `s3:PutObject` on `objects/*` and `ai-context/*`, KMS `GenerateDataKey` for the `draft` and `ai-context` contexts, KMS through S3/DynamoDB only for storage, DynamoDB `GetItem`/`PutItem`/`UpdateItem`/`Query` on the tables and their indexes, `sqs:SendMessage` on its DLQ, `ssm:GetParameter` on `envelope-public-jwk` and `grok-api-key` under `/lojo-mail/`, logs, and `bedrock:InvokeModel` only when `llm_provider = bedrock`. No SES send.
+- API: the same DynamoDB actions, `s3:GetObject` on `objects/*` and `ai-context/*`, `s3:PutObject` on `objects/*` (the sealed sent copy), KMS as described under key custody, `ses:SendEmail`/`ses:SendRawEmail` constrained by `ses:FromAddress`, `ssm:GetParameter` on the named `/lojo-mail/` parameters it reads (tokens, session secret, passphrase hash, envelope public key, PGP keys, Grok key), logs, Bedrock only when selected. No access to `raw/*`.
 - No `dynamodb:Scan` and no `dynamodb:DeleteItem` anywhere. Every read path is `GetItem` or `Query` on a declared index. A unit test fails if `ScanCommand` appears in `packages/*/src`.
 - No `*` resource on data APIs. No IAM write. No SES identity administration from the runtime roles.
 - **Receipt rule set activation defaults ON** (`manage_active_rule_set = true`). A read-only audit found no active receipt rule set in any region, so activating this one is what starts delivery. A region has one active set, and turning this flag off later deactivates receiving for every identity in the region. Re-check with `aws ses describe-active-receipt-rule-set` before apply.
@@ -243,7 +243,7 @@ Tests: `packages/core/src/security.test.ts`, `packages/api/src/security.test.ts`
 
 - `.gitignore` blocks `.env`, private keys, tfstate, and import dumps.
 - `scripts/check-no-secrets.mjs` fails CI on `AKIA`, PEM private keys, armored PGP private keys, private EC JWKs (a `"d"` member), and Terraform secret-looking assignments.
-- CI runs lint, typecheck, tests, the secret scan, the Lambda build plus a bundle import check, `terraform validate`, and `terraform test` with mocked providers. It never applies and has no AWS keys.
+- CI runs lint, typecheck, tests, the secret scan, the Lambda build plus a bundle import check, the web build, `terraform validate`, `fmt -check`, and `terraform test` with mocked providers. It never applies and has no AWS keys.
 
 ## Residual risks
 

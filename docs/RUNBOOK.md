@@ -6,7 +6,7 @@ Region for this domain: **us-east-1**. SES already has a verified identity there
 
 ## Who can apply
 
-IAM user `grok-rw` can use Route 53, Route 53 Domains, and SES. That is not enough to apply this stack. Apply needs permission to create KMS, S3, DynamoDB, Lambda, IAM roles, API Gateway, CloudWatch Logs, and SSM parameters, and to read the existing SES identity. Use a principal that has those rights. Do not attach a broader policy to `grok-rw` from this repo, and do not put that user's keys in git.
+IAM user `grok-rw` can use Route 53, Route 53 Domains, and SES. That is not enough to apply this stack. Apply needs permission to create KMS, S3, DynamoDB, Lambda, IAM roles, API Gateway, SQS, CloudWatch Logs and alarms, and SSM parameters, and to read the existing SES identity. Use a principal that has those rights. Do not attach a broader policy to `grok-rw` from this repo, and do not put that user's keys in git.
 
 `grok-rw` is the right user later for the DNS edits in the plan output (DMARC `rua`, TLS-RPT, MTA-STS) and for Route 53 Domains. It cannot create the DNSSEC signing key.
 
@@ -15,7 +15,8 @@ Other SES identities in the account, `cyberdevsec.com` and `jon@lojo.engineering
 ## 0. Tools
 
 - Terraform >= 1.5 (CI uses 1.9.8).
-- Node.js 20 or newer.
+- Node.js 22 (`.nvmrc`). The Lambdas run `nodejs22.x`.
+- `jq`, for the redrive commands below.
 - AWS CLI authenticated as the apply principal above, not as `grok-rw`.
 - A decision about where the envelope private key will live (a password manager is fine).
 
@@ -34,7 +35,7 @@ terraform plan
 With the defaults (`ses_identity_mode = existing`, `manage_dns = false`, `manage_active_rule_set = true`, `aws_region = us-east-1`) the plan should:
 
 - Read the existing SES identity. It should not create one, and it should not create DKIM or MAIL FROM attributes.
-- Create KMS, S3, DynamoDB, IAM, a configuration set, a receipt rule set, the active association, two Lambdas, and an HTTP API.
+- Create KMS, S3, six DynamoDB tables, IAM, a configuration set, a receipt rule set, the active association, two Lambdas, an SQS dead-letter queue, two CloudWatch alarms, and an HTTP API.
 - Create **no** Route 53 records.
 
 `manage_dns = true` in existing mode fails the plan on purpose.
@@ -64,10 +65,47 @@ aws ssm put-parameter --region us-east-1 \
   --value "$(openssl rand -hex 32)"
 
 aws ssm put-parameter --region us-east-1 \
+  --name /lojo-mail/session-secret \
+  --type SecureString \
+  --value "$(openssl rand -base64 48)"
+
+aws ssm put-parameter --region us-east-1 \
   --name /lojo-mail/grok-api-key \
   --type SecureString \
   --value 'paste-the-xai-key-here'
 ```
+
+The web sign-in passphrase is stored as an scrypt hash, never in the clear. Pick a long passphrase (12 characters minimum) in the password manager, then:
+
+```bash
+npm run passphrase-hash          # prompts without echo; prints the hash
+aws ssm put-parameter --region us-east-1 \
+  --name /lojo-mail/human-passphrase-hash \
+  --type SecureString \
+  --value 'scrypt$32768$8$1$…paste the printed hash…'
+```
+
+Optional OpenPGP parameters. Leave them unset to send without Jon's own key or a signature:
+
+```bash
+aws ssm put-parameter --region us-east-1 --name /lojo-mail/pgp-public-key \
+  --type String --value file://keys/lojo.public.asc
+# Only if you accept a server-readable signing key (see SECURITY.md, outbound):
+aws ssm put-parameter --region us-east-1 --name /lojo-mail/pgp-signing-key \
+  --type SecureString --value file://keys/lojo.signing.asc
+aws ssm put-parameter --region us-east-1 --name /lojo-mail/pgp-signing-passphrase \
+  --type SecureString --value 'signing-key-passphrase'
+```
+
+| Parameter | Read by | Required |
+| --- | --- | --- |
+| `envelope-public-jwk` | processor, API | yes |
+| `api-token` | API | yes (the MCP server's token, scopes `read,write`) |
+| `api-token-send` | API | no |
+| `session-secret` | API | yes, for web sign-in |
+| `human-passphrase-hash` | API | yes, for web sign-in |
+| `pgp-public-key`, `pgp-signing-key`, `pgp-signing-passphrase` | API | no |
+| `grok-api-key` | processor, API | only with `llm_provider = "grok"` |
 
 Store the SecureString values in the password manager. Skip the Grok parameter if you set `llm_provider = "bedrock"` or `"ollama"`. The lab Ollama host is on the tailnet. This stack does not connect the Lambda to it.
 
@@ -81,7 +119,7 @@ terraform plan
 terraform apply
 ```
 
-Point `processor_bundle` and `api_bundle` at the built zips before apply. The default zips throw a clear error.
+Before apply, set `processor_bundle = "../../packages/pipeline/dist/processor.mjs"` and `api_bundle = "../../packages/api/dist/api.mjs"` in `terraform.tfvars`. Terraform zips them. The default placeholders throw a clear error. `npm run bundles:check` imports both bundles and fails if either crashes at load.
 
 The receipt rule accepts `lojo@cyberphysical.us` and `dmarc@cyberphysical.us` only. Other local parts at the domain still have no rule, so SES will not store them. That is deliberate.
 
@@ -166,7 +204,27 @@ The audit script is read-only. On a zone that still matches the September 2026 p
 - [ ] `terraform plan` creates no Route 53 changes.
 - [ ] `ses_identity_mode` is `existing` and `manage_dns` is false.
 
-Then `terraform apply`. Watch for an object under `raw/` and a DynamoDB item whose body is not plaintext. Send from an outside account to `lojo@cyberphysical.us`.
+Then `terraform apply`.
+
+### First test email
+
+SES writes an `AMAZON_SES_SETUP_NOTIFICATION` object when the rule is created. The processor skips it; that is expected. Then send a short message from an outside account to `lojo@cyberphysical.us` and check each hop:
+
+```bash
+cd infra/terraform
+BUCKET=$(terraform output -raw bucket)
+TABLE=$(terraform output -json tables | jq -r .messages)
+
+aws logs tail /aws/lambda/lojo-mail-processor --since 10m --region us-east-1
+aws dynamodb query --region us-east-1 --table-name "$TABLE" --index-name folder \
+  --key-condition-expression 'folder = :f' --expression-attribute-values '{":f":{"S":"inbox"}}' \
+  --no-scan-index-forward --max-items 1 \
+  --query 'Items[0].{subject:subject.S,bodyKey:bodyKey.S,verdicts:verdicts}'
+aws s3 ls "s3://$BUCKET/raw/"      # empty again: raw is deleted after ingest
+aws s3 ls "s3://$BUCKET/objects/"  # the sealed body
+```
+
+The item has a `bodyKey` and no body text. Its `verdicts` should show SPF, DKIM, and DMARC `PASS` for a normal sender. Then sign in to the PWA, load the envelope key in Settings, and open the message.
 
 `dig MX cyberphysical.us` should keep answering:
 
@@ -174,27 +232,65 @@ Then `terraform apply`. Watch for an object under `raw/` and a DynamoDB item who
 10 inbound-smtp.us-east-1.amazonaws.com.
 ```
 
-## 7. Revert
+## 7. Failed messages and redrive
+
+If the processor throws (for example a KMS or DynamoDB error), S3's async invoke retries twice, then puts the event in the DLQ. Alarm `lojo-mail-processor-dlq-not-empty` fires, and the raw MIME stays under `raw/` until `raw_retention_days` (7). Fix the cause, then redrive. Each message body is the original S3 event, so it can be replayed as-is; ingest is idempotent per `raw/` key.
+
+```bash
+cd infra/terraform
+QUEUE=$(terraform output -raw processor_dlq_url)
+while MSG=$(aws sqs receive-message --region us-east-1 --queue-url "$QUEUE" \
+      --max-number-of-messages 1 --wait-time-seconds 2 --output json) \
+    && [ -n "$(echo "$MSG" | jq -r '.Messages[0].Body // empty')" ]; do
+  echo "$MSG" | jq -r '.Messages[0].Body' > /tmp/lojo-event.json
+  OUT=$(aws lambda invoke --region us-east-1 --function-name lojo-mail-processor \
+    --cli-binary-format raw-in-base64-out --payload file:///tmp/lojo-event.json /tmp/lojo-result.json)
+  if echo "$OUT" | jq -e '.FunctionError' > /dev/null; then cat /tmp/lojo-result.json; break; fi
+  aws sqs delete-message --region us-east-1 --queue-url "$QUEUE" \
+    --receipt-handle "$(echo "$MSG" | jq -r '.Messages[0].ReceiptHandle')"
+done
+```
+
+The loop stops at the first failure and leaves that message in the queue. A message whose `raw/` object has already expired cannot be recovered from AWS; ask the sender to resend.
+
+## 8. Revert
 
 The MX was already SES. Do not point it somewhere else to undo a bad apply.
 
 1. Set `manage_active_rule_set` to false and apply, or delete the active rule set association. That returns the region to "no active receipt rule set," which is the previous state. It also stops any other SES receiving in us-east-1, so do it only if this set is the one you just activated.
 2. Leave DKIM, SPF, MAIL FROM, DMARC, and the MX target as they were.
 
-## 8. Day-two
+Rolling back code, not receiving: check out the previous commit, `npm run build:lambda`, and apply again. Only the function code changes. Mail that arrives meanwhile waits in `raw/` or the DLQ. The tables have deletion protection, so a `terraform destroy` stops at them; turn `deletion_protection_enabled` off by hand only if you really mean to delete the index. The bucket is `force_destroy = false`.
 
-- Open the PWA over HTTPS, unlock with the private JWK, and confirm a real message decrypts.
+## 9. The web app
+
+Build it against the API and host it on an HTTPS origin you already have:
+
+```bash
+VITE_LOJO_API_URL=$(terraform -chdir=infra/terraform output -raw api_endpoint) npm run build:web
+# upload packages/web/dist/ to the HTTPS origin
+```
+
+Add that origin to `web_origins` in `terraform.tfvars` and apply. That list drives the API's CORS and the bucket's CORS for presigned attachment downloads. The build's Content-Security-Policy only allows the API origin it was built with, so rebuild if the API URL changes. Settings has an API URL override for local testing.
+
+## 10. Day-two
+
+- Open the PWA over HTTPS, sign in with the passphrase, load the envelope private key in Settings, and confirm a real message opens.
+- Drafts that an assistant submitted appear under Drafts → "Waiting for your approval". Open one, check it, and press Approve and send.
 - Put a budget alarm on the `Project=lojo-mail` tag. See [COSTS.md](COSTS.md).
 - Follow [MIGRATION.md](MIGRATION.md) for Tuta.
-- Add the DMARC `rua` when you want reports. Reports arrive at `dmarc@cyberphysical.us` and go through the same pipeline.
-- Rotate the API token by writing a new SSM value. The function reads SSM per request.
+- Add the DMARC `rua` when you want reports. Reports arrive at `dmarc@cyberphysical.us`, skip the model, and are archived with the label `dmarc-report`.
+- Rotate a token, the passphrase hash, or the session secret by writing a new SSM value (`--overwrite`). The API caches its configuration for `LOJO_CONFIG_TTL_MS` (5 minutes by default), so the old value keeps working for up to that long in a warm container. Rotating the session secret signs everyone out.
+- Point `alarm_actions` at an SNS topic if you want the DLQ and error alarms to page you.
 - To switch the domain later, set `domain` and `ses_identity_mode = create`, then repeat identity, DKIM, and DNS for that new name. Do not delete the `cyberphysical.us` identity until mail to it can die. `manage_dns` is allowed only in create mode, and only with the confirmation string, after an audit of the new zone.
 
-## 9. Local demo, no AWS
+## 11. Local demo, no AWS
 
 ```bash
 npm ci
 npm run dev
 ```
 
-API on `http://127.0.0.1:8787`, web app on `http://127.0.0.1:5173`, in-memory mailbox with synthetic messages, mock LLM unless you set `LOJO_LLM_PROVIDER`. The dev token is printed in the API log and is refused if `NODE_ENV=production`.
+API on `http://127.0.0.1:8787`, web app on `http://127.0.0.1:5173`, in-memory mailbox with synthetic messages, mock LLM unless you set `LOJO_LLM_PROVIDER`. Both bind to `127.0.0.1`. The API log prints the web sign-in passphrase (`lojo-dev-passphrase` unless `LOJO_HUMAN_PASSPHRASE` is set) and the local API tokens. The dev passphrase and tokens are refused if `NODE_ENV=production`.
+
+To browse an imported mailbox instead, start the API with `LOJO_STORE_FILE=data/mailbox.json`. That store is locked: load `data/mailbox.json.private.jwk` in Settings to read bodies.

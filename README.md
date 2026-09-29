@@ -1,6 +1,6 @@
 # lojo-mail
 
-Personal mail for **lojo@cyberphysical.us**. AWS SES receives and sends, S3 and DynamoDB store, a Lambda seals each body to a key only Jon holds, and an AI pipeline summarizes and drafts. A web app, an HTTP API, and an MCP server sit on top. The domain is configuration, so it can move (for example to lojo.dev) without a rewrite.
+Personal mail for **lojo@cyberphysical.us**. AWS SES receives and sends, S3 and DynamoDB store, a Lambda seals each body to a key only Jon holds, and an AI pipeline summarizes and drafts. A web app, an HTTP API, and an MCP server sit on top. Nothing is sent without Jon approving it in the web app; assistants can only queue drafts for approval. The domain is configuration, so it can move (for example to lojo.dev) without a rewrite.
 
 Nothing in this repo deploys itself. Terraform plans; it does not apply. There are no cloud credentials here and there should never be any.
 
@@ -11,8 +11,9 @@ Nothing in this repo deploys itself. Terraform plans; it does not apply. There a
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Shape of the system and why it is Terraform |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model, including what is not end-to-end |
 | [docs/COSTS.md](docs/COSTS.md) | Monthly estimate (about $2 on Ollama, a few dollars more on Grok) |
-| [docs/RUNBOOK.md](docs/RUNBOOK.md) | Exact steps Jon runs, including the MX dry-run |
-| [docs/MIGRATION.md](docs/MIGRATION.md) | Leaving Tuta (`lojo@tuta.io`) without IMAP |
+| [docs/RUNBOOK.md](docs/RUNBOOK.md) | Exact steps Jon runs: parameters, apply, first test email, DLQ redrive, rollback |
+| [docs/MIGRATION.md](docs/MIGRATION.md) | Leaving Tuta (`lojo@tuta.io`) without IMAP, locally or straight into AWS |
+| [qa/REVIEW_REPORT.md](qa/REVIEW_REPORT.md) | Independent pre-deploy review, with evidence and screenshots under `qa/` |
 
 ## Local demo
 
@@ -21,28 +22,37 @@ npm ci
 npm run dev
 ```
 
-- Web app: http://127.0.0.1:5173
-- API: http://127.0.0.1:8787
+- Web app: http://127.0.0.1:5173. Sign in with `lojo-dev-passphrase` (printed by the API; set `LOJO_HUMAN_PASSPHRASE` to change it).
+- API: http://127.0.0.1:8787. Both bind to `127.0.0.1` only.
 
-The demo mailbox is synthetic and in memory. The LLM is the mock provider unless `LOJO_LLM_PROVIDER` is set. No AWS calls.
+The demo mailbox is synthetic and in memory. The LLM is the mock provider unless `LOJO_LLM_PROVIDER` is set. No AWS calls. To browse a mailbox you imported (see MIGRATION.md), start with `LOJO_STORE_FILE=data/mailbox.json npm run dev`.
+
+Node 22 (`.nvmrc`). Checks, as CI runs them:
 
 ```bash
-npm test
-npm run typecheck
 npm run lint
-npm run infra:validate
+npm run typecheck
+npm test
+npm run secrets:check
+npm run build:lambda && npm run bundles:check
+npm run build:web
+npm run infra:validate   # terraform 1.9+ on PATH: validate, fmt -check, and the mocked `terraform test`
 ```
+
+For a deployed build of the web app, set `VITE_LOJO_API_URL` to the API Gateway URL when running `npm run build:web`.
 
 ## Layout
 
 ```text
 infra/terraform     SES, KMS, S3, DynamoDB, IAM, Lambda, HTTP API, DNS plan
+infra/terraform/tests  Offline `terraform test` with mocked providers
 packages/core       MIME, envelope crypto, store, AI pipeline, OpenPGP helpers
-packages/pipeline   Inbound processor
+packages/pipeline   Inbound processor and the AWS adapters (DynamoDB, S3, KMS)
 packages/api        HTTP API
 packages/mcp        MCP tools
 packages/web        PWA
 packages/importer   eml / mbox / vCard / CSV import
+fixtures/           Sample, malicious, and DNS fixtures used by the tests
 ```
 
 Infrastructure defaults: region `us-east-1` (SES for this domain is already there), domain `cyberphysical.us`, local part `lojo`, existing SES identity adopted, DNS changes off, receipt rule set activated because no set is active. See `infra/terraform/terraform.tfvars.example`.
