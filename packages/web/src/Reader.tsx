@@ -1,17 +1,24 @@
 import { useEffect, useState } from "react";
 import { api } from "./api.ts";
 import { person, when, type Message } from "./types.ts";
+import { openMessage } from "./unlock.ts";
 
 export function Reader({ threadId, onChanged }: { threadId: string; onChanged: () => void }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [label, setLabel] = useState("");
 
+  async function loadThread(): Promise<void> {
+    const body = await api<{ messages: Message[] }>(`/v1/threads/${encodeURIComponent(threadId)}`);
+    setMessages(await Promise.all(body.messages.map((message) => openMessage(message))));
+  }
+
   useEffect(() => {
     let cancel = false;
     api<{ messages: Message[] }>(`/v1/threads/${encodeURIComponent(threadId)}`)
-      .then((body) => {
-        if (!cancel) setMessages(body.messages);
+      .then(async (body) => {
+        const opened = await Promise.all(body.messages.map((message) => openMessage(message)));
+        if (!cancel) setMessages(opened);
       })
       .catch((err: unknown) => {
         if (!cancel) setError(err instanceof Error ? err.message : "Could not open the thread");
@@ -22,25 +29,33 @@ export function Reader({ threadId, onChanged }: { threadId: string; onChanged: (
   }, [threadId]);
 
   const latest = messages[messages.length - 1];
+  const title = messages[0]?.subject ?? latest?.subject;
   const summary = messages.map((message) => message.summary).find(Boolean);
   const actions = messages.flatMap((message) => message.actionItems ?? []);
   const phish = messages.find((message) => (message.ai?.phishingScore ?? 0) >= 40);
 
   async function archive() {
-    if (!latest) return;
-    await api(`/v1/messages/${latest.id}/archive`, { method: "POST" });
+    const inbox = messages.filter((message) => message.folder === "inbox");
+    const targets = inbox.length > 0 ? inbox : latest ? [latest] : [];
+    await Promise.all(
+      targets.map((message) => api(`/v1/messages/${message.id}/archive`, { method: "POST" })),
+    );
     onChanged();
     window.location.hash = "#/inbox";
   }
 
   async function addLabel() {
-    if (!latest || !label.trim()) return;
-    const labels = [...new Set([...latest.labels, label.trim().toLowerCase()])];
-    await api(`/v1/messages/${latest.id}/labels`, { method: "POST", body: JSON.stringify({ labels }) });
+    const next = label.trim().toLowerCase();
+    if (!next || messages.length === 0) return;
+    await Promise.all(
+      messages.map((message) => {
+        const labels = [...new Set([...message.labels, next])];
+        return api(`/v1/messages/${message.id}/labels`, { method: "POST", body: JSON.stringify({ labels }) });
+      }),
+    );
     setLabel("");
     onChanged();
-    const body = await api<{ messages: Message[] }>(`/v1/threads/${encodeURIComponent(threadId)}`);
-    setMessages(body.messages);
+    await loadThread();
   }
 
   if (error) return <p className="error">{error}</p>;
@@ -49,7 +64,7 @@ export function Reader({ threadId, onChanged }: { threadId: string; onChanged: (
   return (
     <>
       <header>
-        <h2>{latest.subject}</h2>
+        <h2>{title}</h2>
         <a className="back" href="#/inbox">Back</a>
       </header>
       {summary ? (
@@ -58,8 +73,8 @@ export function Reader({ threadId, onChanged }: { threadId: string; onChanged: (
           <p>{summary}</p>
           {actions.length > 0 ? (
             <ul>
-              {actions.map((item) => (
-                <li key={item.text}>
+              {actions.map((item, index) => (
+                <li key={`${item.text}-${item.deadline ?? ""}-${index}`}>
                   {item.text}
                   {item.deadline ? ` · ${item.deadline}` : ""}
                 </li>
@@ -78,7 +93,11 @@ export function Reader({ threadId, onChanged }: { threadId: string; onChanged: (
           <strong>{person(message.from)}</strong>
           <div className="muted">{when(message.date)} · {message.from.email}</div>
           {message.pgpEncrypted ? <div className="chip">OpenPGP</div> : null}
-          <pre>{message.locked ? "Locked. Unlock the mailbox to read the body." : message.text}</pre>
+          <pre>
+            {message.locked
+              ? "Locked. Paste the envelope private key in Settings to read the body in this browser."
+              : message.text}
+          </pre>
         </article>
       ))}
       <div className="actions">

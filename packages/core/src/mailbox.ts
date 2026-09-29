@@ -60,6 +60,8 @@ function viewOf(message: StoredMessage, opened: SealedBody | null): MessageView 
       view.draftReply = opened.ai.draftReply;
       view.phishingReasons = opened.ai.phishingReasons;
     }
+  } else {
+    view.envelope = message.envelope;
   }
   return view;
 }

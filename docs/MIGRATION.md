@@ -50,7 +50,8 @@ Behavior:
 - De-duplication is by `Message-ID`, then by hash of the raw bytes.
 - Threads are reconstructed from `References` and `In-Reply-To`, then by a normalized subject fallback only when those headers are absent **and** the participants match. Re-running the import does not create a second thread for the same root.
 - Attachments are kept inside the envelope.
-- The importer does **not** call the LLM. Bulk historical mail would burn the token budget and send years of mail to a provider. After import, `npm run import -- --analyze` can enqueue AI for selected folders (`inbox`, `archive`) within the same budget. Default is off.
+- The importer does **not** call the LLM unless you pass `--analyze`. Bulk historical mail would burn the token budget and send years of mail to a provider. `--analyze` uses `LOJO_LLM_PROVIDER` (Grok needs `LOJO_GROK_API_KEY`; Ollama and Bedrock use their usual settings). If Grok is selected and the key is missing, the importer says so and uses the mock model. Default is off.
+- Prefer `.eml` files. A classic mbox splits on any line that starts with `From `, which can cut a message whose body contains that prefix.
 
 ## Cutover plan
 

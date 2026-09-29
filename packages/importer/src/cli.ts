@@ -1,8 +1,28 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { parseArgs } from "node:util";
-import { generateIdentity, loadConfig, MemoryStore, MockLlm, type EcPublicJwk, type EcPrivateJwk } from "@lojo/core";
+import {
+  createLlmClient,
+  generateIdentity,
+  loadConfig,
+  MemoryStore,
+  MockLlm,
+  type EcPrivateJwk,
+  type EcPublicJwk,
+  type LlmClient,
+  type LojoConfig,
+} from "@lojo/core";
 import { importMailbox, loadFolderMap } from "./import-mailbox.ts";
+
+function analyzer(config: LojoConfig): LlmClient {
+  if (config.llmProvider === "mock") return new MockLlm();
+  const grokApiKey = process.env.LOJO_GROK_API_KEY;
+  if (config.llmProvider === "grok" && !grokApiKey) {
+    console.error("--analyze: LOJO_LLM_PROVIDER is grok and LOJO_GROK_API_KEY is unset. Using the mock model.");
+    return new MockLlm();
+  }
+  return createLlmClient(config, { grokApiKey });
+}
 
 const { values } = parseArgs({
   options: {
@@ -45,7 +65,7 @@ const report = await importMailbox({
   deps: {
     store,
     publicJwk,
-    llm: values.analyze ? new MockLlm() : null,
+    llm: values.analyze ? analyzer(config) : null,
     config,
     styleGuide: existsSync("config/style-guide.md") ? readFileSync("config/style-guide.md", "utf8") : "",
   },

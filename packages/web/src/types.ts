@@ -39,6 +39,13 @@ export interface Message {
   draftReply?: string;
   phishingReasons?: string[];
   attachments: Array<{ id: string; filename: string; contentType: string; size: number }>;
+  envelope?: {
+    v: 1;
+    alg: "P-256-ECDH+HKDF-SHA256+AES-256-GCM";
+    epk: { kty: "EC"; crv: "P-256"; x: string; y: string };
+    iv: string;
+    ct: string;
+  };
 }
 
 export interface DraftRow {
@@ -49,6 +56,7 @@ export interface DraftRow {
     to: Address[];
     aiGenerated: boolean;
     updatedAt: string;
+    envelope?: Message["envelope"];
   };
   text: string | null;
 }

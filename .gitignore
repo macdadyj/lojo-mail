@@ -33,3 +33,4 @@ keys/*.asc
 data/
 *.mbox
 imports/
+.playwright-mcp/

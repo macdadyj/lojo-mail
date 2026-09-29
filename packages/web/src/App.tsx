@@ -114,9 +114,11 @@ export function App() {
                   <span className="muted">{when(message.date)}</span>
                   {message.ai ? <span className={`chip ${message.ai.priority}`}>{message.ai.priority}</span> : null}
                   {message.bulk ? <span className="chip bulk">bulk</span> : null}
-                  {message.labels.map((label) => (
-                    <span className="chip" key={label}>{label}</span>
-                  ))}
+                  {message.labels
+                    .filter((label) => label !== "bulk" || !message.bulk)
+                    .map((label) => (
+                      <span className="chip" key={label}>{label}</span>
+                    ))}
                 </div>
               </a>
             ))}

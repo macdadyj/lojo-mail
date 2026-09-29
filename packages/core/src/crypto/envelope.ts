@@ -1,5 +1,7 @@
 import type { EcPrivateJwk, EcPublicJwk, EnvelopeBlob } from "../types.ts";
 
+export type { EcPrivateJwk, EcPublicJwk, EnvelopeBlob };
+
 const INFO = new TextEncoder().encode("lojo-mail-envelope-v1");
 const ECDH: EcKeyGenParams = { name: "ECDH", namedCurve: "P-256" };
 

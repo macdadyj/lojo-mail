@@ -9,6 +9,7 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173"
   },
   "dependencies": {
+    "@lojo/core": "*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

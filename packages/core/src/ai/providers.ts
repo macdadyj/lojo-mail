@@ -19,6 +19,13 @@ export class MockLlm implements LlmClient {
   async complete(request: LlmRequest): Promise<LlmCompletion> {
     this.calls.push(request);
     if (this.script) return this.script(request);
+    if (request.system.startsWith("Rewrite the email")) {
+      return {
+        text: "Hi,\n\nA shorter note. I will follow up.\n\nJon",
+        inputTokens: estimateTokens(request.system + request.user),
+        outputTokens: 12,
+      };
+    }
     const haystack = request.user.toLowerCase();
     const phishing = /verify your account|password expires|suspended/.test(haystack);
     const newsletter = /unsubscribe|newsletter/.test(haystack);

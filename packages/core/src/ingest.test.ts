@@ -167,11 +167,16 @@ test("reply lands on the parent thread and keyword search needs the key for body
     sender: env.sender,
     styleGuide: STYLE,
   });
+  const sealed = await locked.listInbox();
+  assert.equal(sealed[0]?.locked, true);
+  assert.equal(sealed[0]?.text, undefined);
+  assert.equal(sealed[0]?.envelope?.v, 1);
   const hidden = await locked.search("CODEWORD-ZEBRA");
   assert.equal(hidden.length, 0);
   const found = await env.mailbox.search("CODEWORD-ZEBRA");
   assert.equal(found.length, 1);
   assert.equal(found[0]?.locked, false);
+  assert.equal(found[0]?.envelope, undefined);
 });
 
 test("approveAndSend is the only path that touches the sender", async () => {

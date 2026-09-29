@@ -211,4 +211,6 @@ export interface MessageView {
   actionItems?: ActionItem[];
   draftReply?: string;
   phishingReasons?: string[];
+  /** Present when the server cannot open the body. The browser opens it with the private key. */
+  envelope?: EnvelopeBlob;
 }

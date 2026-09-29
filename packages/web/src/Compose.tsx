@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api.ts";
 import type { DraftRow, Message } from "./types.ts";
+import { openDraftText, openMessage } from "./unlock.ts";
 
 export function Compose({ draftId }: { draftId?: string }) {
   const [to, setTo] = useState("");
@@ -22,7 +23,7 @@ export function Compose({ draftId }: { draftId?: string }) {
         setTo(draft.to.map((item) => item.email).join(", "));
         const rows = await api<{ drafts: DraftRow[] }>("/v1/drafts");
         const row = rows.drafts.find((item) => item.draft.id === draft.id);
-        setText(row?.text ?? "");
+        setText(row ? ((await openDraftText(row)) ?? "") : "");
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not draft a reply"));
   }, []);
@@ -30,13 +31,13 @@ export function Compose({ draftId }: { draftId?: string }) {
   useEffect(() => {
     if (!draftId) return;
     api<{ drafts: DraftRow[] }>("/v1/drafts")
-      .then((body) => {
+      .then(async (body) => {
         const row = body.drafts.find((item) => item.draft.id === draftId);
         if (!row) return;
         setId(row.draft.id);
         setSubject(row.draft.subject);
         setTo(row.draft.to.map((item) => item.email).join(", "));
-        setText(row.text ?? "");
+        setText((await openDraftText(row)) ?? "");
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not open the draft"));
   }, [draftId]);
@@ -121,6 +122,7 @@ function ReplyHint() {
     const reply = params.get("reply");
     if (!reply) return;
     api<Message>(`/v1/messages/${reply}`)
+      .then((message) => openMessage(message))
       .then((message) => setHint(message.subject))
       .catch(() => setHint(null));
   }, []);

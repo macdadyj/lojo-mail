@@ -148,6 +148,8 @@ button.ghost:hover { background: #f7f3ed; }
 
 .panel { padding: 8px 22px 32px; }
 label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 6px; }
+label.check { display: flex; align-items: center; gap: 8px; color: var(--ink); }
+label.check input { width: auto; }
 input, textarea, select {
   width: 100%;
   border: 1px solid var(--line);
