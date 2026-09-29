@@ -32,7 +32,9 @@ Do this before changing MX records for `cyberphysical.us`. The new address does 
 
 ## Import
 
-The importer is idempotent. Each message's id is derived from a SHA-256 of its raw bytes, and writes are conditional, so a second run skips everything it already has and does not duplicate threads or contacts. The same message exported into two folders is stored once.
+The importer is idempotent. Each message's id is derived from a SHA-256 of its bytes after line endings are normalized (CRLF and bare CR become LF, trailing blank lines and a leading UTF-8 byte-order mark are dropped), and writes are conditional. A second run, even from a new export that uses different line endings, skips everything it already has and does not duplicate threads or contacts. The same message exported into two folders is stored once. A re-export that actually changes a message (for example a client that rewrites headers) is a different message and is imported again.
+
+Files that are empty, contain binary data in the header block, or do not start with a mail header are listed as errors with the reason (`empty file`, `binary file, not a message`, `no mail headers`) and are not stored. The command exits 1 when there are errors; the rest of the import still completes.
 
 ### Local first
 
@@ -104,7 +106,7 @@ DKIM, MAIL FROM, SPF, DMARC, and the apex MX are already in place for us-east-1.
 
 - Search Tuta for the latest week of mail.
 - Confirm registrars and banks.
-- Export one last time and re-run the importer (it will skip what it already has).
+- Export one last time and re-run the importer. It skips what it already has, including messages whose only difference is CRLF vs LF line endings (`packages/importer/src/import.test.ts` covers this). Check the report: `skipped` should be most of the export and `imported` only the new mail.
 - Then cancel Tuta.
 
 ## Contact notification template

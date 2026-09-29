@@ -53,6 +53,16 @@ export interface IngestResult {
 
 const PRIORITY_RANK: Record<Priority, number> = { now: 0, today: 1, later: 2, noise: 3 };
 
+/**
+ * The dedupe key for mail with no SES delivery (imports). Exporters disagree on
+ * CRLF vs LF and on trailing blank lines, so both are normalized before hashing;
+ * latin1 maps bytes one to one, so 8-bit bodies hash unchanged.
+ */
+export function contentDeliveryId(raw: Buffer): string {
+  const text = raw.toString("latin1").replace(/\r\n?/g, "\n").replace(/\n+$/, "");
+  return `sha256:${sha256(Buffer.from(text, "latin1"))}`;
+}
+
 export function messageIdFor(deliveryId: string): string {
   return `msg_${sha256(deliveryId).slice(0, 32)}`;
 }
@@ -205,7 +215,7 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
   const now = deps.now ?? new Date();
   const origin = options.origin ?? "inbound";
   const buffer = typeof raw === "string" ? Buffer.from(raw) : raw;
-  const deliveryId = options.deliveryId ?? `sha256:${sha256(buffer)}`;
+  const deliveryId = options.deliveryId ?? contentDeliveryId(buffer);
   const id = messageIdFor(deliveryId);
 
   const duplicate = async (message: StoredMessage): Promise<IngestResult> => {

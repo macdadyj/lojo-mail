@@ -56,6 +56,24 @@ export function placement(folderName: string | undefined, folderMap: Record<stri
   return { folder: "archive", labels: [folderName.trim().toLowerCase()] };
 }
 
+const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
+
+function withoutBom(raw: Buffer): Buffer {
+  return raw.subarray(0, 3).equals(UTF8_BOM) ? raw.subarray(3) : raw;
+}
+
+/** Why a file is not a message, or null. Such files are reported, never stored as blank messages. */
+function notMailReason(raw: Buffer): string | null {
+  const text = raw.subarray(0, 64 * 1024).toString("latin1").replace(/^\s+/, "");
+  if (text.length === 0) return "empty file";
+  const headerEnd = text.search(/\r?\n\r?\n/);
+  const headers = headerEnd < 0 ? text : text.slice(0, headerEnd);
+  // eslint-disable-next-line no-control-regex -- control bytes in a header block mean this is not RFC 5322 text
+  if (/[\u0000-\u0008\u000e-\u001f]/.test(headers)) return "binary file, not a message";
+  if (!/^[\x21-\x39\x3b-\x7e]+:/.test(headers)) return "no mail headers";
+  return null;
+}
+
 async function* messagesIn(file: string): AsyncGenerator<Buffer> {
   if (extname(file).toLowerCase() === ".mbox") {
     yield* readMbox(file);
@@ -73,7 +91,13 @@ export async function importMailbox(options: ImportInput): Promise<ImportReport>
   const imported: StoredMessage[] = [];
   for (const item of files) {
     const where = placement(folderNameFor(item.file, item.folder), options.folderMap);
-    for await (const raw of messagesIn(item.file)) {
+    for await (const exported of messagesIn(item.file)) {
+      const raw = withoutBom(exported);
+      const reason = notMailReason(raw);
+      if (reason) {
+        report.errors.push(`${item.file}: ${reason}`);
+        continue;
+      }
       try {
         const result = await ingestRaw(raw, options.deps, { origin: "import", ...where });
         if (result.duplicate) {

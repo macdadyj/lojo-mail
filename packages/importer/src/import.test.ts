@@ -92,3 +92,55 @@ test("import is idempotent, maps folders, and relinks threads", async () => {
   assert.equal((await store.listMessages({ limit: 20 })).length, 3);
   assert.equal((await store.listContacts()).length, 1);
 });
+
+async function importDeps() {
+  const { publicJwk } = await generateIdentity();
+  const store = new MemoryStore();
+  return { store, blobs: new MemoryBlobStore(), publicJwk, llm: null, config: loadConfig({ LOJO_LLM_PROVIDER: "mock" }), styleGuide: "" };
+}
+
+test("a final re-export with CRLF line endings and extra blank lines is skipped, not re-imported", async () => {
+  const deps = await importDeps();
+  const first = mkdtempSync(join(tmpdir(), "lojo-import-lf-"));
+  mkdirSync(join(first, "Inbox"));
+  writeFileSync(join(first, "Inbox", "parent.eml"), parent);
+  writeFileSync(join(first, "Inbox", "latin1.eml"), Buffer.concat([Buffer.from(middle.replace("Middle.", "Caf")), Buffer.from([0xe9]), Buffer.from(".\n")]));
+  assert.equal((await importMailbox({ input: first, folderMap: {}, deps })).imported, 2);
+
+  const again = mkdtempSync(join(tmpdir(), "lojo-import-crlf-"));
+  mkdirSync(join(again, "Inbox"));
+  writeFileSync(join(again, "Inbox", "parent.eml"), `${parent.replace(/\n/g, "\r\n")}\r\n\r\n`);
+  writeFileSync(
+    join(again, "Inbox", "latin1.eml"),
+    Buffer.concat([Buffer.from(middle.replace("Middle.", "Caf").replace(/\n/g, "\r\n")), Buffer.from([0xe9]), Buffer.from(".\r\n")]),
+  );
+  const report = await importMailbox({ input: again, folderMap: {}, deps });
+  assert.deepEqual({ imported: report.imported, skipped: report.skipped, errors: report.errors }, { imported: 0, skipped: 2, errors: [] });
+  assert.equal((await deps.store.listMessages({ limit: 20 })).length, 2);
+});
+
+test("empty, binary, and header-less .eml files are import errors, not blank messages", async () => {
+  const deps = await importDeps();
+  const root = mkdtempSync(join(tmpdir(), "lojo-import-bad-"));
+  mkdirSync(join(root, "Inbox"));
+  writeFileSync(join(root, "Inbox", "empty.eml"), "");
+  writeFileSync(join(root, "Inbox", "blank.eml"), "\r\n  \n");
+  writeFileSync(join(root, "Inbox", "image.eml"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]));
+  writeFileSync(join(root, "Inbox", "nul-header.eml"), Buffer.concat([Buffer.from("From: a@example.com\nSubject: x"), Buffer.from([0x00]), Buffer.from("\n\nbody\n")]));
+  writeFileSync(join(root, "Inbox", "notes.eml"), "Just some notes I saved with the wrong extension.\n");
+  writeFileSync(join(root, "Inbox", "bom.eml"), `\ufeff${parent}`);
+  const report = await importMailbox({ input: root, folderMap: {}, deps });
+  assert.equal(report.imported, 1, "the BOM-prefixed message still imports");
+  const reasons = Object.fromEntries(report.errors.map((line) => [line.split("/").pop()?.split(":")[0], line.split(": ").pop()]));
+  assert.deepEqual(reasons, {
+    "blank.eml": "empty file",
+    "empty.eml": "empty file",
+    "image.eml": "binary file, not a message",
+    "notes.eml": "no mail headers",
+    "nul-header.eml": "binary file, not a message",
+  });
+  const stored = await deps.store.listMessages({ limit: 20 });
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0]?.subject, "Parent");
+  assert.equal(stored[0]?.from.email, "mina@example.com");
+});
