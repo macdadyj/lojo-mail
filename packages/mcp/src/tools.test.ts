@@ -20,9 +20,20 @@ test("the tool list has no send, approve, trash, or full export", () => {
     "submit_for_approval",
     "summarize_thread",
   ]);
-  assert.ok(tools.every((tool) => tool.scope === "read" || tool.scope === "write"));
-  assert.equal(tools.find((tool) => tool.name === "search_mail")?.scope, "read");
-  assert.equal(tools.find((tool) => tool.name === "summarize_thread")?.scope, "write");
+  assert.ok(tools.every((tool) => tool.scopes.every((scope) => scope === "read" || scope === "write" || scope === "body")));
+  assert.deepEqual(tools.find((tool) => tool.name === "search_mail")?.scopes, ["read"]);
+  assert.deepEqual(tools.find((tool) => tool.name === "summarize_thread")?.scopes, ["write", "body"]);
+  assert.deepEqual(tools.find((tool) => tool.name === "get_action_items")?.scopes, ["read", "body"]);
+});
+
+test("a write token without body cannot get message text through a thread summary", async () => {
+  const w = await agentWorld(["read", "write"]);
+  const { message } = await w.ingest(fixture("personal.eml"));
+  await assert.rejects(() => callTool("summarize_thread", { threadId: message.threadId }, w.ctx), /Missing body scope/);
+  await assert.rejects(() => callTool("get_action_items", {}, w.ctx), /Missing body scope/);
+  const direct = await w.call(`/v1/threads/${message.threadId}/summarize`, { token: w.token, method: "POST" });
+  assert.equal(direct.status, 403);
+  assert.equal(direct.text.includes("lease"), false);
 });
 
 test("approve_and_send is an unknown tool, even with send scope", async () => {

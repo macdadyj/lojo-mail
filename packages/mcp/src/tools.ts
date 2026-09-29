@@ -78,7 +78,7 @@ function requireBody(ctx: ToolContext, wanted: boolean | undefined): boolean {
 export const tools = [
   {
     name: "search_mail",
-    scope: "read",
+    scopes: ["read"],
     description: "Search mail by keyword, or semantically when embeddings exist. includeContext searches AI-context text and needs the body scope.",
     schema: searchSchema,
     run: (args: z.infer<typeof searchSchema>, ctx: ToolContext) =>
@@ -86,14 +86,14 @@ export const tools = [
   },
   {
     name: "read_thread",
-    scope: "read",
+    scopes: ["read"],
     description: "Read one thread's metadata. includeContext adds server-readable AI-context text and needs the body scope.",
     schema: readThreadSchema,
     run: (args: z.infer<typeof readThreadSchema>, ctx: ToolContext) => ctx.mailbox.readThread(args.threadId, requireBody(ctx, args.includeContext)),
   },
   {
     name: "list_inbox",
-    scope: "read",
+    scopes: ["read"],
     description: "List the inbox. Pass triage true for the priority view.",
     schema: inboxSchema,
     run: (args: z.infer<typeof inboxSchema>, ctx: ToolContext) =>
@@ -101,63 +101,63 @@ export const tools = [
   },
   {
     name: "summarize_thread",
-    scope: "write",
-    description: "Summarize a thread with the configured model. Spends tokens. Does not send mail.",
+    scopes: ["write", "body"],
+    description: "Summarize a thread with the configured model. The summary is message text, so it needs the body scope. Spends tokens. Does not send mail.",
     schema: threadSchema,
     run: async (args: z.infer<typeof threadSchema>, ctx: ToolContext) => ({ summary: await ctx.mailbox.summarizeThread(args.threadId) }),
   },
   {
     name: "draft_reply",
-    scope: "write",
+    scopes: ["write"],
     description: "Create or reuse a suggested reply draft. Does not send it.",
     schema: messageSchema,
     run: (args: z.infer<typeof messageSchema>, ctx: ToolContext) => ctx.mailbox.draftReply(args.messageId),
   },
   {
     name: "create_draft",
-    scope: "write",
+    scopes: ["write"],
     description: "Create a draft to existing contacts or to participants of the thread being answered. Does not send it.",
     schema: draftSchema,
     run: (args: z.infer<typeof draftSchema>, ctx: ToolContext) => ctx.mailbox.createDraft(args),
   },
   {
     name: "submit_for_approval",
-    scope: "write",
+    scopes: ["write"],
     description: "Put a draft in Jon's approval queue in the web app. Only Jon can approve and send it.",
     schema: draftIdSchema,
     run: (args: z.infer<typeof draftIdSchema>, ctx: ToolContext) => ctx.mailbox.submitForApproval(args.draftId),
   },
   {
     name: "label_message",
-    scope: "write",
+    scopes: ["write"],
     description: "Replace labels on a message.",
     schema: labelSchema,
     run: (args: z.infer<typeof labelSchema>, ctx: ToolContext) => ctx.mailbox.setLabels(args.messageId, args.labels),
   },
   {
     name: "archive_message",
-    scope: "write",
+    scopes: ["write"],
     description: "Move a message to the archive.",
     schema: messageSchema,
     run: (args: z.infer<typeof messageSchema>, ctx: ToolContext) => ctx.mailbox.archive(args.messageId),
   },
   {
     name: "move_message",
-    scope: "write",
+    scopes: ["write"],
     description: "Move a message to inbox, archive, or spam. Trash is only available to Jon in the web app.",
     schema: moveSchema,
     run: (args: z.infer<typeof moveSchema>, ctx: ToolContext) => ctx.mailbox.move(args.messageId, args.folder),
   },
   {
     name: "get_action_items",
-    scope: "read",
-    description: "List action items extracted from unlocked inbox mail.",
+    scopes: ["read", "body"],
+    description: "List action items extracted from unlocked inbox mail. Action items are message text, so this needs the body scope.",
     schema: z.object({}),
     run: (_args: Record<string, never>, ctx: ToolContext) => ctx.mailbox.actionItems(),
   },
   {
     name: "export_mailbox",
-    scope: "read",
+    scopes: ["read"],
     description: "Export a metadata index of the mailbox (no bodies). A full export is only available to Jon in the web app.",
     schema: z.object({}),
     run: (_args: Record<string, never>, ctx: ToolContext) => ctx.mailbox.exportIndex(),
@@ -169,8 +169,9 @@ export type ToolName = (typeof tools)[number]["name"];
 export async function callTool(name: string, args: unknown, ctx: ToolContext): Promise<string> {
   const tool = tools.find((item) => item.name === name);
   if (!tool) throw new MailError(`Unknown tool ${name}`, "invalid");
-  const scope = asScope(tool.scope);
-  if (!hasScope(ctx.scopes, scope)) throw new MailError(`Missing ${scope} scope for ${name}`, "forbidden");
+  for (const scope of tool.scopes.map(asScope)) {
+    if (!hasScope(ctx.scopes, scope)) throw new MailError(`Missing ${scope} scope for ${name}`, "forbidden");
+  }
   const parsed = tool.schema.parse(args ?? {}) as never;
   return wrapUntrusted(await tool.run(parsed, ctx));
 }

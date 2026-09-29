@@ -32,10 +32,10 @@ Jon's machines (the browser tab that holds the envelope private key, the passwor
 | API Lambda role (or anyone who can change its code) | Drafts and the AI-context copy (it holds `kms:Decrypt` for those two encryption contexts). Can send as Jon. Cannot open sealed bodies or attachments. |
 | LLM provider | The truncated plaintext of messages that were actually submitted, plus the style guide. Bulk, quarantined, PGP, and over-budget mail is not submitted. |
 | Ollama on the tailnet | Same as the LLM provider, but the host is Jon's. |
-| Stolen API token, `read` | The index and draft metadata. No bodies, no draft text, no AI-context text. |
-| Stolen API token, `write` | Also create drafts to known correspondents, label, archive, and queue drafts for approval. Cannot trash, cannot send, cannot mint approval. |
+| Stolen API token, `read` | The index and draft metadata. No bodies, no draft text, no AI-context text, no summaries or action items. This holds even on a local server that has the private key loaded: views include opened text only for `body` or a human session. |
+| Stolen API token, `write` | Also create drafts to known correspondents, label, archive, and queue drafts for approval. Still no message text: thread summaries and action items need `body` as well. Cannot trash, cannot send, cannot mint approval. |
 | Stolen API token, `send` | Nothing more on its own. Sending also needs a one-time approval token that only a human session can mint. |
-| Stolen API token, `body` | The AI-context text of recent mail and draft text. Treat `body` like a read key to recent mail. |
+| Stolen API token, `body` | The AI-context text of recent mail, draft text, action items, and (with `write`) model summaries of threads. Treat `body` like a read key to recent mail. |
 | Stolen human passphrase | Everything the web app can do, including approving sends and full export. It still cannot open sealed bodies without the envelope private key. Rotate it with `npm run passphrase-hash`. |
 | Stolen session signing secret | Can mint human sessions. Rotate the SSM parameter; every session dies. |
 | Stolen envelope private key | Can open every sealed body and attachment, forever. There is no forward secrecy against a later key compromise. |
@@ -166,7 +166,7 @@ Every email is untrusted text. It reaches models in two places: the processor's 
 | Choose draft recipients | No. Recipients come from headers. | Only known correspondents (see below). |
 | Trash or delete | No. | No. `move_message` does not accept `trash`, and the service layer refuses trash for any non-human actor. There is no delete API. |
 | Export the mailbox | No. | Metadata only (`export_mailbox` → `GET /v1/export/index`). Full export is human-only. |
-| Read bodies | Sees the one message it analyzes. | Only with the `body` scope, and only the AI-context text. |
+| Read bodies | Sees the one message it analyzes. | Only with the `body` scope: AI-context text, action items, and thread summaries (summaries also need `write`). |
 | Reorder triage | Priority and labels are advisory, filtered, and capped (see below). | Can label and archive. |
 
 ### Controls
@@ -228,7 +228,7 @@ Tests: `packages/core/src/security.test.ts`, `packages/api/src/security.test.ts`
 
 - Bearer API tokens with scopes `read`, `write`, `send`, `body`, `admin`. MCP tools check the same scopes.
 - Human-only routes: login-derived sessions for approval minting, trash, full export.
-- `POST /v1/search` needs `read`. `POST /v1/threads/:id/summarize` needs `write` (it spends tokens).
+- `POST /v1/search` needs `read`, and only matches body text for callers with `body`. `POST /v1/threads/:id/summarize` needs `write` (it spends tokens) **and** `body` (a summary is message text). `GET /v1/action-items` needs `read` and `body`. The MCP tools `summarize_thread` and `get_action_items` declare the same pairs. Test: `packages/api/src/security.test.ts` → `[P1] API: read and write tokens get no message text`, and `packages/mcp/src/tools.test.ts`.
 - Production boot refuses the well-known dev token values, in the Lambda and in `npm run dev` when `NODE_ENV=production`. The dev server binds `127.0.0.1` unless `LOJO_HOST` says otherwise.
 - The web app has no built-in token. It signs in with the passphrase.
 - CORS origins are an explicit list.

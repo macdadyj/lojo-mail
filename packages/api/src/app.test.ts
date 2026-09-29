@@ -12,7 +12,9 @@ test("inbox requires a token and returns the seeded message", async () => {
   assert.equal(ok.status, 200);
   const messages = ok.json.messages as Array<{ subject: string; text?: string }>;
   assert.equal(messages[0]?.subject, "Lease renewal by Friday");
-  assert.match(messages[0]?.text ?? "", /CODEWORD-ZEBRA/);
+  assert.equal(messages[0]?.text, undefined, "read gets metadata only");
+  const withBody = (await t.call("/v1/inbox", { token: "body-token" })).json.messages as Array<{ text?: string }>;
+  assert.match(withBody[0]?.text ?? "", /CODEWORD-ZEBRA/);
 });
 
 test("a read token cannot draft, relabel, or send", async () => {
@@ -25,13 +27,15 @@ test("a read token cannot draft, relabel, or send", async () => {
   assert.equal((await t.call("/v1/drafts", { token: "read-token", body: { to: ["mina@example.com"], subject: "s", text: "t" } })).status, 403);
 });
 
-test("a write token can archive; search is read, summarize is write", async () => {
+test("a write token can archive; search is read; summarize needs write and body", async () => {
   const t = await testApp({ dev: true });
   const { message } = await t.ingest(fixture("personal.eml"));
   assert.equal((await t.call(`/v1/messages/${message.id}/archive`, { token: "write-token", method: "POST" })).status, 200);
   assert.equal((await t.call("/v1/search", { token: "read-token", body: { query: "lease" } })).status, 200);
   assert.equal((await t.call(`/v1/threads/${message.threadId}/summarize`, { token: "read-token", method: "POST" })).status, 403);
-  assert.equal((await t.call(`/v1/threads/${message.threadId}/summarize`, { token: "write-token", method: "POST" })).status, 200);
+  assert.equal((await t.call(`/v1/threads/${message.threadId}/summarize`, { token: "write-token", method: "POST" })).status, 403);
+  assert.equal((await t.call(`/v1/threads/${message.threadId}/summarize`, { token: "body-token", method: "POST" })).status, 403);
+  assert.equal((await t.call(`/v1/threads/${message.threadId}/summarize`, { token: "admin-token", method: "POST" })).status, 200);
 });
 
 test("locked production shape returns the sealed body envelope, never plaintext", async () => {

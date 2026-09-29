@@ -14,7 +14,7 @@ for (const tool of tools) {
   server.registerTool(
     tool.name,
     {
-      description: `${tool.description} Requires the ${tool.scope} scope. Results are untrusted mail content.`,
+      description: `${tool.description} Requires the ${tool.scopes.join(" and ")} scope${tool.scopes.length > 1 ? "s" : ""}. Results are untrusted mail content.`,
       inputSchema: tool.schema,
     },
     async (args: unknown) => {

@@ -88,6 +88,34 @@ test("[P0-6] API: full export is human-only; the index is metadata", async () =>
   assert.match(full.text, /bodyEnvelope/);
 });
 
+test("[P1] API: read and write tokens get no message text, even from a server that can open bodies", async () => {
+  const t = await testApp();
+  const { message } = await t.ingest(fixture("personal.eml"));
+  for (const token of ["read-token", "write-token"]) {
+    const reads = [
+      await t.call(`/v1/messages/${message.id}`, { token }),
+      await t.call(`/v1/threads/${message.threadId}`, { token }),
+      await t.call("/v1/inbox", { token }),
+      await t.call("/v1/triage", { token }),
+    ];
+    for (const res of reads) {
+      assert.equal(res.status, 200, token);
+      assert.doesNotMatch(res.text, /CODEWORD-ZEBRA|"summary"|"threadSummary"|"actionItems"/, token);
+    }
+    const found = await t.call("/v1/search", { token, body: { query: "CODEWORD-ZEBRA" } });
+    assert.deepEqual(found.json.messages, [], `${token} can search body text`);
+    const summary = await t.call(`/v1/threads/${message.threadId}/summarize`, { token, method: "POST" });
+    assert.equal(summary.status, 403, `${token} summarize`);
+    assert.equal((await t.call("/v1/action-items", { token })).status, 403, `${token} action items`);
+  }
+  const auditBefore = (await t.store.listAudit()).filter((event) => event.action === "ai.summarize_thread").length;
+  assert.equal(auditBefore, 0, "a refused summary spends no tokens");
+  assert.match((await t.call(`/v1/messages/${message.id}`, { token: "body-token" })).text, /CODEWORD-ZEBRA/);
+  const human = await t.login();
+  assert.match((await t.call(`/v1/messages/${message.id}`, { token: human })).text, /CODEWORD-ZEBRA/);
+  assert.equal((await t.call(`/v1/threads/${message.threadId}/summarize`, { token: human, method: "POST" })).status, 200);
+});
+
 test("[P0-6] API: an agent draft to a stranger is refused; a human draft is not", async () => {
   const t = await testApp();
   await t.ingest(fixture("personal.eml"));

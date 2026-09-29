@@ -115,7 +115,8 @@ test("Jon's sent copy joins the thread and keyword search needs the key for body
   assert.equal(sealed[0]?.locked, true);
   assert.equal(sealed[0]?.text, undefined);
   assert.equal((await locked.mailbox.search("CODEWORD-ZEBRA")).length, 0);
-  const found = await w.mailbox.search("CODEWORD-ZEBRA");
+  assert.equal((await w.mailbox.search("CODEWORD-ZEBRA")).length, 0, "body terms need withBody");
+  const found = await w.mailbox.search("CODEWORD-ZEBRA", "keyword", { withBody: true });
   assert.equal(found.length, 1);
   assert.equal(found[0]?.locked, false);
 });

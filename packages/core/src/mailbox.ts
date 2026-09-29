@@ -66,6 +66,11 @@ export interface MailboxDeps {
 export interface ViewOptions {
   /** Include the server-readable AI-context text. Callers must hold the `body` scope. */
   withContext?: boolean;
+  /**
+   * Include body text and the sealed AI output when this process can open them
+   * (local dev with the key loaded). Callers must hold the `body` scope.
+   */
+  withBody?: boolean;
 }
 
 export interface DraftInput {
@@ -257,7 +262,7 @@ export class Mailbox {
   }
 
   async present(message: StoredMessage, opts: ViewOptions = {}): Promise<MessageView> {
-    const opened = await this.openMessage(message);
+    const opened = opts.withBody ? await this.openMessage(message) : null;
     const context = opts.withContext ? await this.contextText(message) : null;
     return viewOf(message, opened, context);
   }
@@ -281,12 +286,12 @@ export class Mailbox {
     return { meta, bytes: await openBytes(envelope, this.deps.privateJwk, attachmentContext(messageId, attachmentId)) };
   }
 
-  async listInbox(limit = 50): Promise<MessageView[]> {
+  async listInbox(limit = 50, opts: ViewOptions = {}): Promise<MessageView[]> {
     const messages = await this.deps.store.listMessages({ folder: "inbox", limit });
-    return Promise.all(messages.map((message) => this.present(message)));
+    return Promise.all(messages.map((message) => this.present(message, opts)));
   }
 
-  async triage(limit = 50): Promise<MessageView[]> {
+  async triage(limit = 50, opts: ViewOptions = {}): Promise<MessageView[]> {
     const messages = await this.deps.store.listMessages({ folder: "inbox", limit: 200 });
     const ranked = messages.filter((message) => {
       const priority = message.ai?.priority;
@@ -303,7 +308,7 @@ export class Mailbox {
       if (ap !== bp) return ap - bp;
       return a.date < b.date ? 1 : -1;
     });
-    return Promise.all(ranked.slice(0, limit).map((message) => this.present(message)));
+    return Promise.all(ranked.slice(0, limit).map((message) => this.present(message, opts)));
   }
 
   async readThread(threadId: string, opts: ViewOptions = {}): Promise<{ thread: Thread; messages: MessageView[] }> {
@@ -339,7 +344,7 @@ export class Mailbox {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     const hits: StoredMessage[] = [];
     for (const message of messages) {
-      const opened = await this.openMessage(message);
+      const opened = opts.withBody ? await this.openMessage(message) : null;
       const context = opts.withContext && !opened ? await this.contextText(message) : null;
       const haystack = [
         message.subject,
@@ -749,7 +754,7 @@ export class Mailbox {
     const messages = await this.deps.store.listMessages({ limit: 100_000 });
     const rows = [];
     for (const message of messages) {
-      rows.push({ ...(await this.present(message)), bodyEnvelope: await this.bodyEnvelope(message) });
+      rows.push({ ...(await this.present(message, { withBody: true })), bodyEnvelope: await this.bodyEnvelope(message) });
     }
     return JSON.stringify({ exportedAt: this.now().toISOString(), mailbox: this.deps.config.mailbox, messages: rows }, null, 2);
   }

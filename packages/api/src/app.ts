@@ -1,4 +1,4 @@
-import { FOLDERS, MailError, type Actor, type Folder, type Mailbox, type PgpMode, type ReviewedDraft } from "@lojo/core";
+import { FOLDERS, MailError, type Actor, type Folder, type Mailbox, type PgpMode, type ReviewedDraft, type ViewOptions } from "@lojo/core";
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
@@ -83,6 +83,11 @@ function requireBodyScope(c: Context<Env>, wanted: boolean): boolean {
   return wanted;
 }
 
+/** Views never carry body text or sealed AI output for a caller without `body`, even where the server could open them. */
+function views(c: Context<Env>, withContext = false): ViewOptions {
+  return { withContext: requireBodyScope(c, withContext), withBody: canReadText(c.get("principal")) };
+}
+
 function strings(value: unknown, field: string): string[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
@@ -141,17 +146,16 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ kind, label, scopes });
   });
 
-  app.get("/v1/inbox", need("read"), async (c) => c.json({ messages: await mailbox.listInbox() }));
-  app.get("/v1/triage", need("read"), async (c) => c.json({ messages: await mailbox.triage() }));
-  app.get("/v1/threads/:id", need("read"), async (c) => {
-    const withContext = requireBodyScope(c, wantsFlag(c, "context"));
-    return c.json(await mailbox.readThread(c.req.param("id"), { withContext }));
-  });
-  app.post("/v1/threads/:id/summarize", need("write"), async (c) => c.json({ summary: await mailbox.summarizeThread(c.req.param("id")) }));
-  app.get("/v1/messages/:id", need("read"), async (c) => {
-    const withContext = requireBodyScope(c, wantsFlag(c, "context"));
-    return c.json(await mailbox.present(await mailbox.getMessage(c.req.param("id")), { withContext }));
-  });
+  app.get("/v1/inbox", need("read"), async (c) => c.json({ messages: await mailbox.listInbox(50, views(c)) }));
+  app.get("/v1/triage", need("read"), async (c) => c.json({ messages: await mailbox.triage(50, views(c)) }));
+  app.get("/v1/threads/:id", need("read"), async (c) => c.json(await mailbox.readThread(c.req.param("id"), views(c, wantsFlag(c, "context")))));
+  /** A summary is message text, so it needs `body`; `write` because it spends tokens. */
+  app.post("/v1/threads/:id/summarize", need("write"), need("body"), async (c) =>
+    c.json({ summary: await mailbox.summarizeThread(c.req.param("id")) }),
+  );
+  app.get("/v1/messages/:id", need("read"), async (c) =>
+    c.json(await mailbox.present(await mailbox.getMessage(c.req.param("id")), views(c, wantsFlag(c, "context")))),
+  );
   app.get("/v1/messages/:id/body", need("read"), async (c) => {
     const message = await mailbox.getMessage(c.req.param("id"));
     return c.json({ id: message.id, envelope: await mailbox.bodyEnvelope(message) });
@@ -170,9 +174,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/v1/search", need("read"), async (c) => {
     const input = await body<{ query: string; mode: "keyword" | "semantic"; context: boolean }>(c);
     if (typeof input.query !== "string" || !input.query) throw new MailError("query is required", "invalid");
-    const withContext = requireBodyScope(c, input.context === true);
     const mode = input.mode === "semantic" ? "semantic" : "keyword";
-    return c.json({ messages: await mailbox.search(input.query, mode, { withContext }) });
+    return c.json({ messages: await mailbox.search(input.query, mode, views(c, input.context === true)) });
   });
 
   app.get("/v1/drafts", need("read"), async (c) => {
@@ -268,7 +271,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const input = await body<{ folder: Folder }>(c);
     return c.json(await mailbox.move(c.req.param("id"), folder(input.folder), actorOf(c.get("principal"))));
   });
-  app.get("/v1/action-items", need("read"), async (c) => c.json({ items: await mailbox.actionItems() }));
+  app.get("/v1/action-items", need("read"), need("body"), async (c) => c.json({ items: await mailbox.actionItems() }));
   app.get("/v1/export/index", need("read"), async (c) => c.json(await mailbox.exportIndex()));
   app.get("/v1/export", need("human"), async (c) => c.body(await mailbox.exportAll(), 200, { "content-type": "application/json" }));
   app.get("/v1/audit", need("read"), async (c) => c.json({ events: await mailbox.listAudit() }));
