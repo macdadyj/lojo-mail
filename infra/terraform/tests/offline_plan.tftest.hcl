@@ -180,8 +180,8 @@ run "defaults_adopt_existing_identity_and_write_no_dns" {
   }
 
   assert {
-    condition     = toset(aws_ses_receipt_rule.store.recipients) == toset(["lojo@cyberphysical.us", "dmarc@cyberphysical.us"])
-    error_message = "receipt rule must name only lojo@ and dmarc@"
+    condition     = toset(aws_ses_receipt_rule.store.recipients) == toset(["lojo-test@cyberphysical.us"])
+    error_message = "a first deploy (receiving_stage = test) must accept only the test address, never real mail"
   }
 
   assert {
@@ -218,6 +218,34 @@ run "active_rule_set_defaults_on_as_security_md_says" {
     condition     = strcontains(file("${path.module}/../../docs/SECURITY.md"), "Receipt rule set activation defaults ON")
     error_message = "SECURITY.md must say that manage_active_rule_set defaults on"
   }
+}
+
+run "live_stage_accepts_the_mailbox_and_dmarc_only" {
+  command = plan
+
+  variables {
+    receiving_stage = "live"
+  }
+
+  assert {
+    condition     = toset(aws_ses_receipt_rule.store.recipients) == toset(["lojo@cyberphysical.us", "dmarc@cyberphysical.us"])
+    error_message = "receipt rule must name only lojo@ and dmarc@ once live"
+  }
+
+  assert {
+    condition     = aws_ses_receipt_rule.store.tls_policy == "Require" && aws_ses_receipt_rule.store.scan_enabled
+    error_message = "going live must not change TLS or scanning"
+  }
+}
+
+run "test_address_cannot_be_the_mailbox" {
+  command = plan
+
+  variables {
+    receiving_test_local_part = "lojo"
+  }
+
+  expect_failures = [var.receiving_test_local_part]
 }
 
 # ---------------------------------------------------------------------------

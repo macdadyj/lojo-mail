@@ -121,7 +121,7 @@ terraform apply
 
 Before apply, set `processor_bundle = "../../packages/pipeline/dist/processor.mjs"` and `api_bundle = "../../packages/api/dist/api.mjs"` in `terraform.tfvars`. Terraform zips them. The default placeholders throw a clear error. `npm run bundles:check` imports both bundles and fails if either crashes at load.
 
-The receipt rule accepts `lojo@cyberphysical.us` and `dmarc@cyberphysical.us` only. Other local parts at the domain still have no rule, so SES will not store them. That is deliberate.
+The first apply runs with `receiving_stage = "test"`. Its receipt rule accepts only `lojo-test@cyberphysical.us`, so real mail is untouched until the live checklist in [DEPLOY.md](DEPLOY.md) passes. Then `receiving_stage = "live"` switches the rule to `lojo@cyberphysical.us` and `dmarc@cyberphysical.us` only. Other local parts at the domain never have a rule, so SES does not store them. That is deliberate.
 
 Before apply, confirm again that no receipt rule set is active in us-east-1 (`aws ses describe-active-receipt-rule-set --region us-east-1`). The audit found none. If one appeared, set `manage_active_rule_set = false` and add a rule to the existing set instead. Activating this set replaces the only active set in the region.
 
@@ -208,7 +208,9 @@ Then `terraform apply`.
 
 ### First test email
 
-SES writes an `AMAZON_SES_SETUP_NOTIFICATION` object when the rule is created. The processor skips it; that is expected. Then send a short message from an outside account to `lojo@cyberphysical.us` and check each hop:
+Follow [DEPLOY.md](DEPLOY.md) for the first deploy. It sends a test message to `lojo-test@` and checks every hop before real mail is switched on. The commands below are the short version, useful again later.
+
+SES writes an `AMAZON_SES_SETUP_NOTIFICATION` object when the rule is created. The processor skips it; that is expected. Then send a short message from an outside account to the address the rule accepts (`terraform output receiving`) and check each hop:
 
 ```bash
 cd infra/terraform

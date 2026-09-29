@@ -12,6 +12,7 @@ Nothing in this repo deploys itself. Terraform plans; it does not apply. There a
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model, including what is not end-to-end |
 | [docs/COSTS.md](docs/COSTS.md) | Monthly estimate (about $2 on Ollama, a few dollars more on Grok) |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | Exact steps Jon runs: parameters, apply, first test email, DLQ redrive, rollback |
+| [docs/DEPLOY.md](docs/DEPLOY.md) | First-deploy live test: a test message to a test address through SES, the encrypted bucket, and the processor, before real mail is switched on |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | Leaving Tuta (`lojo@tuta.io`) without IMAP, locally or straight into AWS |
 | [qa/REVIEW_REPORT.md](qa/REVIEW_REPORT.md) | Independent pre-deploy review, with evidence and screenshots under `qa/` |
 

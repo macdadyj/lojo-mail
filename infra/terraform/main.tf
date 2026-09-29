@@ -1,11 +1,13 @@
 data "aws_caller_identity" "current" {}
 
 locals {
-  account_id       = data.aws_caller_identity.current.account_id
-  mailbox          = "${var.local_part}@${var.domain}"
-  dmarc_mailbox    = "${var.dmarc_rua_local_part}@${var.domain}"
-  mail_from_domain = "${var.mail_from_subdomain}.${var.domain}"
-  name             = var.project
+  account_id         = data.aws_caller_identity.current.account_id
+  mailbox            = "${var.local_part}@${var.domain}"
+  dmarc_mailbox      = "${var.dmarc_rua_local_part}@${var.domain}"
+  test_mailbox       = "${var.receiving_test_local_part}@${var.domain}"
+  receipt_recipients = var.receiving_stage == "live" ? [local.mailbox, local.dmarc_mailbox] : [local.test_mailbox]
+  mail_from_domain   = "${var.mail_from_subdomain}.${var.domain}"
+  name               = var.project
 
   processor_bundle = var.processor_bundle != "" ? var.processor_bundle : "${path.module}/placeholders/processor.mjs"
   api_bundle       = var.api_bundle != "" ? var.api_bundle : "${path.module}/placeholders/api.mjs"

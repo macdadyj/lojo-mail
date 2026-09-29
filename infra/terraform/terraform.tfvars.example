@@ -13,6 +13,11 @@ dns_cutover_confirmation = ""
 zone_id                  = ""
 manage_active_rule_set   = true
 
+# First deploy: only lojo-test@ is accepted, so the live checklist in
+# docs/DEPLOY.md runs before real mail. Set "live" when it passes.
+receiving_stage           = "test"
+receiving_test_local_part = "lojo-test"
+
 llm_provider       = "grok"
 daily_token_budget = 100000
 

@@ -11,6 +11,14 @@ output "web_blob_origin" {
   value       = "https://${aws_s3_bucket.mail.bucket}.s3.${var.aws_region}.amazonaws.com"
 }
 
+output "receiving" {
+  description = "Addresses the receipt rule accepts now."
+  value = {
+    stage      = var.receiving_stage
+    recipients = local.receipt_recipients
+  }
+}
+
 output "kms_key_arn" {
   value = aws_kms_key.mail.arn
 }

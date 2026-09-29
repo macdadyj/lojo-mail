@@ -59,7 +59,7 @@ resource "aws_ses_receipt_rule_set" "main" {
 resource "aws_ses_receipt_rule" "store" {
   name          = "store-raw"
   rule_set_name = aws_ses_receipt_rule_set.main.rule_set_name
-  recipients    = [local.mailbox, local.dmarc_mailbox]
+  recipients    = local.receipt_recipients
   enabled       = true
   scan_enabled  = true
   tls_policy    = "Require"

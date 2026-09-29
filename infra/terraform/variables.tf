@@ -31,6 +31,28 @@ variable "local_part" {
   }
 }
 
+variable "receiving_stage" {
+  type        = string
+  description = "test: the receipt rule accepts only receiving_test_local_part, so the first deploy can be checked end to end while real mail is untouched. live: it accepts the mailbox and the DMARC address. Switch to live only after the docs/DEPLOY.md checklist passes."
+  default     = "test"
+
+  validation {
+    condition     = contains(["test", "live"], var.receiving_stage)
+    error_message = "receiving_stage must be test or live."
+  }
+}
+
+variable "receiving_test_local_part" {
+  type        = string
+  description = "Local part the receipt rule accepts while receiving_stage is test."
+  default     = "lojo-test"
+
+  validation {
+    condition     = can(regex("^[a-z0-9._+-]+$", var.receiving_test_local_part)) && var.receiving_test_local_part != var.local_part
+    error_message = "receiving_test_local_part must be a simple mailbox name, different from local_part."
+  }
+}
+
 variable "mail_from_subdomain" {
   type        = string
   description = "Custom MAIL FROM subdomain label. The FQDN is <label>.<domain> and it must have exactly one MX."
@@ -106,7 +128,7 @@ variable "zone_id" {
 
 variable "manage_active_rule_set" {
   type        = bool
-  description = "When true, make this receipt rule set the active one for the region. A region has only one active set. A read-only audit found none active, so the default turns receiving on for the mailbox. Re-check before apply. Setting this back to false removes the active association and stops all SES receiving in the region."
+  description = "When true, make this receipt rule set the active one for the region. A region has only one active set. A read-only audit found none active, so the default turns receiving on for the addresses that receiving_stage selects. Re-check before apply. Setting this back to false removes the active association and stops all SES receiving in the region."
   default     = true
 }
 
