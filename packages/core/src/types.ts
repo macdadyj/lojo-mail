@@ -8,6 +8,12 @@ export type Priority = "now" | "today" | "later" | "noise";
 
 export type LlmProviderName = "grok" | "bedrock" | "ollama" | "mock";
 
+/** Where a message came from. Decides its folder; headers never do. */
+export type MessageOrigin = "inbound" | "sent" | "import";
+
+/** Who is acting on the mailbox. Agents are default-deny for destructive actions. */
+export type Actor = "human" | "agent";
+
 export interface Address {
   name?: string;
   email: string;
@@ -18,6 +24,10 @@ export interface AttachmentMeta {
   filename: string;
   contentType: string;
   size: number;
+}
+
+export interface StoredAttachment extends AttachmentMeta {
+  blobKey: string;
 }
 
 export interface EcPublicJwk {
@@ -34,9 +44,21 @@ export interface EcPrivateJwk extends EcPublicJwk {
 }
 
 export interface EnvelopeBlob {
-  v: 1;
+  v: 2;
   alg: "P-256-ECDH+HKDF-SHA256+AES-256-GCM";
   epk: EcPublicJwk;
+  iv: string;
+  ct: string;
+}
+
+export type EncryptionContext = Record<string, string>;
+
+/** AES-256-GCM under a data key that a KeyWrapper (KMS in AWS) wraps for one encryption context. */
+export interface ServerSealedBlob {
+  v: 1;
+  alg: "AES-256-GCM+wrapped-data-key";
+  ctx: EncryptionContext;
+  wrappedKey: string;
   iv: string;
   ct: string;
 }
@@ -46,25 +68,24 @@ export interface ActionItem {
   deadline: string | null;
 }
 
+export interface SensitiveAi {
+  summary: string;
+  threadSummary: string;
+  actionItems: ActionItem[];
+  draftReply: string;
+  phishingReasons: string[];
+  unsubscribeUrl?: string;
+  unsubscribeMailto?: string;
+}
+
+/** Sealed to Jon's envelope key at `objects/{id}.bin`. Attachments are sealed separately. */
 export interface SealedBody {
   text: string;
   html: string;
-  attachments: Array<{
-    id: string;
-    filename: string;
-    contentType: string;
-    bytesB64: string;
-  }>;
-  ai: {
-    summary: string;
-    threadSummary: string;
-    actionItems: ActionItem[];
-    draftReply: string;
-    phishingReasons: string[];
-    unsubscribeUrl?: string;
-    unsubscribeMailto?: string;
-  } | null;
+  ai: SensitiveAi | null;
 }
+
+export type SkipReason = "bulk" | "budget" | "pgp" | "error" | "disabled" | "quarantined" | "dmarc-report" | "sent";
 
 export interface AiPublic {
   category: Category;
@@ -73,11 +94,22 @@ export interface AiPublic {
   labels: string[];
   unsubscribeDetected: boolean;
   skipped: boolean;
-  skipReason?: "bulk" | "budget" | "pgp" | "error" | "disabled";
+  skipReason?: SkipReason;
+}
+
+/** SES receipt verdicts and the topmost amazonses.com Authentication-Results. */
+export interface Verdicts {
+  spam?: string;
+  virus?: string;
+  spf?: string;
+  dkim?: string;
+  dmarc?: string;
 }
 
 export interface StoredMessage {
   id: string;
+  deliveryId: string;
+  origin: MessageOrigin;
   rfcMessageId: string;
   threadId: string;
   folder: Folder;
@@ -90,15 +122,16 @@ export interface StoredMessage {
   snippet: string;
   unread: boolean;
   labels: string[];
-  attachments: AttachmentMeta[];
+  attachments: StoredAttachment[];
   inReplyTo?: string;
   references: string[];
   bulk: boolean;
   pgpEncrypted: boolean;
-  envelope: EnvelopeBlob;
+  verdicts?: Verdicts;
+  bodyKey: string;
+  aiContextKey?: string;
   ai: AiPublic | null;
   embedding: number[] | null;
-  rawKey?: string;
   createdAt: string;
 }
 
@@ -113,21 +146,33 @@ export interface Thread {
   priority?: Priority;
 }
 
-export type DraftStatus = "suggested" | "edited" | "sent" | "discarded";
+export type DraftStatus = "suggested" | "edited" | "pending_approval" | "sending" | "sent" | "discarded";
+
+export type DraftOrigin = "human" | "agent" | "ai";
+
+export type PgpMode = "auto" | "off";
 
 export interface Draft {
   id: string;
   threadId?: string;
   inReplyTo?: string;
+  references?: string[];
   to: Address[];
   cc: Address[];
   subject: string;
   status: DraftStatus;
+  origin: DraftOrigin;
   aiGenerated: boolean;
-  envelope: EnvelopeBlob;
+  pgp: PgpMode;
+  /** Draft text, sealed with a KMS data key under `{ purpose: "draft", draftId }`. */
+  sealed: ServerSealedBlob;
   createdAt: string;
   updatedAt: string;
   sentMessageId?: string;
+  approvalTokenHash?: string;
+  approvalContentHash?: string;
+  approvalExpiresAt?: string;
+  approvalUsedAt?: string;
 }
 
 export interface AuditEvent {
@@ -164,7 +209,6 @@ export interface MessagePatch {
   labels?: string[];
   ai?: AiPublic | null;
   embedding?: number[] | null;
-  envelope?: EnvelopeBlob;
   threadId?: string;
 }
 
@@ -173,11 +217,14 @@ export interface LojoConfig {
   localPart: string;
   region: string;
   mailbox: string;
+  dmarcMailbox: string;
   llmProvider: LlmProviderName;
   dailyTokenBudget: number;
   maxBodyChars: number;
   skipBulk: boolean;
   snippetInClear: boolean;
+  /** Days to keep the KMS-sealed AI-context copy of inbound text. 0 disables it. */
+  aiContextDays: number;
   grokBaseUrl: string;
   grokModel: string;
   bedrockModelId: string;
@@ -191,6 +238,7 @@ export interface MessageView {
   id: string;
   threadId: string;
   folder: Folder;
+  origin: MessageOrigin;
   from: Address;
   to: Address[];
   cc: Address[];
@@ -202,7 +250,9 @@ export interface MessageView {
   attachments: AttachmentMeta[];
   bulk: boolean;
   pgpEncrypted: boolean;
+  verdicts?: Verdicts;
   ai: AiPublic | null;
+  /** True when the server cannot open the body. The browser fetches `/v1/messages/:id/body` and opens it locally. */
   locked: boolean;
   text?: string;
   html?: string;
@@ -211,6 +261,11 @@ export interface MessageView {
   actionItems?: ActionItem[];
   draftReply?: string;
   phishingReasons?: string[];
-  /** Present when the server cannot open the body. The browser opens it with the private key. */
-  envelope?: EnvelopeBlob;
+  /** Server-readable AI-context text. Only returned to principals with the `body` scope. */
+  contextText?: string;
+}
+
+export interface DraftView {
+  draft: Omit<Draft, "sealed" | "approvalTokenHash">;
+  text: string | null;
 }

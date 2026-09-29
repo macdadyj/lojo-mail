@@ -1,6 +1,6 @@
 import { simpleParser, type AddressObject, type ParsedMail } from "mailparser";
-import { newId, normalizeMessageId, sha256 } from "../ids.ts";
-import type { Address } from "../types.ts";
+import { normalizeMessageId, sha256 } from "../ids.ts";
+import type { Address, Verdicts } from "../types.ts";
 import { htmlToText } from "./html.ts";
 
 export interface ParsedAttachment {
@@ -29,6 +29,7 @@ export interface ParsedInbound {
   autoSubmitted?: string;
   attachments: ParsedAttachment[];
   pgpEncrypted: boolean;
+  verdicts: Verdicts;
 }
 
 function asAddressList(value: AddressObject | AddressObject[] | undefined): Address[] {
@@ -61,9 +62,55 @@ function referenceList(value: string | string[] | undefined): string[] {
 }
 
 function looksLikePgp(parsed: ParsedInbound, contentType: string): boolean {
-  if (/multipart\/encrypted|application\/pgp-encrypted|application\/pgp-signature/i.test(contentType)) return true;
+  if (/multipart\/encrypted|application\/pgp-encrypted/i.test(contentType)) return true;
   if (parsed.text.includes("-----BEGIN PGP MESSAGE-----")) return true;
-  return parsed.attachments.some((item) => /pgp/i.test(item.contentType) || /pgp/i.test(item.filename));
+  return parsed.attachments.some((item) => /application\/pgp-encrypted/i.test(item.contentType));
+}
+
+/** Header lines in order, unfolded, from the top of the raw message. */
+export function rawHeaders(buffer: Buffer): Array<[string, string]> {
+  const text = buffer.subarray(0, Math.min(buffer.length, 256 * 1024)).toString("latin1");
+  const end = text.search(/\r?\n\r?\n/);
+  const block = end >= 0 ? text.slice(0, end) : text;
+  const out: Array<[string, string]> = [];
+  for (const line of block.split(/\r?\n/)) {
+    if (/^[ \t]/.test(line) && out.length > 0) {
+      const last = out[out.length - 1];
+      if (last) last[1] = `${last[1]} ${line.trim()}`;
+      continue;
+    }
+    const colon = line.indexOf(":");
+    if (colon <= 0) continue;
+    out.push([line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()]);
+  }
+  return out;
+}
+
+function authResult(value: string, method: string): string | undefined {
+  return value.match(new RegExp(`\\b${method}=([a-z]+)`, "i"))?.[1]?.toLowerCase();
+}
+
+/**
+ * SES prepends its verdicts, so the topmost occurrence is the one SES wrote.
+ * Anything lower down could have been supplied by the sender.
+ */
+export function sesVerdicts(headers: Array<[string, string]>): Verdicts {
+  const verdicts: Verdicts = {};
+  const first = (name: string) => headers.find(([key]) => key === name)?.[1];
+  const spam = first("x-ses-spam-verdict");
+  if (spam) verdicts.spam = spam.trim().toUpperCase();
+  const virus = first("x-ses-virus-verdict");
+  if (virus) verdicts.virus = virus.trim().toUpperCase();
+  const auth = headers.find(([key, value]) => key === "authentication-results" && /^amazonses\.com\s*;/i.test(value))?.[1];
+  if (auth) {
+    const spf = authResult(auth, "spf");
+    const dkim = authResult(auth, "dkim");
+    const dmarc = authResult(auth, "dmarc");
+    if (spf) verdicts.spf = spf;
+    if (dkim) verdicts.dkim = dkim;
+    if (dmarc) verdicts.dmarc = dmarc;
+  }
+  return verdicts;
 }
 
 export async function parseMime(raw: Buffer | string): Promise<ParsedInbound> {
@@ -76,10 +123,10 @@ export async function parseMime(raw: Buffer | string): Promise<ParsedInbound> {
   const inReplyToRaw = headerString(parsed, "in-reply-to");
   const fromList = asAddressList(parsed.from);
   const from = fromList[0] ?? { email: "unknown@invalid" };
-  const attachments: ParsedAttachment[] = (parsed.attachments ?? []).map((item) => {
+  const attachments: ParsedAttachment[] = (parsed.attachments ?? []).map((item, index) => {
     const bytes = new Uint8Array(item.content);
     return {
-      id: newId("att"),
+      id: `att${index + 1}`,
       filename: item.filename ?? "attachment",
       contentType: item.contentType || "application/octet-stream",
       size: item.size ?? bytes.byteLength,
@@ -98,6 +145,7 @@ export async function parseMime(raw: Buffer | string): Promise<ParsedInbound> {
     references,
     attachments,
     pgpEncrypted: false,
+    verdicts: sesVerdicts(rawHeaders(buffer)),
   };
   if (inReplyToRaw) message.inReplyTo = normalizeMessageId(inReplyToRaw.split(/\s+/)[0] ?? inReplyToRaw);
   const replyTo = asAddressList(parsed.replyTo)[0];

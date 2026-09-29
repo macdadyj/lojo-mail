@@ -17,9 +17,9 @@ test("WKD local-part hash is stable z-base32 of SHA-1", () => {
 
 test("openpgp encrypts for a recipient key", async () => {
   const recipient = await generateTestKey("ada@example.com", "test-pass");
-  const armored = await encryptText("see you thursday", recipient.publicKey);
+  const armored = await encryptText("see you thursday", [recipient.publicKey]);
   assert.match(armored, /BEGIN PGP MESSAGE/);
   assert.equal(armored.includes("see you thursday"), false);
   const plain = await decryptText(armored, recipient.privateKey, "test-pass");
-  assert.equal(plain, "see you thursday");
+  assert.equal(plain.text, "see you thursday");
 });

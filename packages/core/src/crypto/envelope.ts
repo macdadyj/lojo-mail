@@ -7,6 +7,15 @@ const ECDH: EcKeyGenParams = { name: "ECDH", namedCurve: "P-256" };
 
 export const ENVELOPE_ALG = "P-256-ECDH+HKDF-SHA256+AES-256-GCM" as const;
 
+/** AAD for a message body. Binds the ciphertext to the message it belongs to. */
+export function messageBodyContext(messageId: string): string {
+  return `lojo-mail:message:${messageId}:body`;
+}
+
+export function attachmentContext(messageId: string, attachmentId: string): string {
+  return `lojo-mail:message:${messageId}:attachment:${attachmentId}`;
+}
+
 export function bytesToB64(bytes: Uint8Array): string {
   let binary = "";
   const step = 0x8000;
@@ -55,16 +64,24 @@ async function aesKeyFromShared(shared: ArrayBuffer, usage: "encrypt" | "decrypt
   );
 }
 
-export async function sealBytes(plaintext: Uint8Array, publicJwk: EcPublicJwk): Promise<EnvelopeBlob> {
+function requireContext(context: string): Uint8Array {
+  if (!context) throw new Error("Envelope context is required");
+  return new TextEncoder().encode(context);
+}
+
+export async function sealBytes(plaintext: Uint8Array, publicJwk: EcPublicJwk, context: string): Promise<EnvelopeBlob> {
+  const aad = requireContext(context);
   const recipient = await importPublic(publicJwk);
   const ephemeral = await crypto.subtle.generateKey(ECDH, true, ["deriveBits"]);
   const shared = await crypto.subtle.deriveBits({ name: "ECDH", public: recipient }, ephemeral.privateKey, 256);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const aes = await aesKeyFromShared(shared, "encrypt");
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aes, plaintext as BufferSource));
+  const ct = new Uint8Array(
+    await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad as BufferSource }, aes, plaintext as BufferSource),
+  );
   const epk = (await crypto.subtle.exportKey("jwk", ephemeral.publicKey)) as EcPublicJwk;
   return {
-    v: 1,
+    v: 2,
     alg: ENVELOPE_ALG,
     epk: { kty: "EC", crv: "P-256", x: epk.x, y: epk.y },
     iv: bytesToB64(iv),
@@ -72,9 +89,10 @@ export async function sealBytes(plaintext: Uint8Array, publicJwk: EcPublicJwk): 
   };
 }
 
-export async function openBytes(blob: EnvelopeBlob, privateJwk: EcPrivateJwk): Promise<Uint8Array> {
-  if (blob.v !== 1 || blob.alg !== ENVELOPE_ALG) {
-    throw new Error(`Unsupported envelope ${blob.v} ${blob.alg}`);
+export async function openBytes(blob: EnvelopeBlob, privateJwk: EcPrivateJwk, context: string): Promise<Uint8Array> {
+  const aad = requireContext(context);
+  if (blob.v !== 2 || blob.alg !== ENVELOPE_ALG) {
+    throw new Error(`Unsupported envelope ${String(blob.v)} ${String(blob.alg)}`);
   }
   const privateKey = await importPrivate(privateJwk);
   const epk = await importPublic(blob.epk);
@@ -82,16 +100,28 @@ export async function openBytes(blob: EnvelopeBlob, privateJwk: EcPrivateJwk): P
   const aes = await aesKeyFromShared(shared, "decrypt");
   const iv = b64ToBytes(blob.iv);
   const ct = b64ToBytes(blob.ct);
-  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource }, aes, ct as BufferSource);
+  const plain = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: iv as BufferSource, additionalData: aad as BufferSource },
+    aes,
+    ct as BufferSource,
+  );
   return new Uint8Array(plain);
 }
 
-export async function sealJson(value: unknown, publicJwk: EcPublicJwk): Promise<EnvelopeBlob> {
+export async function sealJson(value: unknown, publicJwk: EcPublicJwk, context: string): Promise<EnvelopeBlob> {
   const encoded = new TextEncoder().encode(JSON.stringify(value));
-  return sealBytes(encoded, publicJwk);
+  return sealBytes(encoded, publicJwk, context);
 }
 
-export async function openJson<T>(blob: EnvelopeBlob, privateJwk: EcPrivateJwk): Promise<T> {
-  const plain = await openBytes(blob, privateJwk);
+export async function openJson<T>(blob: EnvelopeBlob, privateJwk: EcPrivateJwk, context: string): Promise<T> {
+  const plain = await openBytes(blob, privateJwk, context);
   return JSON.parse(new TextDecoder().decode(plain)) as T;
+}
+
+export function encodeEnvelope(blob: EnvelopeBlob): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(blob));
+}
+
+export function decodeEnvelope(bytes: Uint8Array): EnvelopeBlob {
+  return JSON.parse(new TextDecoder().decode(bytes)) as EnvelopeBlob;
 }

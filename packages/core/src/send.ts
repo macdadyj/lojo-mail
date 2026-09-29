@@ -7,6 +7,8 @@ export interface OutboundMessage {
   subject: string;
   text: string;
   html?: string;
+  inReplyTo?: string;
+  references?: string[];
   /** Set when the body was OpenPGP-encrypted before handoff to SES. */
   armored?: string;
 }
@@ -17,8 +19,13 @@ export interface MailSender {
 
 export class MemorySender implements MailSender {
   readonly sent: OutboundMessage[] = [];
+  failNext = false;
 
   async send(message: OutboundMessage): Promise<{ messageId: string }> {
+    if (this.failNext) {
+      this.failNext = false;
+      throw new Error("MessageRejected: simulated SES failure");
+    }
     this.sent.push(message);
     return { messageId: `local-${this.sent.length}@memory` };
   }

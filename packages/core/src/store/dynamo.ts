@@ -1,14 +1,20 @@
 import { MailError } from "../errors.ts";
-import type {
-  AuditEvent,
-  Contact,
-  Draft,
-  ListQuery,
-  MessagePatch,
-  StoredMessage,
-  Thread,
+import { utcDay } from "../ids.ts";
+import {
+  FOLDERS,
+  type AuditEvent,
+  type Contact,
+  type Draft,
+  type DraftStatus,
+  type ListQuery,
+  type MessagePatch,
+  type StoredMessage,
+  type Thread,
 } from "../types.ts";
-import type { DynamoLike, MailStore, TableNames } from "./types.ts";
+import type { DynamoLike, Item, MailStore, TableNames } from "./types.ts";
+
+const AUDIT_DAYS = 7;
+const SENDABLE: DraftStatus[] = ["suggested", "edited", "pending_approval"];
 
 function stripEmpty(value: unknown): unknown {
   if (Array.isArray(value)) return value.map((item) => stripEmpty(item));
@@ -23,14 +29,27 @@ function stripEmpty(value: unknown): unknown {
   return value;
 }
 
+function asItem(value: unknown): Item {
+  return stripEmpty(value) as Item;
+}
+
+function withoutKind<T>(item: Item): T {
+  const { kind: _kind, ...rest } = item;
+  return rest as T;
+}
+
+function byDateDesc(a: StoredMessage, b: StoredMessage): number {
+  return a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
+}
+
 export class DynamoMailStore implements MailStore {
   constructor(
     private readonly db: DynamoLike,
     private readonly tables: TableNames,
   ) {}
 
-  async putMessage(message: StoredMessage): Promise<void> {
-    await this.db.put(this.tables.messages, stripEmpty(message) as Record<string, unknown>);
+  async putMessage(message: StoredMessage, opts?: { ifAbsent?: boolean }): Promise<boolean> {
+    return this.db.put(this.tables.messages, asItem(message), opts?.ifAbsent ? { ifAbsent: "id" } : undefined);
   }
 
   async getMessage(id: string): Promise<StoredMessage | null> {
@@ -38,75 +57,97 @@ export class DynamoMailStore implements MailStore {
     return item ? (item as unknown as StoredMessage) : null;
   }
 
-  async getMessageByRfcId(rfcMessageId: string): Promise<StoredMessage | null> {
-    const items = await this.db.scan(this.tables.messages, 500);
-    const found = items.find((item) => item.rfcMessageId === rfcMessageId);
-    return found ? (found as unknown as StoredMessage) : null;
+  async getMessagesByRfcId(rfcMessageId: string): Promise<StoredMessage[]> {
+    const items = await this.db.query(this.tables.messages, { index: "rfc", keyName: "rfcMessageId", keyValue: rfcMessageId, limit: 50 });
+    return items as unknown as StoredMessage[];
   }
 
   async listMessages(query?: ListQuery): Promise<StoredMessage[]> {
     const limit = query?.limit ?? 100;
-    let items: Record<string, unknown>[];
-    if (query?.folder) {
-      items = await this.db.query(this.tables.messages, {
-        index: "folder",
-        keyName: "folder",
-        keyValue: query.folder,
-        limit,
-        descending: true,
-      });
-    } else {
-      items = await this.db.scan(this.tables.messages, limit);
-    }
-    let messages = items as unknown as StoredMessage[];
+    const filtered = Boolean(query?.unreadOnly || query?.label);
+    const perFolder = filtered ? undefined : limit;
+    const folders = query?.folder ? [query.folder] : FOLDERS;
+    const batches = await Promise.all(
+      folders.map((folder) =>
+        this.db.query(this.tables.messages, { index: "folder", keyName: "folder", keyValue: folder, limit: perFolder, descending: true }),
+      ),
+    );
+    let messages = batches.flat() as unknown as StoredMessage[];
     if (query?.unreadOnly) messages = messages.filter((message) => message.unread);
     if (query?.label) messages = messages.filter((message) => message.labels?.includes(query.label as string));
-    return messages.sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, limit);
+    return messages.sort(byDateDesc).slice(0, limit);
+  }
+
+  async listThreadMessages(threadId: string): Promise<StoredMessage[]> {
+    const items = await this.db.query(this.tables.messages, { index: "thread", keyName: "threadId", keyValue: threadId });
+    return items as unknown as StoredMessage[];
   }
 
   async updateMessage(id: string, patch: MessagePatch): Promise<StoredMessage> {
-    const current = await this.getMessage(id);
-    if (!current) throw new MailError(`No message ${id}`, "not_found");
-    const next = { ...current, ...patch };
-    await this.putMessage(next);
-    return next;
+    const set: Item = {};
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== undefined) set[key] = stripEmpty(value);
+    }
+    const updated = await this.db.update(this.tables.messages, { id }, { set, condition: { exists: ["id"] } });
+    if (!updated) throw new MailError(`No message ${id}`, "not_found");
+    return updated as unknown as StoredMessage;
   }
 
   async putThread(thread: Thread): Promise<void> {
-    await this.db.put(this.tables.threads, stripEmpty(thread) as Record<string, unknown>);
+    await this.db.put(this.tables.threads, asItem({ ...thread, kind: "thread" }));
   }
 
   async getThread(id: string): Promise<Thread | null> {
     const item = await this.db.get(this.tables.threads, { id });
-    return item ? (item as unknown as Thread) : null;
+    return item ? withoutKind<Thread>(item) : null;
   }
 
-  async listThreads(): Promise<Thread[]> {
-    const items = (await this.db.scan(this.tables.threads, 200)) as unknown as Thread[];
-    return items.sort((a, b) => (a.lastDate < b.lastDate ? 1 : -1));
+  async listThreads(limit = 200): Promise<Thread[]> {
+    const items = await this.db.query(this.tables.threads, { index: "recent", keyName: "kind", keyValue: "thread", limit, descending: true });
+    return items.map((item) => withoutKind<Thread>(item));
   }
 
   async putDraft(draft: Draft): Promise<void> {
-    await this.db.put(this.tables.drafts, stripEmpty(draft) as Record<string, unknown>);
+    await this.db.put(this.tables.drafts, asItem({ ...draft, kind: "draft" }));
   }
 
   async getDraft(id: string): Promise<Draft | null> {
     const item = await this.db.get(this.tables.drafts, { id });
-    return item ? (item as unknown as Draft) : null;
+    return item ? withoutKind<Draft>(item) : null;
   }
 
-  async listDrafts(): Promise<Draft[]> {
-    const items = (await this.db.scan(this.tables.drafts, 200)) as unknown as Draft[];
-    return items.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  async listDrafts(limit = 200): Promise<Draft[]> {
+    const items = await this.db.query(this.tables.drafts, { index: "recent", keyName: "kind", keyValue: "draft", limit, descending: true });
+    return items.map((item) => withoutKind<Draft>(item));
+  }
+
+  async claimDraftForSend(id: string, approvalTokenHash: string, at: string): Promise<Draft | null> {
+    const updated = await this.db.update(
+      this.tables.drafts,
+      { id },
+      {
+        set: { status: "sending", approvalUsedAt: at, updatedAt: at },
+        condition: {
+          exists: ["id"],
+          notExists: ["approvalUsedAt"],
+          equals: { approvalTokenHash },
+          oneOf: { status: SENDABLE },
+        },
+      },
+    );
+    return updated ? withoutKind<Draft>(updated) : null;
   }
 
   async putAudit(event: AuditEvent): Promise<void> {
-    await this.db.put(this.tables.audit, stripEmpty(event) as Record<string, unknown>);
+    await this.db.put(this.tables.audit, asItem(event));
   }
 
   async listAudit(limit = 100): Promise<AuditEvent[]> {
-    const items = (await this.db.scan(this.tables.audit, limit)) as unknown as AuditEvent[];
-    return items.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, limit);
+    const now = Date.now();
+    const days = Array.from({ length: AUDIT_DAYS }, (_, i) => utcDay(new Date(now - i * 86_400_000)));
+    const batches = await Promise.all(days.map((day) => this.db.query(this.tables.audit, { keyName: "day", keyValue: day })));
+    const events = batches.flat() as unknown as AuditEvent[];
+    return events.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0)).slice(0, limit);
   }
 
   async getBudget(day: string): Promise<number> {
@@ -116,31 +157,23 @@ export class DynamoMailStore implements MailStore {
   }
 
   async addBudget(day: string, tokens: number): Promise<number> {
-    const used = await this.getBudget(day);
-    const next = used + tokens;
-    await this.db.put(this.tables.budget, { day, tokens: next });
-    return next;
+    const updated = await this.db.update(this.tables.budget, { day }, { add: { tokens } });
+    const next = updated?.tokens;
+    return typeof next === "number" ? next : tokens;
   }
 
-  async putContact(contact: Contact): Promise<void> {
-    await this.db.put(this.tables.contacts, stripEmpty({ ...contact, email: contact.email.toLowerCase() }) as Record<string, unknown>);
+  async putContact(contact: Contact, opts?: { ifAbsent?: boolean }): Promise<boolean> {
+    const item = asItem({ ...contact, email: contact.email.toLowerCase(), kind: "contact" });
+    return this.db.put(this.tables.contacts, item, opts?.ifAbsent ? { ifAbsent: "email" } : undefined);
   }
 
   async getContact(email: string): Promise<Contact | null> {
     const item = await this.db.get(this.tables.contacts, { email: email.toLowerCase() });
-    return item ? (item as unknown as Contact) : null;
+    return item ? withoutKind<Contact>(item) : null;
   }
 
   async listContacts(): Promise<Contact[]> {
-    return (await this.db.scan(this.tables.contacts, 500)) as unknown as Contact[];
-  }
-
-  async markImported(key: string, messageId: string): Promise<boolean> {
-    return this.db.put(this.tables.imports, { key, messageId, at: new Date().toISOString() }, "key");
-  }
-
-  async isImported(key: string): Promise<boolean> {
-    const item = await this.db.get(this.tables.imports, { key });
-    return item !== null;
+    const items = await this.db.query(this.tables.contacts, { index: "all", keyName: "kind", keyValue: "contact" });
+    return items.map((item) => withoutKind<Contact>(item));
   }
 }

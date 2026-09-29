@@ -1,6 +1,6 @@
 import { sha256 } from "../ids.ts";
 import { heuristicPhishing } from "../mime/phishing.ts";
-import type { Address, AiPublic, SealedBody } from "../types.ts";
+import type { Address, AiPublic, Priority, SensitiveAi } from "../types.ts";
 import { parseAiResult, type AiResult } from "./schema.ts";
 import type { LlmClient } from "./types.ts";
 
@@ -18,9 +18,45 @@ Fields:
 - draftReply: a reply in Jon's voice, or "" if no reply is appropriate
 Do not invent facts that are not in the message. Do not mention that you are a model.`;
 
+/** Model labels are suggestions from a model that read attacker-controlled text. Only these survive. */
+export const AI_LABEL_ALLOWLIST = [
+  "bills",
+  "calendar",
+  "events",
+  "family",
+  "finance",
+  "friends",
+  "health",
+  "home",
+  "legal",
+  "lists",
+  "personal",
+  "project",
+  "receipts",
+  "school",
+  "security",
+  "shipping",
+  "social",
+  "travel",
+  "work",
+] as const;
+
+export const PHISHING_DEMOTE_SCORE = 40;
+
+export function allowedLabels(labels: string[]): string[] {
+  const allowed = new Set<string>(AI_LABEL_ALLOWLIST);
+  return [...new Set(labels.map((label) => label.trim().toLowerCase()))].filter((label) => allowed.has(label));
+}
+
+export function demotedPriority(priority: Priority, phishingScore: number): Priority {
+  if (phishingScore < PHISHING_DEMOTE_SCORE) return priority;
+  return priority === "noise" ? "noise" : "later";
+}
+
 export interface AnalyzeInput {
   subject: string;
   from: Address;
+  replyTo?: Address;
   to: string;
   text: string;
   threadContext: string;
@@ -31,7 +67,7 @@ export interface AnalyzeInput {
 export interface AnalyzeOutput {
   result: AiResult;
   aiPublic: AiPublic;
-  sensitive: NonNullable<SealedBody["ai"]>;
+  sensitive: SensitiveAi;
   inputTokens: number;
   outputTokens: number;
   promptSha256: string;
@@ -66,6 +102,7 @@ export async function analyzeMessage(llm: LlmClient, input: AnalyzeInput): Promi
   const result = parseAiResult(completion.text);
   const heuristic = heuristicPhishing({
     from: input.from,
+    ...(input.replyTo ? { replyTo: input.replyTo } : {}),
     subject: input.subject,
     text: input.text,
   });
@@ -73,13 +110,13 @@ export async function analyzeMessage(llm: LlmClient, input: AnalyzeInput): Promi
   const phishingReasons = [...heuristic.reasons, ...result.phishingReasons];
   const aiPublic: AiPublic = {
     category: result.category,
-    priority: result.priority,
+    priority: demotedPriority(result.priority, phishingScore),
     phishingScore,
-    labels: result.labels,
+    labels: allowedLabels(result.labels),
     unsubscribeDetected: result.unsubscribe.detected,
     skipped: false,
   };
-  const sensitive: NonNullable<SealedBody["ai"]> = {
+  const sensitive: SensitiveAi = {
     summary: result.summary,
     threadSummary: result.threadSummary,
     actionItems: result.actionItems,

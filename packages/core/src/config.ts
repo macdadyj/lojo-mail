@@ -20,6 +20,7 @@ function intEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): LojoConfig {
   const domain = (env.LOJO_DOMAIN ?? "cyberphysical.us").trim().toLowerCase();
   const localPart = (env.LOJO_LOCAL_PART ?? "lojo").trim().toLowerCase();
+  const dmarcLocalPart = (env.LOJO_DMARC_LOCAL_PART ?? "dmarc").trim().toLowerCase();
   const providerRaw = (env.LOJO_LLM_PROVIDER ?? "grok").trim().toLowerCase();
   if (!isProvider(providerRaw)) {
     throw new Error(`LOJO_LLM_PROVIDER must be one of ${PROVIDERS.join(", ")}`);
@@ -39,14 +40,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): LojoConfig {
     localPart,
     region: env.LOJO_REGION ?? "us-east-1",
     mailbox: `${localPart}@${domain}`,
+    dmarcMailbox: `${dmarcLocalPart}@${domain}`,
     llmProvider: provider,
     dailyTokenBudget: intEnv(env, "LOJO_DAILY_TOKEN_BUDGET", 100_000),
     maxBodyChars: intEnv(env, "LOJO_MAX_BODY_CHARS", 8_000),
     skipBulk: (env.LOJO_SKIP_BULK ?? "1") !== "0",
     snippetInClear: (env.LOJO_SNIPPET_IN_CLEAR ?? "1") !== "0",
+    aiContextDays: intEnv(env, "LOJO_AI_CONTEXT_DAYS", 30),
     grokBaseUrl: env.LOJO_GROK_BASE_URL ?? "https://api.x.ai/v1",
     grokModel: env.LOJO_GROK_MODEL ?? "grok-3-mini",
-    bedrockModelId: env.LOJO_BEDROCK_MODEL_ID ?? "anthropic.claude-3-haiku-20240307-v1:0",
+    bedrockModelId: env.LOJO_BEDROCK_MODEL_ID ?? "us.anthropic.claude-haiku-4-5-20251001-v1:0",
     bedrockRegion: env.LOJO_BEDROCK_REGION ?? env.LOJO_REGION ?? "us-east-1",
     ollamaBaseUrl: env.LOJO_OLLAMA_BASE_URL ?? "http://100.96.1.90:11434",
     ollamaModel: env.LOJO_OLLAMA_MODEL ?? "llama3.2:1b",
