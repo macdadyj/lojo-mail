@@ -1,0 +1,17 @@
+{
+  "name": "@lojo/pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/handler.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/processor.cjs --loader:.md=text"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.830.0",
+    "@aws-sdk/client-s3": "^3.830.0",
+    "@aws-sdk/client-ssm": "^3.830.0",
+    "@aws-sdk/lib-dynamodb": "^3.830.0",
+    "@lojo/core": "*",
+    "esbuild": "^0.25.5"
+  }
+}

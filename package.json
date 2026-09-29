@@ -1,0 +1,33 @@
+{
+  "name": "lojo-mail",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "tsx scripts/dev.ts",
+    "test": "node scripts/run-tests.mjs",
+    "typecheck": "tsc -p packages/core --noEmit && tsc -p packages/pipeline --noEmit",
+    "lint": "eslint .",
+    "keygen": "tsx scripts/keygen.ts",
+    "wkd-hash": "tsx scripts/wkd-hash.ts",
+    "import": "tsx packages/importer/src/cli.ts",
+    "build:web": "npm run build -w @lojo/web",
+    "build:lambda": "npm run build -w @lojo/pipeline && npm run build -w @lojo/api",
+    "infra:validate": "terraform -chdir=infra/terraform init -backend=false -input=false && terraform -chdir=infra/terraform validate && terraform -chdir=infra/terraform fmt -check",
+    "secrets:check": "node scripts/check-no-secrets.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.28.0",
+    "@types/node": "^22.15.21",
+    "eslint": "^9.28.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.33.1"
+  }
+}
