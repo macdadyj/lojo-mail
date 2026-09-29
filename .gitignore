@@ -34,3 +34,5 @@ data/
 *.mbox
 imports/
 .playwright-mcp/
+*.private.jwk
+*.master.key
