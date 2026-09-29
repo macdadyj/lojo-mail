@@ -7,7 +7,7 @@ export {
   cosine,
   demotedPriority,
 } from "./ai/pipeline.ts";
-export { parseAiResult, aiResultSchema } from "./ai/schema.ts";
+export { ModelOutputError, parseAiResult, aiResultSchema } from "./ai/schema.ts";
 export type { AiResult } from "./ai/schema.ts";
 export { BedrockLlm, GrokLlm, MockLlm, OllamaLlm, createLlmClient } from "./ai/providers.ts";
 export type { LlmClient, LlmCompletion, LlmRequest } from "./ai/types.ts";

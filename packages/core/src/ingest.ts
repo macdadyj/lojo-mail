@@ -1,4 +1,5 @@
 import { analyzeMessage } from "./ai/pipeline.ts";
+import { ModelOutputError } from "./ai/schema.ts";
 import type { LlmClient } from "./ai/types.ts";
 import { aiContextKey, attachmentKey, bodyKey, type BlobStore } from "./blob/store.ts";
 import { attachmentContext, encodeEnvelope, messageBodyContext, sealBytes, sealJson } from "./crypto/envelope.ts";
@@ -279,6 +280,7 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
         });
       } catch (error) {
         ai = skipped("error");
+        if (error instanceof ModelOutputError) await deps.store.addBudget(utcDay(now), error.usage.inputTokens + error.usage.outputTokens);
         const detail = error instanceof Error ? error.message : "unknown error";
         await deps.store.putAudit({ ...auditBase, id: newId("aud"), action: "ai.analyze", outcome: "error", detail: detail.slice(0, 200) });
       }

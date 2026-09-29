@@ -1,4 +1,5 @@
-export type MailErrorCode = "not_found" | "locked" | "forbidden" | "invalid" | "budget" | "conflict";
+/** `upstream`: the model provider failed or returned something unusable. */
+export type MailErrorCode = "not_found" | "locked" | "forbidden" | "invalid" | "budget" | "conflict" | "upstream";
 
 export class MailError extends Error {
   readonly code: MailErrorCode;

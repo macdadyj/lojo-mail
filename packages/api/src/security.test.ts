@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseMime } from "@lojo/core";
+import { MockLlm, parseMime, type LlmRequest } from "@lojo/core";
 import { fixture, malicious } from "@lojo/core/testing";
 import { sesInput } from "./ses.ts";
 import { testApp } from "./test-app.ts";
@@ -114,6 +114,32 @@ test("[P1] API: read and write tokens get no message text, even from a server th
   const human = await t.login();
   assert.match((await t.call(`/v1/messages/${message.id}`, { token: human })).text, /CODEWORD-ZEBRA/);
   assert.equal((await t.call(`/v1/threads/${message.threadId}/summarize`, { token: human, method: "POST" })).status, 200);
+});
+
+test("[P2] API: a non-JSON model reply falls back to a plain reply; a provider failure is a 502, never a bare 500", async () => {
+  const prose = new MockLlm((request: LlmRequest) =>
+    request.system.startsWith("Write Jon's reply")
+      ? { text: "Hi Mina,\n\nWill do.\n\nJon", inputTokens: 50, outputTokens: 5 }
+      : { text: "Sure! This email is about a lease.", inputTokens: 50, outputTokens: 5 },
+  );
+  const t = await testApp({ llm: prose });
+  const { message } = await t.ingest(fixture("personal.eml"));
+  const ok = await t.call(`/v1/messages/${message.id}/draft-reply`, { token: "admin-token", method: "POST" });
+  assert.equal(ok.status, 201, ok.text);
+  assert.equal(ok.json.text, "Hi Mina,\n\nWill do.\n\nJon");
+
+  const down = await testApp({
+    llm: new MockLlm(() => {
+      throw new Error("503 from provider");
+    }),
+  });
+  const again = await down.ingest(fixture("personal.eml"));
+  for (const path of [`/v1/messages/${again.message.id}/draft-reply`, `/v1/threads/${again.message.threadId}/summarize`]) {
+    const res = await down.call(path, { token: "admin-token", method: "POST" });
+    assert.equal(res.status, 502, `${path} ${res.text}`);
+    assert.equal(res.json.code, "upstream");
+    assert.doesNotMatch(res.text, /503 from provider|internal/);
+  }
 });
 
 test("[P0-6] API: an agent draft to a stranger is refused; a human draft is not", async () => {

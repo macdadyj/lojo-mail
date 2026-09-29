@@ -1,7 +1,7 @@
 import { sha256 } from "../ids.ts";
 import { heuristicPhishing } from "../mime/phishing.ts";
 import type { Address, AiPublic, Priority, SensitiveAi } from "../types.ts";
-import { parseAiResult, type AiResult } from "./schema.ts";
+import { ModelOutputError, parseAiResult, type AiResult } from "./schema.ts";
 import type { LlmClient } from "./types.ts";
 
 const SYSTEM = `You triage one email for Jon Hebert. Respond with a single JSON object and no markdown.
@@ -99,7 +99,13 @@ export function buildPrompt(input: AnalyzeInput): { system: string; user: string
 export async function analyzeMessage(llm: LlmClient, input: AnalyzeInput): Promise<AnalyzeOutput> {
   const prompt = buildPrompt(input);
   const completion = await llm.complete({ system: prompt.system, user: prompt.user, maxTokens: 800, temperature: 0.2 });
-  const result = parseAiResult(completion.text);
+  let result: AiResult;
+  try {
+    result = parseAiResult(completion.text);
+  } catch (error) {
+    if (!(error instanceof ModelOutputError)) throw error;
+    throw new ModelOutputError(error.message, { inputTokens: completion.inputTokens, outputTokens: completion.outputTokens });
+  }
   const heuristic = heuristicPhishing({
     from: input.from,
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
