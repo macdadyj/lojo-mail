@@ -7,8 +7,8 @@ locals {
   mail_from_domain = "${var.mail_from_subdomain}.${var.domain}"
   name             = var.project
 
-  processor_bundle = var.processor_bundle != "" ? var.processor_bundle : "${path.module}/placeholders/processor.cjs"
-  api_bundle       = var.api_bundle != "" ? var.api_bundle : "${path.module}/placeholders/api.cjs"
+  processor_bundle = var.processor_bundle != "" ? var.processor_bundle : "${path.module}/placeholders/processor.mjs"
+  api_bundle       = var.api_bundle != "" ? var.api_bundle : "${path.module}/placeholders/api.mjs"
 
   common_env = {
     LOJO_DOMAIN             = var.domain

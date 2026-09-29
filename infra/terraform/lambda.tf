@@ -23,7 +23,7 @@ data "archive_file" "api" {
 resource "aws_lambda_function" "processor" {
   function_name    = "${var.project}-processor"
   role             = aws_iam_role.processor.arn
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   handler          = "processor.handler"
   filename         = data.archive_file.processor.output_path
   source_code_hash = data.archive_file.processor.output_base64sha256
@@ -40,7 +40,7 @@ resource "aws_lambda_function" "processor" {
 resource "aws_lambda_function" "api" {
   function_name    = "${var.project}-api"
   role             = aws_iam_role.api.arn
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   handler          = "api.handler"
   filename         = data.archive_file.api.output_path
   source_code_hash = data.archive_file.api.output_base64sha256

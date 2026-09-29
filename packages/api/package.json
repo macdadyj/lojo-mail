@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild src/lambda.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/api.cjs --loader:.md=text",
+    "build": "esbuild src/lambda.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/api.mjs --loader:.md=text --banner:js=\"import { createRequire as lojoCreateRequire } from 'node:module'; const require = lojoCreateRequire(import.meta.url);\"",
     "start": "tsx src/server.ts"
   },
   "dependencies": {

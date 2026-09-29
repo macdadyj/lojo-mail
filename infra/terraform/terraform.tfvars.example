@@ -17,8 +17,8 @@ llm_provider       = "grok"
 daily_token_budget = 100000
 
 # After `npm run build:lambda`:
-# processor_bundle = "../../packages/pipeline/dist/handler.cjs"
-# api_bundle       = "../../packages/api/dist/api.cjs"
+# processor_bundle = "../../packages/pipeline/dist/processor.mjs"
+# api_bundle       = "../../packages/api/dist/api.mjs"
 
 web_origins = [
   "http://127.0.0.1:5173",
