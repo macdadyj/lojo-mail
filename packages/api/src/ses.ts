@@ -1,45 +1,16 @@
 import { SESv2Client, SendEmailCommand, type SendEmailCommandInput } from "@aws-sdk/client-sesv2";
-import type { MailSender, OutboundMessage } from "@lojo/core";
+import { buildRawMessage, type MailSender, type OutboundMessage } from "@lojo/core";
 
+/** Always Raw, so every header goes through the same sanitizer and threading headers survive. */
 export function sesInput(message: OutboundMessage, configurationSet?: string): SendEmailCommandInput {
-  const from = message.from.name ? `${message.from.name} <${message.from.email}>` : message.from.email;
-  const destination = {
-    ToAddresses: message.to.map((item) => item.email),
-    CcAddresses: message.cc.map((item) => item.email),
-  };
-  if (message.armored) {
-    const raw = [
-      `From: ${from}`,
-      `To: ${destination.ToAddresses.join(", ")}`,
-      message.cc.length ? `Cc: ${destination.CcAddresses.join(", ")}` : "",
-      `Subject: ${message.subject}`,
-      "MIME-Version: 1.0",
-      "Content-Type: text/plain; charset=utf-8",
-      "",
-      message.armored,
-    ]
-      .filter((line) => line !== "")
-      .join("\r\n");
-    return {
-      FromEmailAddress: message.from.email,
-      Destination: destination,
-      ConfigurationSetName: configurationSet,
-      Content: { Raw: { Data: new TextEncoder().encode(raw) } },
-    };
-  }
   return {
     FromEmailAddress: message.from.email,
-    Destination: destination,
-    ConfigurationSetName: configurationSet,
-    Content: {
-      Simple: {
-        Subject: { Data: message.subject, Charset: "UTF-8" },
-        Body: {
-          Text: { Data: message.text, Charset: "UTF-8" },
-          ...(message.html ? { Html: { Data: message.html, Charset: "UTF-8" } } : {}),
-        },
-      },
+    Destination: {
+      ToAddresses: message.to.map((item) => item.email),
+      CcAddresses: message.cc.map((item) => item.email),
     },
+    ConfigurationSetName: configurationSet,
+    Content: { Raw: { Data: new TextEncoder().encode(buildRawMessage(message)) } },
   };
 }
 
@@ -55,6 +26,7 @@ export class SesSender implements MailSender {
 
   async send(message: OutboundMessage): Promise<{ messageId: string }> {
     const out = await this.client.send(new SendEmailCommand(sesInput(message, this.configurationSet)));
-    return { messageId: out.MessageId ?? "ses-unknown" };
+    if (!out.MessageId) throw new Error("SES returned no MessageId");
+    return { messageId: out.MessageId };
   }
 }

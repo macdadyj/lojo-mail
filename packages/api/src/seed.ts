@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { ingestRaw, type IngestDeps } from "@lojo/core";
+import { ingestRaw, type IngestDeps, type MessageOrigin } from "@lojo/core";
 
 function fixture(name: string): string {
   return readFileSync(new URL(`../../../fixtures/emails/${name}`, import.meta.url), "utf8");
@@ -29,11 +29,19 @@ Content-Type: text/plain; charset=utf-8
 Your order of two notebooks shipped today. No action needed.
 `;
 
+const SEED: Array<[string, MessageOrigin]> = [
+  ["personal.eml", "inbound"],
+  ["reply.eml", "sent"],
+  ["newsletter.eml", "inbound"],
+  ["phish.eml", "inbound"],
+  ["attachment.eml", "inbound"],
+  ["html-only.eml", "inbound"],
+];
+
 export async function seedDemo(deps: IngestDeps): Promise<void> {
-  const files = ["personal.eml", "reply.eml", "newsletter.eml", "phish.eml", "attachment.eml", "html-only.eml"];
-  for (const name of files) {
-    await ingestRaw(fixture(name), deps);
+  for (const [name, origin] of SEED) {
+    await ingestRaw(fixture(name), deps, { origin, deliveryId: `seed:${name}` });
   }
-  await ingestRaw(extra, deps);
-  await ingestRaw(receipt, deps);
+  await ingestRaw(extra, deps, { deliveryId: "seed:harbor" });
+  await ingestRaw(receipt, deps, { deliveryId: "seed:receipt" });
 }
