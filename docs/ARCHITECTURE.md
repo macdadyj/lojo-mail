@@ -23,7 +23,7 @@ flowchart LR
     Jon[Jon / AI assistant]
   end
 
-  subgraph aws [AWS us-west-2]
+  subgraph aws [AWS us-east-1]
     SES[SES inbound TLS]
     S3[(S3 raw MIME<br/>SSE-KMS)]
     Fn[Processor Lambda]
@@ -56,8 +56,8 @@ flowchart LR
   Key --> Web
 ```
 
-1. MX for the domain points at `inbound-smtp.us-west-2.amazonaws.com` (only after the DNS audit).
-2. An SES receipt rule requires TLS, scans for spam/virus, and writes the raw MIME object into S3 under `raw/`, encrypted with a customer-managed KMS key.
+1. The apex MX already points at `inbound-smtp.us-east-1.amazonaws.com`. Standing up lojo-mail does not change it. The region stays a Terraform variable so a later domain can use another receiving region.
+2. An SES receipt rule requires TLS, scans for spam/virus, and writes the raw MIME object into S3 under `raw/`, encrypted with a customer-managed KMS key. The rule names `lojo@<domain>` and `dmarc@<domain>` only. Other SES identities in the account stay untouched.
 3. An S3 event invokes the processor Lambda. The function parses MIME, seals the body to Jon's public key, writes metadata to DynamoDB, and runs the AI pipeline. AI failure never fails receipt.
 4. The HTTP API and the MCP server read that index. Bodies stay sealed until something that holds Jon's private key opens them.
 5. Outbound mail is built by the API and sent with SESv2 only after an explicit approve-and-send call. The AI pipeline has no sender dependency.
@@ -138,9 +138,23 @@ Apple Mail and Thunderbird need a standard access protocol. The store is already
 - IMAP is the compatibility fallback (Apple Mail still wants it). A small IMAP facade would map folders to `folder` and speak IDLE for push. It should not run on a public port 143.
 - Neither facade is required for the web app, the API, or MCP, so they are not in the first release.
 
+## What the September 2026 audit already found
+
+A read-only look at the account, not an apply:
+
+- SES for `cyberphysical.us` is verified in **us-east-1**, along with identities `cyberdevsec.com` and `jon@lojo.engineering`. This stack adopts `var.domain` and does not edit the other two.
+- Easy DKIM is already published (six CNAMEs). Custom MAIL FROM is `mail.cyberphysical.us` (MX `feedback-smtp.us-east-1.amazonses.com` plus an SPF TXT). Apex SPF is `v=spf1 include:amazonses.com ~all`. DMARC is `v=DMARC1;p=quarantine;pct=100;fo=1` with no `rua`.
+- The apex MX is already the us-east-1 inbound endpoint, TTL 1800. No receipt rule set is active in any region, so the new rule set is what starts delivery into the bucket.
+- Leave these records alone: ACM validation CNAME, the six DKIM CNAMEs, `_amazonses`, the `mail.` MX and TXT, NS, and SOA. Do not add a second SPF TXT.
+- `autodiscover` and `_amazonchime` look like WorkMail leftovers. They are optional cleanup after Jon confirms WorkMail is gone.
+- Registrar is Gandi, managed through Route 53 Domains. DNSSEC is off. Enabling it is optional and needs a KMS signing key the current deploy user cannot create.
+- IAM user `grok-rw` can use Route 53, Route 53 Domains, and SES. It cannot create KMS, S3, Lambda, DynamoDB, IAM, API Gateway, or SSM. Apply uses a different principal. This repo does not grant `grok-rw` anything.
+
+`ses_identity_mode = existing` (the default) reads that identity and creates the receipt rule set, the bucket, the key, and the functions. `terraform output dns_plan` lists suggested additions and does not create them: a `rua` on the existing DMARC record (to `dmarc@<domain>`, not a second TXT), TLS-RPT, MTA-STS once the policy host exists, OpenPGP WKD hosting, and a lower MX TTL only before a future region move. `manage_dns = true` is refused in existing mode so a plan cannot overwrite those records.
+
 ## Domain switch
 
-`domain` and `local_part` are variables. Moving from `cyberphysical.us` to `lojo.dev` means a second SES identity, a second DNS plan, and a decision about what happens to the old MX (leave it accepting and forwarding into the same bucket, or drop it). The processor keys off the recipient only to file the message; it does not hard-code the domain in storage.
+`domain` and `local_part` are variables. Moving from `cyberphysical.us` to `lojo.dev` means `ses_identity_mode = create` for that new name, a second DNS plan, and a decision about what happens to the old MX (leave it accepting into the same bucket, or drop it). The processor keys off the recipient only to file the message; it does not hard-code the domain in storage.
 
 ## What is intentionally not here
 

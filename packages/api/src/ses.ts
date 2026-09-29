@@ -50,7 +50,7 @@ export class SesSender implements MailSender {
   ) {}
 
   static fromEnv(env: NodeJS.ProcessEnv = process.env): SesSender {
-    return new SesSender(new SESv2Client({ region: env.LOJO_REGION ?? env.AWS_REGION ?? "us-west-2" }), env.LOJO_CONFIG_SET);
+    return new SesSender(new SESv2Client({ region: env.LOJO_REGION ?? env.AWS_REGION ?? "us-east-1" }), env.LOJO_CONFIG_SET);
   }
 
   async send(message: OutboundMessage): Promise<{ messageId: string }> {

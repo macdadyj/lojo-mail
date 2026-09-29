@@ -20,7 +20,7 @@ terraform {
   # backend "s3" {
   #   bucket       = "lojo-mail-tfstate"
   #   key          = "lojo-mail/terraform.tfstate"
-  #   region       = "us-west-2"
+  #   region       = "us-east-1"
   #   encrypt      = true
   #   use_lockfile = true
   # }

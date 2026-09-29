@@ -37,7 +37,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): LojoConfig {
   return {
     domain,
     localPart,
-    region: env.LOJO_REGION ?? "us-west-2",
+    region: env.LOJO_REGION ?? "us-east-1",
     mailbox: `${localPart}@${domain}`,
     llmProvider: provider,
     dailyTokenBudget: intEnv(env, "LOJO_DAILY_TOKEN_BUDGET", 100_000),
@@ -47,7 +47,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): LojoConfig {
     grokBaseUrl: env.LOJO_GROK_BASE_URL ?? "https://api.x.ai/v1",
     grokModel: env.LOJO_GROK_MODEL ?? "grok-3-mini",
     bedrockModelId: env.LOJO_BEDROCK_MODEL_ID ?? "anthropic.claude-3-haiku-20240307-v1:0",
-    bedrockRegion: env.LOJO_BEDROCK_REGION ?? env.LOJO_REGION ?? "us-west-2",
+    bedrockRegion: env.LOJO_BEDROCK_REGION ?? env.LOJO_REGION ?? "us-east-1",
     ollamaBaseUrl: env.LOJO_OLLAMA_BASE_URL ?? "http://100.96.1.90:11434",
     ollamaModel: env.LOJO_OLLAMA_MODEL ?? "llama3.2:1b",
     ollamaEmbedModel: env.LOJO_OLLAMA_EMBED_MODEL ?? "nomic-embed-text",

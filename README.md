@@ -45,4 +45,4 @@ packages/web        PWA
 packages/importer   eml / mbox / vCard / CSV import
 ```
 
-Infrastructure defaults: region `us-west-2`, domain `cyberphysical.us`, local part `lojo`, DNS changes off, receipt rule set not activated. See `infra/terraform/terraform.tfvars.example`.
+Infrastructure defaults: region `us-east-1` (SES for this domain is already there), domain `cyberphysical.us`, local part `lojo`, existing SES identity adopted, DNS changes off, receipt rule set activated because no set is active. See `infra/terraform/terraform.tfvars.example`.

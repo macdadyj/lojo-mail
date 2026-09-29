@@ -1,15 +1,17 @@
 # Copy to terraform.tfvars (gitignored) before plan/apply.
-# Defaults already match lojo@cyberphysical.us in us-west-2.
-# Leave the two manage_* flags false until docs/RUNBOOK.md says otherwise.
+# Defaults match the read-only audit: lojo@cyberphysical.us, SES in us-east-1.
+# manage_dns stays false. The receipt rule set is active because no set was
+# active in any region. Re-check that before apply.
 
-aws_region = "us-west-2"
-domain     = "cyberphysical.us"
-local_part = "lojo"
+aws_region         = "us-east-1"
+domain             = "cyberphysical.us"
+local_part         = "lojo"
+ses_identity_mode  = "existing"
 
 manage_dns               = false
 dns_cutover_confirmation = ""
 zone_id                  = ""
-manage_active_rule_set   = false
+manage_active_rule_set   = true
 
 llm_provider       = "grok"
 daily_token_budget = 100000

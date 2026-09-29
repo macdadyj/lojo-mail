@@ -14,8 +14,17 @@ output "api_endpoint" {
   value = aws_apigatewayv2_api.http.api_endpoint
 }
 
+output "ses_identity_mode" {
+  value = var.ses_identity_mode
+}
+
+output "ses_identity_arn" {
+  value = local.ses_identity_arn
+}
+
 output "dkim_tokens" {
-  value = local.dkim_tokens
+  description = "Already published when ses_identity_mode is existing. Do not create new CNAMEs from these."
+  value       = local.dkim_tokens
 }
 
 output "dns_plan" {

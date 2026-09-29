@@ -3,6 +3,7 @@ data "aws_caller_identity" "current" {}
 locals {
   account_id       = data.aws_caller_identity.current.account_id
   mailbox          = "${var.local_part}@${var.domain}"
+  dmarc_mailbox    = "${var.dmarc_rua_local_part}@${var.domain}"
   mail_from_domain = "${var.mail_from_subdomain}.${var.domain}"
   name             = var.project
 
@@ -42,6 +43,11 @@ resource "terraform_data" "dns_guard" {
   count = var.manage_dns ? 1 : 0
 
   lifecycle {
+    precondition {
+      condition     = var.ses_identity_mode == "create"
+      error_message = "ses_identity_mode=existing refuses manage_dns. cyberphysical.us already has SES DNS in us-east-1. Leave manage_dns false. Suggested additions are output dns_plan, not Route 53 resources."
+    }
+
     precondition {
       condition     = var.dns_cutover_confirmation == "I-audited-the-existing-zone"
       error_message = "Refusing to write Route 53 records. Set dns_cutover_confirmation to I-audited-the-existing-zone only after the checklist in docs/RUNBOOK.md."

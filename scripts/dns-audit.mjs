@@ -3,7 +3,7 @@
  * Read-only audit of a Route 53 record set export.
  *
  *   aws route53 list-resource-record-sets --hosted-zone-id ZONE --output json > zone.json
- *   node scripts/dns-audit.mjs zone.json cyberphysical.us
+ *   node scripts/dns-audit.mjs zone.json cyberphysical.us us-east-1
  *
  * Does not call AWS. Does not change DNS.
  */
@@ -73,19 +73,33 @@ function apex(name, domain) {
 }
 
 /**
+/**
+ * @param {string[]} values
+ * @returns {string | null}
+ */
+function sesInboundRegion(values) {
+  const joined = values.join(" ").toLowerCase();
+  const match = joined.match(/inbound-smtp\.([a-z0-9-]+)\.amazonaws\.com/);
+  return match?.[1] ?? null;
+}
+
+/**
  * @param {DnsRecord[]} records
  * @param {string} domain
+ * @param {string} [expectedRegion]
  * @returns {{ domain: string, recordCount: number, findings: Finding[], blockers: number }}
  */
-export function auditZone(records, domain) {
+export function auditZone(records, domain, expectedRegion = "us-east-1") {
   const d = domain.toLowerCase().replace(/\.$/, "");
+  const region = expectedRegion.toLowerCase();
   /** @type {Finding[]} */
   const findings = [];
   const mailFrom = `mail.${d}`;
+  let dkimCount = 0;
 
   findings.push({
     level: "info",
-    message: `${records.length} record(s) in the export. The brief said cyberphysical.us had 17; if this number moved, read the new records before changing anything.`,
+    message: `${records.length} record(s) in the export. Expected receiving region is ${region}. Read every record before changing anything.`,
   });
 
   const soa = records.filter((r) => r.type === "SOA");
@@ -106,7 +120,49 @@ export function auditZone(records, domain) {
     const bare = rec.name.replace(/\.$/, "");
     const joined = rec.values.join(" ").toLowerCase();
 
-    if ((rec.type === "A" || rec.type === "AAAA" || rec.type === "CAA" || rec.type === "CNAME") && !joined.includes("amazonses") && !joined.includes("inbound-smtp")) {
+    const isDkim = bare.includes("._domainkey.") || bare.endsWith("._domainkey");
+    const isAcm = rec.type === "CNAME" && joined.includes("acm-validations.aws");
+    const isAutodiscover = bare.startsWith("autodiscover.") || bare.startsWith("autoconfig.") || bare.includes("_autodiscover");
+    const isChime = bare === `_amazonchime.${d}` || bare.startsWith("_amazonchime.");
+    const isSesVerification = rec.type === "TXT" && bare === `_amazonses.${d}`;
+
+    if (isAcm) {
+      findings.push({
+        level: "info",
+        name: rec.name,
+        type: rec.type,
+        message: "Protected. ACM validation CNAME. Do not edit or delete it.",
+      });
+    } else if (isDkim) {
+      dkimCount += 1;
+      findings.push({
+        level: "info",
+        name: rec.name,
+        type: rec.type,
+        message: "Protected. Existing Easy DKIM CNAME. Do not add another _domainkey record and do not delete this one.",
+      });
+    } else if (isSesVerification) {
+      findings.push({
+        level: "info",
+        name: rec.name,
+        type: rec.type,
+        message: "Protected. _amazonses TXT is the SES verification record. Do not delete it.",
+      });
+    } else if (isAutodiscover) {
+      findings.push({
+        level: "info",
+        name: rec.name,
+        type: rec.type,
+        message: "Optional cleanup. autodiscover is a WorkMail leftover. Remove it only after confirming WorkMail is gone. lojo-mail does not use it.",
+      });
+    } else if (isChime) {
+      findings.push({
+        level: "info",
+        name: rec.name,
+        type: rec.type,
+        message: "Optional cleanup. _amazonchime TXT is a WorkMail leftover. Remove it only after confirming WorkMail is gone.",
+      });
+    } else if ((rec.type === "A" || rec.type === "AAAA" || rec.type === "CAA" || rec.type === "CNAME") && !joined.includes("amazonses") && !joined.includes("inbound-smtp")) {
       findings.push({
         level: "info",
         name: rec.name,
@@ -125,12 +181,30 @@ export function auditZone(records, domain) {
     }
 
     if (rec.type === "MX" && apex(rec.name, d)) {
-      findings.push({
-        level: "blocker",
-        name: rec.name,
-        type: rec.type,
-        message: `Existing apex MX (${rec.values.join(", ")}). Cutover replaces this. Write the current values down and be ready to revert. Do not assume the zone is mail-free.`,
-      });
+      const inbound = sesInboundRegion(rec.values);
+      const ttlNote = rec.ttl === undefined ? "" : ` TTL ${rec.ttl}.`;
+      if (inbound === region) {
+        findings.push({
+          level: "info",
+          name: rec.name,
+          type: rec.type,
+          message: `Apex MX already points at SES inbound in ${region} (${rec.values.join(", ")}).${ttlNote} Do not change the target. Lower the TTL only before a future region move.`,
+        });
+      } else if (inbound) {
+        findings.push({
+          level: "blocker",
+          name: rec.name,
+          type: rec.type,
+          message: `Apex MX points at SES inbound in ${inbound}, not ${region}. Do not stand up a receipt rule in ${region} until the MX and the rule region match.`,
+        });
+      } else {
+        findings.push({
+          level: "blocker",
+          name: rec.name,
+          type: rec.type,
+          message: `Existing apex MX is not SES (${rec.values.join(", ")}).${ttlNote} Write the current values down before any cutover. Do not assume the zone is mail-free.`,
+        });
+      }
     } else if (rec.type === "MX") {
       const sesFeedback = joined.includes("feedback-smtp") && joined.includes("amazonses.com");
       findings.push({
@@ -159,31 +233,23 @@ export function auditZone(records, domain) {
     }
 
     if (rec.type === "TXT" && bare === `_dmarc.${d}`) {
-      findings.push({
-        level: "warn",
-        name: rec.name,
-        type: rec.type,
-        message: `Existing DMARC (${rec.values.join(" ")}). Decide whether to keep it or replace it. Do not publish two _dmarc TXT records.`,
-      });
-    }
-
-    if (bare.includes("._domainkey.") || bare.includes("_domainkey")) {
-      findings.push({
-        level: "warn",
-        name: rec.name,
-        type: rec.type,
-        message: "Existing DKIM record. SES Easy DKIM will add three more CNAMEs. Do not delete a DKIM record that another sender still uses.",
-      });
-    }
-
-    if (bare.startsWith("autodiscover.") || bare.startsWith("autoconfig.") || bare.includes("_autodiscover")) {
+      const hasRua = joined.includes("rua=");
       findings.push({
         level: "info",
         name: rec.name,
         type: rec.type,
-        message: "Autodiscover record for an older mail client setup. lojo-mail does not need it. Leave it until you know which client it serves.",
+        message: hasRua
+          ? `Existing DMARC (${rec.values.join(" ")}). Edit this one record if the policy changes. Do not publish a second _dmarc TXT.`
+          : `Existing DMARC without rua (${rec.values.join(" ")}). Keep p=quarantine. Edit this single TXT to add a dedicated rua. Do not publish a second _dmarc TXT and do not relax the policy to stand up receipt.`,
       });
     }
+  }
+
+  if (dkimCount > 0) {
+    findings.push({
+      level: "info",
+      message: `${dkimCount} Easy DKIM CNAME(s). The September 2026 audit found six on this domain. Do not publish additional _domainkey records.`,
+    });
   }
 
   const spfByName = new Map();
@@ -221,12 +287,13 @@ function printReport(report) {
 async function main() {
   const file = process.argv[2];
   const domain = process.argv[3] ?? "cyberphysical.us";
+  const region = process.argv[4] ?? "us-east-1";
   if (!file || file === "--help") {
-    console.error("usage: node scripts/dns-audit.mjs <zone.json> [domain]");
+    console.error("usage: node scripts/dns-audit.mjs <zone.json> [domain] [region]");
     process.exit(2);
   }
   const raw = await readFile(file, "utf8");
-  const report = auditZone(parseRoute53Export(raw), domain);
+  const report = auditZone(parseRoute53Export(raw), domain, region);
   printReport(report);
   process.exit(report.blockers > 0 ? 1 : 0);
 }

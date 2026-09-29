@@ -59,7 +59,7 @@ History and new mail are different problems. Import covers history. New mail nee
 
 ### 1. Stand up lojo-mail without touching MX
 
-Follow [RUNBOOK.md](RUNBOOK.md) through SES verification and a test send. Leave the live `cyberphysical.us` MX records exactly as they are until the dry-run checklist is signed off. The zone already has records (17 of them at the time this was written). Some may be unrelated to mail. Some may be mail. The audit script is how you find out.
+Follow [RUNBOOK.md](RUNBOOK.md) through the receipt rule. The apex MX already points at SES in us-east-1, so do not change it. The audit script is how you confirm the zone still matches that picture before apply.
 
 ### 2. Keep Tuta alive
 
@@ -77,9 +77,9 @@ Use the template below. Send it from the new address once SES production access 
 
 On Tuta, add a filter that forwards new Inbox mail to `lojo@cyberphysical.us` if the client still exposes that action for your account. Do not expect it to be complete. Each morning for the first two months, open Tuta once and check for stragglers. That manual check is the plan, not a failure of the plan.
 
-### 5. Switch the MX only when the checklist says so
+### 5. Receiving starts when the receipt rule is active
 
-Inbound to `lojo@cyberphysical.us` starts when the apex MX points at SES. That is the last DNS change, not the first. DKIM CNAMEs can (and should) exist before MX changes. See the runbook.
+DKIM, MAIL FROM, SPF, DMARC, and the apex MX are already in place for us-east-1. Inbound to `lojo@cyberphysical.us` starts when the `lojo-mail` receipt rule set is the active set, not when the MX changes. See the runbook. Do not add DKIM CNAMEs or a second SPF TXT.
 
 ### 6. Two months later
 

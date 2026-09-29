@@ -6,7 +6,7 @@ Prices below were checked against the public SES price page and the SES pricing-
 
 ## Assumptions
 
-- Region `us-west-2`.
+- Region `us-east-1`. A read-only audit found SES for this domain already there. Prices in that region match the figures below at this volume.
 - About 400 messages in and 150 messages out per month. Most messages under 256 KB. A few megabytes of attachments.
 - Stored mail under 1 GB.
 - One customer-managed KMS key with rotation.

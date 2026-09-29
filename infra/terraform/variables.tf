@@ -1,7 +1,7 @@
 variable "aws_region" {
   type        = string
-  description = "SES receiving region. Inbound MX endpoints exist only in us-east-1, us-west-2, and eu-west-1."
-  default     = "us-west-2"
+  description = "SES region for inbound and outbound. A read-only audit found cyberphysical.us already verified in us-east-1, with the apex MX on inbound-smtp.us-east-1. Receiving exists only in us-east-1, us-west-2, and eu-west-1."
+  default     = "us-east-1"
 
   validation {
     condition     = contains(["us-east-1", "us-west-2", "eu-west-1"], var.aws_region)
@@ -59,9 +59,20 @@ variable "dns_ttl" {
   default     = 300
 }
 
+variable "ses_identity_mode" {
+  type        = string
+  description = "existing: adopt the SES identity already in this region and do not publish DKIM, SPF, MX, or MAIL FROM records. create: make a new identity (a later domain such as lojo.dev)."
+  default     = "existing"
+
+  validation {
+    condition     = contains(["existing", "create"], var.ses_identity_mode)
+    error_message = "ses_identity_mode must be existing or create."
+  }
+}
+
 variable "manage_dns" {
   type        = bool
-  description = "When true, Terraform writes Route 53 records. Leave false until the dry-run checklist in docs/RUNBOOK.md is done."
+  description = "When true, and only when ses_identity_mode is create, Terraform may write DNS for that new identity. existing mode refuses this flag. Suggested records for cyberphysical.us stay in the dns_plan output."
   default     = false
 }
 
@@ -79,8 +90,8 @@ variable "zone_id" {
 
 variable "manage_active_rule_set" {
   type        = bool
-  description = "When true, make this receipt rule set the active one for the whole region. A region has only one active set."
-  default     = false
+  description = "When true, make this receipt rule set the active one for the region. A region has only one active set. A read-only audit found none active, so the default turns receiving on for the mailbox. Re-check before apply. Setting this back to false removes the active association and stops all SES receiving in the region."
+  default     = true
 }
 
 variable "web_origins" {
@@ -152,10 +163,21 @@ variable "api_bundle" {
   default     = ""
 }
 
+variable "dmarc_rua_local_part" {
+  type        = string
+  description = "Local part for a dedicated DMARC aggregate mailbox. Suggested in dns_plan. Not published by Terraform. The receipt rule accepts it so reports are stored once the TXT is edited."
+  default     = "dmarc"
+
+  validation {
+    condition     = can(regex("^[a-z0-9._+-]+$", var.dmarc_rua_local_part))
+    error_message = "dmarc_rua_local_part must be a simple mailbox name."
+  }
+}
+
 variable "dmarc_policy" {
   type        = string
-  description = "DMARC p= value published when manage_dns is true. Start at none."
-  default     = "none"
+  description = "DMARC p= value. The live cyberphysical.us record is already quarantine. existing mode does not publish this. create mode uses it when manage_dns is true."
+  default     = "quarantine"
 
   validation {
     condition     = contains(["none", "quarantine", "reject"], var.dmarc_policy)

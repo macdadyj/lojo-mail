@@ -17,7 +17,7 @@ export function tableNamesFromEnv(env: NodeJS.ProcessEnv = process.env): TableNa
 export function documentClient(env: NodeJS.ProcessEnv = process.env): DynamoDBDocumentClient {
   const endpoint = env.AWS_ENDPOINT_URL;
   const client = new DynamoDBClient({
-    region: env.LOJO_REGION ?? env.AWS_REGION ?? "us-west-2",
+    region: env.LOJO_REGION ?? env.AWS_REGION ?? "us-east-1",
     ...(endpoint ? { endpoint } : {}),
   });
   return DynamoDBDocumentClient.from(client, { marshallOptions: { removeUndefinedValues: true } });

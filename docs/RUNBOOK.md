@@ -1,72 +1,75 @@
 # lojo-mail runbook
 
-Jon (or whoever he asks) runs these steps. The agent that wrote this repo did not have AWS credentials and did not run them. Do not skip the DNS audit. The `cyberphysical.us` zone already has 17 records and this project does not know what they are.
+Jon (or whoever he asks) runs these steps. Nothing in this repo has been applied. A read-only audit of the live account is already folded in below. Re-run the DNS audit before apply in case the zone moved.
 
-Region for everything in this stack: **us-west-2**. SES email receiving exists only in `us-east-1`, `us-west-2`, and `eu-west-1`. The Terraform variable rejects other regions.
+Region for this domain: **us-east-1**. SES already has a verified identity there, and the apex MX is already `10 inbound-smtp.us-east-1.amazonaws.com`. `aws_region` stays a variable. Receiving exists only in `us-east-1`, `us-west-2`, and `eu-west-1`.
+
+## Who can apply
+
+IAM user `grok-rw` can use Route 53, Route 53 Domains, and SES. That is not enough to apply this stack. Apply needs permission to create KMS, S3, DynamoDB, Lambda, IAM roles, API Gateway, CloudWatch Logs, and SSM parameters, and to read the existing SES identity. Use a principal that has those rights. Do not attach a broader policy to `grok-rw` from this repo, and do not put that user's keys in git.
+
+`grok-rw` is the right user later for the DNS edits in the plan output (DMARC `rua`, TLS-RPT, MTA-STS) and for Route 53 Domains. It cannot create the DNSSEC signing key.
+
+Other SES identities in the account, `cyberdevsec.com` and `jon@lojo.engineering`, are out of scope. Do not import them and do not point this receipt rule at them.
 
 ## 0. Tools
 
 - Terraform >= 1.5 (CI uses 1.9.8).
 - Node.js 20 or newer.
-- AWS CLI authenticated as a principal that can create the resources in `infra/terraform` and read Route 53. Administrator is enough for a personal account; a tighter IAM user is better if you already have one.
-- A KMS-backed decision about where the envelope private key will live (password manager is fine).
+- AWS CLI authenticated as the apply principal above, not as `grok-rw`.
+- A decision about where the envelope private key will live (a password manager is fine).
 
 ```bash
 cd infra/terraform
 terraform init
 ```
 
-The default backend is local. Before the first real apply, if you want state somewhere safer than a laptop, uncomment the S3 backend in `versions.tf`, create that bucket by hand (or a one-off bootstrap), and `terraform init -migrate-state`. Do not commit `*.tfstate`. It can contain resource IDs and, if you ever put a secret in a variable, the secret.
+The default backend is local. Before the first real apply, if you want state somewhere safer than a laptop, uncomment the S3 backend in `versions.tf`, create that bucket by hand, and `terraform init -migrate-state`. Do not commit `*.tfstate`.
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
-# edit terraform.tfvars — it is gitignored
 terraform plan
 ```
 
-Read the plan. It should want to create KMS, S3, DynamoDB, IAM, SES identity, a receipt rule set that is **not** active, two Lambdas, and an HTTP API. It should **not** want to change Route 53 while `manage_dns` is false.
+With the defaults (`ses_identity_mode = existing`, `manage_dns = false`, `manage_active_rule_set = true`, `aws_region = us-east-1`) the plan should:
 
-## 1. Keys and parameters (before apply is also fine)
+- Read the existing SES identity. It should not create one, and it should not create DKIM or MAIL FROM attributes.
+- Create KMS, S3, DynamoDB, IAM, a configuration set, a receipt rule set, the active association, two Lambdas, and an HTTP API.
+- Create **no** Route 53 records.
+
+`manage_dns = true` in existing mode fails the plan on purpose.
+
+## 1. Keys and parameters
 
 Generate the envelope keypair on a trusted machine. The private key never goes in AWS.
 
 ```bash
 npm run keygen -- --out ./keys
-# writes keys/envelope.public.jwk and keys/envelope.private.jwk
-# keys/ is gitignored except keys/README.md
 ```
 
-Put the public key where the processor can read it, and create the API token and (only if you will use Grok) the API key. These commands write secrets to SSM. They are the point; do not copy the values into Terraform.
-
 ```bash
-aws ssm put-parameter --region us-west-2 \
+aws ssm put-parameter --region us-east-1 \
   --name /lojo-mail/envelope-public-jwk \
   --type String \
   --value file://keys/envelope.public.jwk
 
-aws ssm put-parameter --region us-west-2 \
+aws ssm put-parameter --region us-east-1 \
   --name /lojo-mail/api-token \
   --type SecureString \
   --value "$(openssl rand -hex 32)"
 
-# Optional second token that is allowed to send. The first token can be read+write only.
-aws ssm put-parameter --region us-west-2 \
+aws ssm put-parameter --region us-east-1 \
   --name /lojo-mail/api-token-send \
   --type SecureString \
   --value "$(openssl rand -hex 32)"
 
-aws ssm put-parameter --region us-west-2 \
+aws ssm put-parameter --region us-east-1 \
   --name /lojo-mail/grok-api-key \
   --type SecureString \
   --value 'paste-the-xai-key-here'
 ```
 
-Store the SecureString values in the password manager at the same time. SSM is not a convenient place to recover a token you did not save. Standard SecureString parameters do not show the value again in `put-parameter` output; retrieve it once with `aws ssm get-parameter --with-decryption` and save it.
-
-If you are starting on Ollama instead, skip the Grok parameter and set `llm_provider = "ollama"` in `terraform.tfvars`. The lab host `http://100.96.1.90:11434` is on the tailnet. A Lambda in AWS cannot reach a tailnet address unless you specifically connect the VPC to Tailscale, which this stack does not do (that would be a NAT gateway and a subnet, and it would cost more than the rest of the system). Practical split:
-
-- **Receipt and storage** run in AWS.
-- **AI** either calls Grok or Bedrock from the Lambda, or you run the processor locally / on the lab machine against the bucket. For the first weeks, `llm_provider = "bedrock"` or `"grok"` is the one that works inside Lambda. Use Ollama for the local app (`npm run dev`) and for backfill.
+Store the SecureString values in the password manager. Skip the Grok parameter if you set `llm_provider = "bedrock"` or `"ollama"`. The lab Ollama host is on the tailnet. This stack does not connect the Lambda to it.
 
 ## 2. Build the Lambdas and apply
 
@@ -74,167 +77,118 @@ If you are starting on Ollama instead, skip the Grok parameter and set `llm_prov
 npm ci
 npm run build:lambda
 cd infra/terraform
-# terraform.tfvars:
-#   processor_zip = "../../packages/pipeline/dist/handler.zip"
-#   api_zip       = "../../packages/api/dist/api.zip"
 terraform plan
 terraform apply
 ```
 
-The default zips are placeholders that throw a clear error. Do not leave those in place if you expect mail to process.
+Point `processor_bundle` and `api_bundle` at the built zips before apply. The default zips throw a clear error.
 
-Note the outputs: bucket name, table names, API endpoint, DKIM tokens, and the DNS plan.
+The receipt rule accepts `lojo@cyberphysical.us` and `dmarc@cyberphysical.us` only. Other local parts at the domain still have no rule, so SES will not store them. That is deliberate.
 
-## 3. Verify the domain in SES (no MX change yet)
+Before apply, confirm again that no receipt rule set is active in us-east-1 (`aws ses describe-active-receipt-rule-set --region us-east-1`). The audit found none. If one appeared, set `manage_active_rule_set = false` and add a rule to the existing set instead. Activating this set replaces the only active set in the region.
 
-`terraform apply` creates the SES domain identity and Easy DKIM. DKIM token values show up as outputs only after apply (AWS generates them).
+## 3. Do not redo SES DNS
 
-Add **only** the three DKIM CNAMEs to Route 53, by hand or by a second apply that still has `manage_dns = false` for everything except what you type yourself. Each record is:
+The identity is already verified. Easy DKIM CNAMEs are already published. MAIL FROM `mail.cyberphysical.us` is already the feedback MX plus an SPF TXT. Do not create three more DKIM CNAMEs from `terraform output dkim_tokens`. Those tokens describe the keys already in DNS.
 
-```text
-<token>._domainkey.cyberphysical.us.  CNAME  <token>.dkim.amazonses.com.
-```
+Confirm in the SES console, region us-east-1:
 
-Wait until the SES console shows the identity as verified and DKIM as successful. This does not affect existing mail delivery.
+- Identity `cyberphysical.us` verified.
+- DKIM successful.
+- Custom MAIL FROM successful.
+
+Then stop. No Route 53 change in this step.
 
 ## 4. Production access and warm-up
 
-New accounts are in the SES sandbox: you can send only to verified identities, and the cap is 200 messages a day at one message per second. Receiving does not require production access. Sending to the rest of the world does.
+Receiving does not require production access. Sending to arbitrary recipients does. The audit did not show whether the account is still in the sandbox.
 
-Request production access in the SES console (Account dashboard → Request production access) for **us-west-2**:
+If it is, request production access in us-east-1 (transactional, personal mailbox, no dedicated IP, no purchased list). While you wait, send tests to a verified identity. Check `dkim=pass` on a received copy.
 
-- Mail type: transactional (this is a personal mailbox, not a campaign).
-- Website: whatever you already publish, or say it is a personal domain.
-- Use case, in your own words: personal mail for a single address, replacing a previous provider, low volume, no purchased lists.
-- Do not request a dedicated IP.
+Leave the live DMARC policy at `p=quarantine`. It is already there. Do not drop it to `p=none` to "start over." Warm up outbound the same way as any new stream: a handful of real messages a day, no list, no Virtual Deliverability Manager. Move toward `p=reject` only after reports show nothing legitimate is failing. Do not set `aspf=s`. Strict SPF alignment fails for a custom MAIL FROM at `mail.cyberphysical.us`.
 
-Approval can take a day or longer. While you wait:
+If the account was created in a new region after 21 July 2026 it may be on the SES Essentials plan. Switch to à la carte. Do not pick Pro. See [COSTS.md](COSTS.md).
 
-- Verify a second address you control and send a few messages to it.
-- Confirm DKIM passes (a received message's `Authentication-Results` should show `dkim=pass`).
-- Leave DMARC at `p=none` for the first week so you can see reports without rejecting anyone.
+## 5. DNS that already exists, and additions that stay a plan
 
-Warm-up, once production access is granted:
+Already in the zone. Do not touch:
 
-- Week 1: real personal mail only, a handful of messages a day. No announcements to a large list.
-- Do not turn on Virtual Deliverability Manager.
-- Watch the SES reputation dashboard. If complaint rate is non-zero, stop and find out why before sending more.
-- Move DMARC from `p=none` to `p=quarantine` after a week of passing reports, then to `p=reject` when you are sure nothing legitimate still sends with a missing DKIM signature (old devices, old "send mail as" settings).
+- NS and SOA
+- The ACM validation CNAME
+- The six Easy DKIM CNAMEs
+- `_amazonses` TXT
+- `mail.cyberphysical.us` MX `10 feedback-smtp.us-east-1.amazonses.com` and its SPF TXT
+- Apex SPF `v=spf1 include:amazonses.com ~all` (one TXT; do not add another; do not change `~all` to `-all` as part of this work)
+- Apex MX `10 inbound-smtp.us-east-1.amazonaws.com`
 
-## 5. MAIL FROM, SPF, DMARC, MTA-STS, TLS-RPT
+Optional cleanup, only after you confirm WorkMail is gone:
 
-Custom MAIL FROM is `mail.cyberphysical.us`. It needs **exactly one** MX record:
+- `autodiscover` CNAME
+- `_amazonchime` TXT
 
-```text
-mail.cyberphysical.us.  MX  10 feedback-smtp.us-west-2.amazonses.com.
-mail.cyberphysical.us.  TXT "v=spf1 include:amazonses.com ~all"
-```
+Suggested additions. `terraform output dns_plan` prints them. Terraform does not create them. `grok-rw` can make these edits later:
 
-AWS rejects the MAIL FROM setup if that subdomain has more than one MX.
+- Edit the existing `_dmarc` TXT in place to `v=DMARC1; p=quarantine; pct=100; fo=1; rua=mailto:dmarc@cyberphysical.us`. One record. The receipt rule already accepts `dmarc@` so the reports have somewhere to land.
+- Add `_smtp._tls` TXT `v=TLSRPTv1; rua=mailto:dmarc@cyberphysical.us`.
+- Serve `docs/mta-sts.txt` at `https://mta-sts.cyberphysical.us/.well-known/mta-sts.txt`, then add the `_mta-sts` TXT. The file is `mode: testing` and names the us-east-1 inbound MX. The TXT alone does nothing.
+- Host the OpenPGP public key at the WKD advanced URL (`npm run wkd-hash`). No DNS record until that HTTPS host exists. Publish only the public key.
+- Apex MX TTL is 1800 and the target is already correct. Lower it to 300 only before a future move off us-east-1.
 
-Apex SPF, only after you know whether an SPF TXT already exists (the audit will say):
+Optional, after mail works: turn on DNSSEC. The registrar is Gandi via Route 53 Domains, and DNSSEC is off. Enabling means a KMS key for the hosted zone, `aws route53 enable-hosted-zone-dnssec`, and a DS record at the registrar. `grok-rw` does not have KMS, so the signing key is a separate step. Do not combine it with the receipt apply.
 
-```text
-cyberphysical.us.  TXT "v=spf1 include:amazonses.com -all"
-```
-
-If an SPF record already exists, **edit that record** to add `include:amazonses.com`. Two SPF TXT records on the same name are a permanent error. Do not publish `-all` until you are sure no other service sends for the domain.
-
-DMARC, start relaxed:
-
-```text
-_dmarc.cyberphysical.us.  TXT "v=DMARC1; p=none; rua=mailto:lojo@cyberphysical.us; adkim=s; aspf=s; fo=1"
-```
-
-TLS-RPT:
-
-```text
-_smtp._tls.cyberphysical.us.  TXT "v=TLSRPTv1; rua=mailto:lojo@cyberphysical.us"
-```
-
-MTA-STS, after `https://mta-sts.cyberphysical.us/.well-known/mta-sts.txt` is served (the file in this repo is `docs/mta-sts.txt`, mode `testing`):
-
-```text
-_mta-sts.cyberphysical.us.  TXT "v=STSv1; id=<yyyymmddhhmm>"
-mta-sts.cyberphysical.us.   A or CNAME to the HTTPS host
-```
-
-Bump `id` whenever the policy file changes. Switch `mode: enforce` only after receiving works and you have seen a TLS report.
-
-`terraform output dns_plan` prints this set, with the real DKIM tokens filled in after apply.
-
-## 6. Dry-run checklist for MX cutover
-
-Do this on a day you can watch for bounces. The zone had 17 records when this project was specified. Do not assume they are "just a website."
+## 6. Checklist before apply
 
 ```bash
 aws route53 list-hosted-zones-by-name --dns-name cyberphysical.us \
   --query 'HostedZones[0].Id' --output text
 
-# Replace ZONE_ID. This is read-only.
 aws route53 list-resource-record-sets --hosted-zone-id ZONE_ID \
   --output json > /tmp/cyberphysical.zone.json
 
-node scripts/dns-audit.mjs /tmp/cyberphysical.zone.json cyberphysical.us
+node scripts/dns-audit.mjs /tmp/cyberphysical.zone.json cyberphysical.us us-east-1
+
+aws ses describe-active-receipt-rule-set --region us-east-1
 ```
 
-The script exits non-zero if it sees a blocker (an existing apex MX, a duplicate SPF, an existing MAIL FROM MX that is not SES). Read every warning. Then walk this list by hand:
+The audit script is read-only. On a zone that still matches the September 2026 picture it exits 0. An apex MX that is not SES us-east-1 is a blocker.
 
-- [ ] Record count noted. If it is not 17 anymore, the zone drifted; read the new records, do not ignore them.
-- [ ] SOA and NS records identified and left untouched.
-- [ ] Every A, AAAA, CNAME, and CAA that serves a website identified and left untouched.
-- [ ] Every TXT that is a site verification (Google, Apple, GitHub, and similar) left untouched.
-- [ ] Existing apex MX records written down, including priority and target. If they point at a live host, you need a plan for the mail that host still receives.
-- [ ] Existing SPF TXT found or confirmed absent. Merge plan written down. Not a second TXT.
-- [ ] Existing `_dmarc` found or confirmed absent.
-- [ ] Existing `*._domainkey` records found or confirmed absent.
-- [ ] `mail.cyberphysical.us` has no MX, or the one MX is the SES feedback endpoint.
-- [ ] `autodiscover` / `autoconfig` records noted. They are for old clients and are not required for lojo-mail.
-- [ ] DKIM CNAMEs already published and SES shows DKIM successful.
-- [ ] MAIL FROM domain shows success in SES.
-- [ ] A test message to a verified address passed SPF, DKIM, and DMARC.
-- [ ] Receipt rule set `lojo-mail` exists and is **not** yet the active set, or you have read the currently active set and you know what you will displace.
-- [ ] `terraform plan` with the intended DNS diff reviewed line by line.
-- [ ] You know how to revert the apex MX (the previous values are in the zone export you just saved).
+- [ ] SOA and NS left untouched.
+- [ ] ACM validation CNAME left untouched.
+- [ ] Six DKIM CNAMEs still present. No plan to add more.
+- [ ] `_amazonses` left untouched.
+- [ ] `mail.` MX and TXT left untouched.
+- [ ] Apex SPF is the single `include:amazonses.com` TXT. No second SPF.
+- [ ] Apex MX is `10 inbound-smtp.us-east-1.amazonaws.com`. Target will not change. TTL 1800 is fine for this apply.
+- [ ] DMARC is still the one `p=quarantine` TXT. `rua` is a later edit, not part of apply.
+- [ ] `autodiscover` and `_amazonchime` noted. Not deleted unless WorkMail is confirmed gone.
+- [ ] Website and other non-mail records left untouched.
+- [ ] No active receipt rule set in us-east-1, or you have decided not to activate this one.
+- [ ] `terraform plan` creates no Route 53 changes.
+- [ ] `ses_identity_mode` is `existing` and `manage_dns` is false.
 
-Only then:
+Then `terraform apply`. Watch for an object under `raw/` and a DynamoDB item whose body is not plaintext. Send from an outside account to `lojo@cyberphysical.us`.
 
-```hcl
-manage_dns                 = true
-dns_cutover_confirmation   = "I-audited-the-existing-zone"
-manage_active_rule_set     = true
-zone_id                    = "Z..."
-```
-
-`manage_dns = true` without that exact confirmation string fails the plan on purpose. `manage_active_rule_set` replaces the region's active receipt rule set. If another identity in this account uses SES receiving, stop and add a rule to the existing set instead of activating this one.
-
-```bash
-terraform plan    # the diff should be DNS records and the active rule set, nothing surprising
-terraform apply
-```
-
-Watch `aws route53 list-resource-record-sets` and an external lookup (`dig MX cyberphysical.us`) until the answer is:
+`dig MX cyberphysical.us` should keep answering:
 
 ```text
-10 inbound-smtp.us-west-2.amazonaws.com.
+10 inbound-smtp.us-east-1.amazonaws.com.
 ```
-
-Send a message from an outside account. Confirm it lands in S3 under `raw/` and a DynamoDB item appears. Confirm the body attribute in DynamoDB is not the plaintext.
 
 ## 7. Revert
 
-If inbound breaks:
+The MX was already SES. Do not point it somewhere else to undo a bad apply.
 
-1. Put the previous apex MX back (from `/tmp/cyberphysical.zone.json`) immediately. DNS TTL on the records this stack creates is 300 seconds so this is a few minutes, not a day. Lower it further in `terraform.tfvars` if you want.
-2. Set `manage_active_rule_set` back to false only after you have restored whatever rule set was active before. Deactivating by deleting the active association stops all SES receiving in the region.
+1. Set `manage_active_rule_set` to false and apply, or delete the active rule set association. That returns the region to "no active receipt rule set," which is the previous state. It also stops any other SES receiving in us-east-1, so do it only if this set is the one you just activated.
+2. Leave DKIM, SPF, MAIL FROM, DMARC, and the MX target as they were.
 
 ## 8. Day-two
 
 - Open the PWA over HTTPS, unlock with the private JWK, and confirm a real message decrypts.
-- Put a $10 budget alarm on the `Project=lojo-mail` tag. See [COSTS.md](COSTS.md).
+- Put a budget alarm on the `Project=lojo-mail` tag. See [COSTS.md](COSTS.md).
 - Follow [MIGRATION.md](MIGRATION.md) for Tuta.
-- Rotate the API token by writing a new SSM value and restarting the API Lambda (`aws lambda update-function-configuration` is enough to pick up a new decrypt on the next cold start; the function reads SSM per request, so a restart is not even required).
-- To switch the domain later, change `domain`, apply a new identity, and repeat sections 3–6. Do not delete the old identity until mail to it can die.
+- Add the DMARC `rua` when you want reports. Reports arrive at `dmarc@cyberphysical.us` and go through the same pipeline.
+- Rotate the API token by writing a new SSM value. The function reads SSM per request.
+- To switch the domain later, set `domain` and `ses_identity_mode = create`, then repeat identity, DKIM, and DNS for that new name. Do not delete the `cyberphysical.us` identity until mail to it can die. `manage_dns` is allowed only in create mode, and only with the confirmation string, after an audit of the new zone.
 
 ## 9. Local demo, no AWS
 

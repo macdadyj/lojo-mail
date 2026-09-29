@@ -1,4 +1,13 @@
-resource "aws_sesv2_email_identity" "domain" {
+# cyberphysical.us, cyberdevsec.com, and jon@lojo.engineering already exist in
+# SES us-east-1. This stack adopts var.domain only. It does not import or edit
+# the other identities.
+data "aws_sesv2_email_identity" "existing" {
+  count          = var.ses_identity_mode == "existing" ? 1 : 0
+  email_identity = var.domain
+}
+
+resource "aws_sesv2_email_identity" "created" {
+  count          = var.ses_identity_mode == "create" ? 1 : 0
   email_identity = var.domain
 
   dkim_signing_attributes {
@@ -6,10 +15,23 @@ resource "aws_sesv2_email_identity" "domain" {
   }
 }
 
-resource "aws_sesv2_email_identity_mail_from_attributes" "domain" {
-  email_identity         = aws_sesv2_email_identity.domain.email_identity
+resource "aws_sesv2_email_identity_mail_from_attributes" "created" {
+  count                  = var.ses_identity_mode == "create" ? 1 : 0
+  email_identity         = aws_sesv2_email_identity.created[0].email_identity
   mail_from_domain       = local.mail_from_domain
   behavior_on_mx_failure = "REJECT_MESSAGE"
+}
+
+locals {
+  ses_identity_arn = one(concat(
+    aws_sesv2_email_identity.created[*].arn,
+    data.aws_sesv2_email_identity.existing[*].arn,
+  ))
+  dkim_attributes = one(concat(
+    aws_sesv2_email_identity.created[*].dkim_signing_attributes,
+    data.aws_sesv2_email_identity.existing[*].dkim_signing_attributes,
+  ))
+  dkim_tokens = tolist(local.dkim_attributes[0].tokens)
 }
 
 resource "aws_sesv2_configuration_set" "outbound" {
@@ -35,7 +57,7 @@ resource "aws_ses_receipt_rule_set" "main" {
 resource "aws_ses_receipt_rule" "store" {
   name          = "store-raw"
   rule_set_name = aws_ses_receipt_rule_set.main.rule_set_name
-  recipients    = [local.mailbox]
+  recipients    = [local.mailbox, local.dmarc_mailbox]
   enabled       = true
   scan_enabled  = true
   tls_policy    = "Require"
