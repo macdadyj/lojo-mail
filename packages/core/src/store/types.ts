@@ -25,8 +25,15 @@ export interface MailStore {
   putThread(thread: Thread): Promise<void>;
   getThread(id: string): Promise<Thread | null>;
   listThreads(limit?: number): Promise<Thread[]>;
-  /** Drops an emptied thread out of the listing index. There is no DeleteItem. */
+  /** Drops an emptied thread out of the listing index. Threads are never deleted. */
   retireThread(id: string): Promise<void>;
+  /**
+   * The only hard delete, used by the trash purge alone: removes the message
+   * row only if it is still in trash with exactly this `keepUntil`, so a
+   * restore (or a new trash with a new window) in between wins. Returns the
+   * deleted row, or null when the condition failed.
+   */
+  deleteTrashedMessage(id: string, keepUntil: string): Promise<StoredMessage | null>;
 
   putDraft(draft: Draft): Promise<void>;
   getDraft(id: string): Promise<Draft | null>;
@@ -79,7 +86,7 @@ export interface UpdateOptions {
   condition?: Condition;
 }
 
-/** The DynamoDB surface the store needs. There is deliberately no scan. */
+/** The DynamoDB surface the store needs. There is deliberately no scan, and delete always takes a condition. */
 export interface DynamoLike {
   get(table: string, key: Record<string, string>): Promise<Item | null>;
   put(table: string, item: Item, opts?: { ifAbsent?: string }): Promise<boolean>;
@@ -87,6 +94,8 @@ export interface DynamoLike {
   query(table: string, opts: QueryOptions): Promise<Item[]>;
   /** Returns the updated item, or null when the condition failed. */
   update(table: string, key: Record<string, string>, opts: UpdateOptions): Promise<Item | null>;
+  /** Returns the deleted item, or null when the condition failed. Only the trash purge role may call DeleteItem. */
+  delete(table: string, key: Record<string, string>, condition: Condition): Promise<Item | null>;
 }
 
 export interface TableNames {

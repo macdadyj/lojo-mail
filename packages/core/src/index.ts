@@ -80,6 +80,8 @@ export { evaluateRules, ruleMatches, senderMatches } from "./rules/match.ts";
 export { RULE_FOLDERS } from "./rules/types.ts";
 export type { ReplyAction, Rule, RuleAction, RuleAuthor, RuleFolder, RuleHit, RuleMatch, RuleOutcome, RulesDocument } from "./rules/types.ts";
 export { checkRulesFile, emptyRules, parseRulesDocument, rulesHash } from "./rules/validate.ts";
+export { isPurgeDue, ownedBlobKeys, PURGE_MAX_PER_RUN, PURGE_MIN_AGE_DAYS, purgeExpiredTrash, purgeModeFrom } from "./trash/purge.ts";
+export type { PurgeDeps, PurgeMode, PurgeResult } from "./trash/purge.ts";
 export { MemorySender } from "./send.ts";
 export type { MailSender, OutboundMessage } from "./send.ts";
 export { DynamoMailStore } from "./store/dynamo.ts";

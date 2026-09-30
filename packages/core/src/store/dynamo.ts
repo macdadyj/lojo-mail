@@ -120,6 +120,11 @@ export class DynamoMailStore implements MailStore {
     await this.db.update(this.tables.threads, { id }, { remove: ["kind"], set: { messageIds: [], unreadCount: 0 }, condition: { exists: ["id"] } });
   }
 
+  async deleteTrashedMessage(id: string, keepUntil: string): Promise<StoredMessage | null> {
+    const deleted = await this.db.delete(this.tables.messages, { id }, { equals: { folder: "trash", keepUntil } });
+    return deleted ? (deleted as unknown as StoredMessage) : null;
+  }
+
   async putDraft(draft: Draft): Promise<void> {
     await this.db.put(this.tables.drafts, asItem({ ...draft, kind: "draft" }));
   }

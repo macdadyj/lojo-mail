@@ -132,6 +132,15 @@ export class MemoryDynamo implements DynamoLike {
     return clone(next);
   }
 
+  async delete(table: string, key: Record<string, string>, condition: Condition): Promise<Item | null> {
+    const { schema, rows } = this.table(table);
+    const id = this.keyOf(schema, key);
+    const current = rows.get(id);
+    if (!current || !matches(current, condition)) return null;
+    rows.delete(id);
+    return clone(current);
+  }
+
   itemSize(table: keyof TableNames, key: Record<string, string>): number {
     const { schema, rows } = this.table(this.names[table]);
     const found = rows.get(this.keyOf(schema, key));

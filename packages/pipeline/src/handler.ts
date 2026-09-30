@@ -24,6 +24,8 @@ import { S3BlobStore } from "./s3-blobs.ts";
 import { SesSender } from "./ses.ts";
 import { ttlCache } from "./ttl-cache.ts";
 
+export { purge } from "./purge.ts";
+
 export interface S3Notification {
   Records?: Array<{
     s3: {
