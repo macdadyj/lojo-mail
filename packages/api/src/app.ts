@@ -1,4 +1,4 @@
-import { FOLDERS, MailError, type Actor, type Folder, type Mailbox, type PgpMode, type ReviewedDraft, type TrashActor, type ViewOptions } from "@lojo/core";
+import { FOLDERS, keyFingerprint, MailError, type Actor, type Folder, type Mailbox, type PgpMode, type ReviewedDraft, type TrashActor, type ViewOptions } from "@lojo/core";
 import { HttpMailClient } from "@lojo/mcp/http";
 import { handleMcpPost, mcpMethodNotAllowed, type McpHttpReply } from "@lojo/mcp/remote";
 import { Hono, type Context } from "hono";
@@ -431,6 +431,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       dailyTokenBudget: deps.info.dailyTokenBudget,
       budgetUsed: await mailbox.store.getBudget(day),
       unlocked: mailbox.unlocked,
+      envelopeKeyFingerprint: await keyFingerprint(mailbox.publicJwk),
       dev: deps.dev,
       principal: c.get("principal").kind,
     });

@@ -89,12 +89,22 @@ export async function sealBytes(plaintext: Uint8Array, publicJwk: EcPublicJwk, c
   };
 }
 
-export async function openBytes(blob: EnvelopeBlob, privateJwk: EcPrivateJwk, context: string): Promise<Uint8Array> {
+/** A short, stable fingerprint of the envelope public key, for comparing keys by eye. */
+export async function keyFingerprint(publicJwk: Pick<EcPublicJwk, "x" | "y">): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`P-256:${publicJwk.x}:${publicJwk.y}`)));
+  const hex = [...digest.subarray(0, 10)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return hex.match(/.{4}/g)?.join("-") ?? hex;
+}
+
+/** Either the JWK or an already imported (typically non-extractable) ECDH private key. */
+export type EnvelopePrivateKey = EcPrivateJwk | CryptoKey;
+
+export async function openBytes(blob: EnvelopeBlob, key: EnvelopePrivateKey, context: string): Promise<Uint8Array> {
   const aad = requireContext(context);
   if (blob.v !== 2 || blob.alg !== ENVELOPE_ALG) {
     throw new Error(`Unsupported envelope ${String(blob.v)} ${String(blob.alg)}`);
   }
-  const privateKey = await importPrivate(privateJwk);
+  const privateKey = key instanceof CryptoKey ? key : await importPrivate(key);
   const epk = await importPublic(blob.epk);
   const shared = await crypto.subtle.deriveBits({ name: "ECDH", public: epk }, privateKey, 256);
   const aes = await aesKeyFromShared(shared, "decrypt");
@@ -113,8 +123,8 @@ export async function sealJson(value: unknown, publicJwk: EcPublicJwk, context: 
   return sealBytes(encoded, publicJwk, context);
 }
 
-export async function openJson<T>(blob: EnvelopeBlob, privateJwk: EcPrivateJwk, context: string): Promise<T> {
-  const plain = await openBytes(blob, privateJwk, context);
+export async function openJson<T>(blob: EnvelopeBlob, key: EnvelopePrivateKey, context: string): Promise<T> {
+  const plain = await openBytes(blob, key, context);
   return JSON.parse(new TextDecoder().decode(plain)) as T;
 }
 
