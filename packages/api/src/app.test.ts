@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { keyFingerprint } from "@lojo/core";
 import { fixture } from "@lojo/core/testing";
 import { sesInput } from "./ses.ts";
 import { testApp } from "./test-app.ts";
@@ -119,6 +120,13 @@ test("vector backfill needs write and body, and reports what it did", async () =
   assert.deepEqual(res.json, { embedded: 0, unreadable: 0, failed: 0, remaining: 0 });
   const settings = await api.call("/v1/settings", { token: "read-token" });
   assert.equal(settings.json.embedProvider, "none");
+});
+
+test("settings publish the envelope key fingerprint, so the web app can check an unwrapped key belongs to this mailbox", async () => {
+  const api = await testApp();
+  const settings = await api.call("/v1/settings", { token: "read-token" });
+  assert.equal(settings.json.envelopeKeyFingerprint, await keyFingerprint(api.publicJwk));
+  assert.ok(!JSON.stringify(settings.json).includes(api.privateJwk.d), "never the private key");
 });
 
 test("a CORS preflight is answered without a token, so API Gateway's CORS headers can reach the browser", async () => {

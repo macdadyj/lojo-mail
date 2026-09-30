@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api.ts";
 import { person, when, type ActionItem, type AttachmentMeta, type Message } from "./types.ts";
-import { downloadAttachment, openMessage } from "./unlock.ts";
+import { downloadAttachment, onKeyChange, openMessage } from "./unlock.ts";
 
 function uniqueItems(items: ActionItem[]): ActionItem[] {
   const seen = new Set<string>();
@@ -31,16 +31,25 @@ export function Reader({ threadId, onChanged }: { threadId: string; onChanged: (
 
   useEffect(() => {
     let cancel = false;
-    setError(null);
-    fetchThread()
-      .then((opened) => {
-        if (!cancel) setMessages(opened);
-      })
-      .catch((err: unknown) => {
-        if (!cancel) setError(err instanceof Error ? err.message : "Could not open the thread");
-      });
+    const load = () => {
+      setError(null);
+      fetchThread()
+        .then((opened) => {
+          if (!cancel) setMessages(opened);
+        })
+        .catch((err: unknown) => {
+          if (!cancel) setError(err instanceof Error ? err.message : "Could not open the thread");
+        });
+    };
+    load();
+    // Locking drops the decrypted bodies from the page; unlocking opens them.
+    const unsubscribe = onKeyChange(() => {
+      setMessages([]);
+      load();
+    });
     return () => {
       cancel = true;
+      unsubscribe();
     };
   }, [threadId]);
 
