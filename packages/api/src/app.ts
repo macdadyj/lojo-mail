@@ -18,6 +18,15 @@ interface AppDeps {
   dev: boolean;
   corsOrigin?: string[];
   info: { mailbox: string; domain: string; llmProvider: string; embedProvider?: string; dailyTokenBudget: number };
+  /** One entry per authenticated request, so each token's use can be traced. Never bodies or query strings. */
+  accessLog?: (entry: AccessLogEntry) => void;
+}
+
+export interface AccessLogEntry {
+  principal: string;
+  method: string;
+  path: string;
+  status: number;
 }
 
 type Vars = { principal: Principal };
@@ -166,7 +175,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const principal = deps.tokens.principal(authorization, null);
     if (!principal) return c.json({ error: "unauthorized" }, 401, MCP_CHALLENGE);
     const mailbox = new HttpMailClient("http://lojo.internal", token, (url, init) => Promise.resolve(app.request(url, init)));
-    return mcpResponse(await handleMcpPost(await c.req.text(), c.req.raw.headers, { label: principal.label, scopes: principal.scopes, mailbox }));
+    const reply = mcpResponse(await handleMcpPost(await c.req.text(), c.req.raw.headers, { label: principal.label, scopes: principal.scopes, mailbox }));
+    deps.accessLog?.({ principal: principal.label, method: "POST", path: "/mcp", status: reply.status });
+    return reply;
   });
   app.on(["GET", "DELETE", "PUT", "PATCH"], "/mcp", () => mcpResponse(mcpMethodNotAllowed()));
 
@@ -176,6 +187,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (!principal) return c.json({ error: "unauthorized" }, 401);
     c.set("principal", principal);
     await next();
+    deps.accessLog?.({ principal: principal.label, method: c.req.method, path: c.req.path, status: c.res.status });
   });
 
   app.get("/v1/session", (c) => {

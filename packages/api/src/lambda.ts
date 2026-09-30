@@ -105,6 +105,7 @@ async function buildApp() {
     // The login-failure alarm is a CloudWatch metric filter on this line.
     loginThrottle: new LoginThrottle(store, { onFailure: (source) => console.warn(JSON.stringify({ event: "login_failed", source })) }),
     clientAddress: (c) => getConnInfo(c).remote.address,
+    accessLog: (entry) => console.log(JSON.stringify({ event: "api_request", ...entry })),
     dev: false,
     info: {
       mailbox: config.mailbox,

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { memoryWorld, reviewOf, type WorldOptions } from "@lojo/core/testing";
-import { createApp } from "./app.ts";
+import { createApp, type AccessLogEntry } from "./app.ts";
 import { TokenBook } from "./auth.ts";
 import { LoginThrottle, Sessions, hashPassphrase } from "./session.ts";
 
@@ -23,12 +23,14 @@ export async function testApp(opts: WorldOptions & { dev?: boolean; now?: () => 
     passphraseHash: cachedHash,
     ...(opts.now ? { now: () => (opts.now as () => Date)().getTime() } : {}),
   });
+  const accessLog: AccessLogEntry[] = [];
   const app = createApp({
     mailbox: world.mailbox,
     tokens,
     sessions,
     loginThrottle: new LoginThrottle(world.store, opts.now ? { now: () => (opts.now as () => Date)().getTime() } : {}),
     clientAddress: (c) => c.req.header("x-test-source-ip") ?? "192.0.2.10",
+    accessLog: (entry) => accessLog.push(entry),
     dev: opts.dev ?? false,
     info: { mailbox: world.config.mailbox, domain: world.config.domain, llmProvider: "mock", dailyTokenBudget: world.config.dailyTokenBudget },
   });
@@ -61,5 +63,5 @@ export async function testApp(opts: WorldOptions & { dev?: boolean; now?: () => 
   /** The body the web app posts to `/approval` for the draft as it is stored now. */
   const review = (draftId: string) => reviewOf(world.mailbox, draftId);
 
-  return { ...world, app, tokens, sessions, call, login, review };
+  return { ...world, app, tokens, sessions, call, login, review, accessLog };
 }

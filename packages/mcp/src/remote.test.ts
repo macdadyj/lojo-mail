@@ -166,3 +166,21 @@ test("a batch from an older client gets one reply per request", async () => {
     [1, 2],
   );
 });
+
+test("every request is access-logged under the token that made it, including tool calls made through /mcp", async () => {
+  const api = await testApp();
+  await api.ingest(fixture("personal.eml"));
+  await rpc(api, "read-token", "tools/call", { name: "list_inbox", arguments: {} });
+  await rpc(api, "read-token", "tools/call", { name: "get_action_items", arguments: {} });
+  await rpc(api, "nope", "tools/list");
+  await api.call("/v1/action-items", { token: "read-token" });
+  await api.call("/v1/threads/thr_missing", { token: "body-token" });
+  assert.deepEqual(api.accessLog, [
+    { principal: "read", method: "GET", path: "/v1/inbox", status: 200 },
+    { principal: "read", method: "POST", path: "/mcp", status: 200 },
+    { principal: "read", method: "POST", path: "/mcp", status: 200 },
+    { principal: "read", method: "GET", path: "/v1/action-items", status: 403 },
+    { principal: "body", method: "GET", path: "/v1/threads/thr_missing", status: 404 },
+  ]);
+  assert.ok(!JSON.stringify(api.accessLog).includes("read-token"), "the token itself is never logged");
+});
