@@ -70,10 +70,21 @@ resource "aws_ses_receipt_rule" "store" {
     object_key_prefix = "raw/"
   }
 
-  depends_on = [aws_s3_bucket_policy.mail]
+  # SES writes its setup object, and then mail, the moment the rule exists. Without
+  # these, a fresh apply can create the rule before bucket SSE-KMS (objects land as
+  # AES256) or before the processor trigger (objects sit in raw/).
+  depends_on = [
+    aws_kms_key.mail,
+    aws_s3_bucket_server_side_encryption_configuration.mail,
+    aws_s3_bucket_policy.mail,
+    aws_lambda_permission.s3_invoke,
+    aws_s3_bucket_notification.raw,
+  ]
 }
 
 resource "aws_ses_active_receipt_rule_set" "main" {
   count         = var.manage_active_rule_set ? 1 : 0
   rule_set_name = aws_ses_receipt_rule_set.main.rule_set_name
+
+  depends_on = [aws_ses_receipt_rule.store]
 }

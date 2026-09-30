@@ -19,7 +19,7 @@
     "import": "tsx packages/importer/src/cli.ts",
     "build:web": "npm run build -w @lojo/web",
     "build:lambda": "npm run build -w @lojo/pipeline && npm run build -w @lojo/api",
-    "infra:validate": "terraform -chdir=infra/terraform init -backend=false -input=false && terraform -chdir=infra/terraform validate && terraform -chdir=infra/terraform fmt -check -recursive && terraform -chdir=infra/terraform test",
+    "infra:validate": "terraform -chdir=infra/terraform init -backend=false -input=false && terraform -chdir=infra/terraform validate && terraform -chdir=infra/terraform fmt -check -recursive && node scripts/check-tf-order.mjs && terraform -chdir=infra/terraform test",
     "secrets:check": "node scripts/check-no-secrets.mjs",
     "bundles:check": "node scripts/check-bundles.mjs",
     "passphrase-hash": "tsx scripts/passphrase-hash.ts"
