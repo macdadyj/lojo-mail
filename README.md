@@ -15,7 +15,8 @@ Nothing in this repo deploys itself. Terraform plans; it does not apply. There a
 | [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | Connecting Cursor, Grok, and local models (Ollama); choosing the AI and embedding provider; semantic search |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | Exact steps Jon runs: parameters, apply, first test email, DLQ redrive, rollback |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | First-deploy live test: a test message to a test address through SES, the encrypted bucket, and the processor, before real mail is switched on |
-| [docs/THUNDERBIRD.md](docs/THUNDERBIRD.md) | Thunderbird on Linux through the local IMAP/SMTP bridge: install, account setup, what send and delete do |
+| [docs/THUNDERBIRD.md](docs/THUNDERBIRD.md) | Thunderbird as the full mail client through the local IMAP/SMTP bridge: install, account setup, direct send, Drafts, delete |
+| [docs/BOTS.md](docs/BOTS.md) | Bots managing your mail: Grok Bot, Grok Build, Cursor, grok.com, local Ollama; bot drafts approved by Send in Thunderbird |
 | [config/rules.example.json](config/rules.example.json) | Mail rules: sort, label, archive, trash (restorable), and replies (drafts by default; guarded auto-send). See SECURITY.md, mail rules |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | Leaving Tuta (`lojo@tuta.io`) without IMAP, locally or straight into AWS |
 | [qa/REVIEW_REPORT.md](qa/REVIEW_REPORT.md) | Independent pre-deploy review, with evidence and screenshots under `qa/` |
