@@ -12,6 +12,9 @@ Three ways to search and work the mailbox from an assistant, and one switch for 
 | Cursor | stdio MCP server (`packages/mcp`) or remote MCP at `/mcp` | Jon's machine / API Gateway | `read` |
 | Grok (xAI API, Grok Build, grok.com) | remote MCP at `POST /mcp`, Streamable HTTP | xAI's servers call the API | `read` |
 | Local models (Ollama, llama.cpp, vLLM, LM Studio) | `lojo-local` CLI and tool-calling adapter (`packages/local`) | Jon's machine | whatever the token has, narrowed by `LOJO_API_SCOPES` |
+| Thunderbird | local IMAP + SMTP bridge (`packages/bridge`), see [THUNDERBIRD.md](THUNDERBIRD.md) | Santa Computa, 127.0.0.1 | the bridge token: `read`, `write`, `body`, `compose` |
+
+Assistants cannot change Jon's mail rules. With `write` they can only pause the rules, engage the auto-send kill switch, or disable one rule (`POST /v1/rules/switches`, `POST /v1/rules/:id/disable`); with `read` they can list them and dry-run them against a message (`GET /v1/rules`, `POST /v1/rules/test`). See [SECURITY.md](SECURITY.md#mail-rules-and-automation).
 
 ## Tokens: one per client
 

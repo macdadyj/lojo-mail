@@ -110,6 +110,7 @@ aws ssm put-parameter --region us-east-1 --name /lojo-mail/pgp-signing-passphras
 | `gemini-api-key` | processor, API | only with `"gemini"`, or `"vertex"` in express mode |
 | `vertex-sa-json` | processor, API | only with `"vertex"` and a service account (the key file's JSON) |
 | `agent-tokens` | API | no; one token per assistant, see [INTEGRATIONS.md](INTEGRATIONS.md#tokens-one-per-client) |
+| `bridge-token` | API | no; only for Thunderbird through the local bridge, see [THUNDERBIRD.md](THUNDERBIRD.md). At least 32 characters: `openssl rand -base64 36` |
 
 Store the SecureString values in the password manager. Skip the Grok parameter if you set `llm_provider = "bedrock"` or `"ollama"`. Create a provider key parameter only for the provider you select; [INTEGRATIONS.md](INTEGRATIONS.md#server-side-ai-providers) lists them. The lab Ollama host is on the tailnet. This stack does not connect the Lambda to it.
 
@@ -300,6 +301,14 @@ Netlify and Cloudflare Pages read `_headers` as it is. On CloudFront, copy the s
 - Rotate a token, the passphrase hash, or the session secret by writing a new SSM value (`--overwrite`). The API caches its configuration for `LOJO_CONFIG_TTL_MS` (5 minutes by default), so the old value keeps working for up to that long in a warm container. Rotating the session secret signs everyone out.
 - Point `alarm_actions` at an SNS topic if you want the DLQ, error, raw/ swept, and sign-in failure alarms to page you. The raw/ swept alarm means the S3 notification missed mail and the sweep delivered it; see [DEPLOY.md](DEPLOY.md#if-mail-sits-in-raw). `login_failure_alarm_threshold` (default 20 per hour) sets when failed sign-ins across all sources trip the alarm. If it fires and it was not you, rotate the passphrase hash and the session secret.
 - To switch the domain later, set `domain` and `ses_identity_mode = create`, then repeat identity, DKIM, and DNS for that new name. Do not delete the `cyberphysical.us` identity until mail to it can die. `manage_dns` is allowed only in create mode, and only with the confirmation string, after an audit of the new zone.
+
+### Mail rules
+
+- Start from `config/rules.example.json`. Check a file with `npm run rules -- validate my-rules.json`; it lists every rule that trashes or auto-sends. Push it with `npm run rules -- push my-rules.json --api "$API"`: it asks you to type `yes`, then for your passphrase, and saves with a human session. Tokens cannot save rules.
+- Try a rule against a stored message before relying on it: `curl -s "$API/v1/rules/test" -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"messageId":"msg_…"}'`. It lists the matching rules and every reason an auto-send would be refused.
+- Stop everything at once: `curl -s "$API/v1/rules/switches" -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"paused":true}'`. `{"killSwitch":true}` stops only auto-send. Any `write` token can do this; only your session can undo it (Settings, or `npm run rules -- push` with `"paused": false`).
+- Trashed by a rule by mistake: `POST /v1/messages/:id/restore`. Rule actions are in the audit log (`GET /v1/audit`, actions `rule.apply`, `rule.trash`, `rule.reply`, `rule.autosend`).
+- Auto-send stays off until `auto_send_enabled = true` in `terraform.tfvars` and an apply; the plan shows only the processor's SES statement and `LOJO_AUTO_SEND` changing. Without it, auto-send rules write drafts for approval.
 
 ## 11. Local demo, no AWS
 

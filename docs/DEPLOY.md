@@ -275,6 +275,23 @@ terraform apply
 
 To turn semantic search off again, set `embed_provider = "none"` and apply. Stored vectors stay until they are cleared; see [SECURITY.md](SECURITY.md#residual-risks).
 
+**Mail rules.** Rules work without any Terraform change: save them from your session ([RUNBOOK.md](RUNBOOK.md#mail-rules)). Only auto-send needs the flag:
+
+```bash
+# terraform.tfvars, only when a rule really needs to answer without you
+auto_send_enabled = true
+```
+
+```bash
+terraform plan    # the processor role gains RuleAutoSendAsMailbox; LOJO_AUTO_SEND becomes "on"; nothing else
+terraform apply
+```
+
+- [ ] With the flag off, a message that matches an auto-send rule leaves a draft under Drafts → "Waiting for your approval" and an audit row `rule.reply` / `autosend_refused` naming `auto-send is disabled on this deployment`.
+- [ ] With the flag on, a message from an allowlisted sender with DMARC pass gets one reply with `Auto-Submitted: auto-replied`, and the audit table has `rule.autosend` / `sent`. A second message from the same sender that day becomes a draft (`per-sender daily limit`).
+
+**Thunderbird.** Create the bridge token (`/lojo-mail/bridge-token`, [RUNBOOK.md](RUNBOOK.md#1-keys-and-parameters)), wait 5 minutes for the API to reload, then follow [THUNDERBIRD.md](THUNDERBIRD.md) on Santa Computa. `curl -s "$API/v1/session" -H "Authorization: Bearer $BRIDGE_TOKEN"` must show `{"kind":"token","label":"bridge","scopes":["read","write","body","compose"]}`.
+
 ## If mail sits in raw/
 
 The sweep ingests anything older than 5 minutes on its next run, and the `lojo-mail-raw-swept` alarm says the primary trigger missed it. Find out why:

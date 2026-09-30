@@ -122,6 +122,7 @@ Every request carries a bearer credential. The API resolves it to a principal wi
 
 - **API tokens** (`kind: "token"`) come from SSM (`/lojo-mail/api-token`, `/lojo-mail/api-token-send`) or dev env vars. They have scopes. The MCP server holds one of these. An API token cannot become a human session.
 - **Agent tokens** are API tokens for one assistant each (Cursor, Grok, a local model), from the SecureString `/lojo-mail/agent-tokens` (a JSON array of `{label, token, scopes}`; `LOJO_AGENT_TOKENS` in dev). If an entry asks for `send` or `admin`, has a token shorter than 32 characters in production, or reuses a label, the API loads no agent tokens at all and logs `agent_tokens_invalid` (fail closed for agents; the web app and the main API token keep working). Changes take effect within the 5-minute configuration reload. Each resolves to the principal `agent:<label>`, and every authenticated request is logged as an `api_request` line with the principal, method, path, and status (never the token, a body, or a query string). Tests: `packages/api/src/auth.test.ts`, `packages/mcp/src/remote.test.ts`.
+- **The bridge token** (`/lojo-mail/bridge-token`, `LOJO_BRIDGE_TOKEN` in dev) is the one token with the `compose` scope, for Jon's own mail client through the local Thunderbird bridge. Scopes `read`, `write`, `body`, `compose`: never `send` or `admin`. Production refuses one shorter than 32 characters or equal to the dev value; an invalid one is logged as `bridge_token_invalid` and not loaded, and the rest of the API keeps working. See [Thunderbird bridge](#thunderbird-bridge).
 - **Human sessions** (`kind: "human"`) come only from `POST /v1/session/login { passphrase }`.
   - The passphrase is checked against an scrypt hash in SSM `/lojo-mail/human-passphrase-hash` (created with `npm run passphrase-hash`, minimum 12 characters) using a constant-time comparison.
   - Failed sign-ins are throttled **per source**, never globally. There is no lockout that anyone else can trigger for Jon.
@@ -170,9 +171,9 @@ Every email is untrusted text. It reaches models in two places: the processor's 
 
 | Capability | Inbound analysis model | MCP agent or `lojo-local` model (`read`, `write`, `send`) |
 | --- | --- | --- |
-| Send mail | No. The pipeline has no sender. | No. No MCP tool sends. `approve-and-send` needs a human-minted token. |
+| Send mail | No. The model has no tools. The processor sends only for an auto-send rule Jon wrote, after the guards in [Mail rules](#mail-rules-and-automation); off unless `auto_send_enabled`. | No. No MCP tool sends. `approve-and-send` needs a human-minted token. |
 | Choose draft recipients | No. Recipients come from headers. | Only known correspondents (see below). |
-| Trash or delete | No. | No. `move_message` does not accept `trash`, and the service layer refuses trash for any non-human actor. There is no delete API. |
+| Trash or delete | No. A trash rule Jon wrote can move mail to trash (restorable); nothing hard deletes. | No. `move_message` does not accept `trash`, and the service layer refuses trash for any non-human actor. There is no delete API. |
 | Export the mailbox | No. | Metadata only (`export_mailbox` → `GET /v1/export/index`). Full export is human-only. |
 | Read bodies | Sees the one message it analyzes. | Only with the `body` scope: AI-context text, action items, and thread summaries (summaries also need `write`). |
 | Reorder triage | Priority and labels are advisory, filtered, and capped (see below). | Can label and archive. |
@@ -201,6 +202,70 @@ Every email is untrusted text. It reaches models in two places: the processor's 
 
 Tests: `packages/core/src/security.test.ts`, `packages/api/src/security.test.ts`, and `packages/mcp/src/security.test.ts` (moved from the review harness), plus `packages/mcp/src/tools.test.ts`.
 
+## Mail rules and automation
+
+Jon's rules sort, filter, trash and answer mail as it arrives (`packages/core/src/rules/`). The engine is a policy in the processor, authorized by a rules document Jon saved from a signed-in session. It is not an agent and holds no token. A model never decides whether a rule runs; at most it supplies fields a rule may match on, and the text of a reply.
+
+### Who can change rules
+
+- `PUT /v1/rules` replaces the whole document and is **human-session only**. Every API token gets 403, including `admin`, `send`, agent tokens and the bridge token. `npm run rules -- push` signs in with the passphrase, lists what the file makes happen without asking, and needs a typed `yes`.
+- Each rule records `createdBy`, stamped from the session. Anything the request says about authorship is dropped. The engine refuses to auto-send for a rule not written by a human, even if such a rule reaches storage (tested by sealing one directly).
+- The document is sealed with a KMS data key under `{ purpose: "rules" }` at `rules/current.bin`. Only the API role may `GenerateDataKey` for that purpose; the processor may only `Decrypt` it. So the process that reads email cannot write a valid rules document, and a document sealed under any other purpose does not load. A Terraform test asserts both.
+- Any `write` principal can make the rules safer, never looser: `POST /v1/rules/switches { paused: true }` stops every rule, `{ killSwitch: true }` turns auto-send off (replies become drafts), and `POST /v1/rules/:id/disable` turns one rule off. Setting either switch back to `false` is human-only. Every change is audited (`rules.updated` with a SHA-256 of the document and the list of auto-send rules, `rules.switches`, `rules.disabled`).
+- `GET /v1/rules` needs `read`. `POST /v1/rules/test { messageId }` (read) is a dry run: which rules match a stored message and every reason an auto-send would be refused. It sends nothing and counts nothing.
+
+### What a rule can do
+
+| Mode | Runs | Guarded by |
+| --- | --- | --- |
+| Label, move (inbox, archive, spam), mark read | Automatically | Match conditions. Rules never move mail to sent or drafts. |
+| Trash | Automatically, only for rules that ask for it | The message is kept: folder `trash`, `trashedBy: rule:<id>`, `keepUntil` = now + `trashRetentionDays` (7 to 365, default 30). The sealed body stays. `POST /v1/messages/:id/restore` (write) brings it back and clears the markers. There is no hard delete anywhere and no purge job yet. |
+| Reply, `mode: "draft"` (the default) | Writes a draft with origin `rule` into the approval queue | Jon approves it like any other draft. |
+| Reply, `mode: "autoSend"` | Sends only if every guard below passes; otherwise the same draft for approval | The guards below. |
+
+Rules only see inbound mail headed for the inbox. Quarantined mail, DMARC reports, mail from Jon and imports are never filtered. A catch-all rule (no match conditions) is refused. Matching looks at metadata only: sender, recipients, subject, `List-Id`, bulk, attachments, and the model's category, priority and labels. It never looks at body text.
+
+### Auto-send guards
+
+All of these must hold, or the reply becomes a draft for approval and the reasons are audited (`rule.reply` → `autosend_refused`):
+
+1. **Deployment.** Terraform `auto_send_enabled = true` (default false). That sets `LOJO_AUTO_SEND=on` and grants the processor `ses:SendRawEmail` constrained by `ses:FromAddress` to the mailbox. Without it the processor has no sender and no SES permission.
+2. **Kill switch** off and rules not paused.
+3. **Human-written rule** (`createdBy: "human"`).
+4. **Sender allowlist.** `allowSenders` (exact address or `@domain`) is required for auto-send, and the sender must be on it. `allowCategories` can only narrow it: categories are model output that the email itself can steer, so they are never enough on their own, and `phishing` is refused.
+5. **Authenticated sender.** SES's DMARC verdict is `pass`. A spoofed From never gets an answer. Spam or virus `FAIL`, quarantine, bulk, OpenPGP-encrypted mail, a phishing score of 40 or more, and mail the model did not screen are refused. Mail from Jon's own domain is refused.
+6. **Loop prevention** (RFC 3834 and practice), computed from headers at delivery and stored on the message as codes: `Auto-Submitted` other than `no`, `Precedence: bulk|list|junk|auto_reply`, any `List-Id` or `List-Unsubscribe`, `X-Auto-Response-Suppress: All|AutoReply|OOF`, a null `Return-Path` (`<>`), no-reply style local parts (`noreply`, `mailer-daemon`, `bounce`, `notifications`, `info`, `support`, and similar), auto-reply subjects (`Automatic reply`, `Out of office`, `Undeliverable`), and a `Reply-To` that differs from `From`. Replies always go to the DMARC-authenticated `From`, never to `Reply-To`.
+7. **Recipient has no OpenPGP key.** Auto-replies are plaintext only; mail to a key holder waits for Jon.
+8. **Text constraints** on model-written replies, fixed in code: at most `maxChars` (40 to 1,500, default 600); no links or domain names, no email addresses, no run of five or more digits, no mention of money, payments, invoices, passwords, codes, credentials, logins or attachments; no markup; no echo of prompt text; and no run of eight words copied from the incoming message. Templates are Jon's own text; their only placeholder, `{{first_name}}`, inserts a plain name or "there".
+9. **Rate limits**, counted atomically in DynamoDB before the check, so parallel deliveries cannot both slip through: once per message, once per thread per day, `perSenderPerDay` (1 to 5, default 1), `perDay` per rule (1 to 50, default 10), and `maxAutoSendPerDay` across all rules (1 to 100, default 20).
+
+What goes out: `From` the mailbox, `To` the authenticated sender only, `Re:` subject, `In-Reply-To` and `References`, `Auto-Submitted: auto-replied`, `X-Auto-Response-Suppress: All`, and a fixed footer saying it is an automatic reply and that Jon has not read the message. The draft is kept with status `sent`, `ruleId` and `autoSentAt`; the sealed sent copy is stored like any other; `rule.autosend` is audited with the rule, draft, recipient and SES id. If SES refuses, the draft goes back to the approval queue.
+
+This is the second path that calls a `MailSender`, next to `approveAndSend`. It lives in `runRuleReply` (`packages/core/src/rules/engine.ts`) and is reachable only from inbound delivery.
+
+### Threat model: prompt injection through rules
+
+The attacker sends an email. They control its headers (except SES's verdicts), subject and body. What they can reach:
+
+- **Getting mail sorted or trashed.** They can write text that steers the model's category, priority and labels, so a rule that matches on those can fire for their message (fixture `11-rule-category-bait.eml`). For label, move and trash the worst case is mail filed where Jon does not look; trash is restorable for the retention window and every rule action is audited per message. Rules that match on the sender are not affected. Advice: match trash rules on senders or `List-Id`, not on categories.
+- **Getting an automatic reply sent.** Only to an address on a rule's allowlist, with a DMARC pass for that address's domain, so the attacker must control an allowlisted sender's domain or account. Loop headers, bulk markers, Reply-To redirection and spoofing are refused (fixtures `08`, `09`, `10`, `12`).
+- **Steering what the reply says.** A template rule ignores the email entirely. For an AI rule, the model sees Jon's instruction (marked trusted) and only this one message, wrapped as untrusted content. It has no tools, no mailbox, no other messages, no contacts, and no thread history, so there is nothing else for it to leak. Its output then has to pass the fixed text constraints; a hijacked model that writes a link, an address, an account number, a payment promise or a copy of the email produces a draft for Jon instead (fixture `07-autoreply-injection.eml`, tested with a model scripted to obey the injection). What remains is short plain text going back to the authenticated sender, with a footer that says it was automatic.
+- **Loops and floods.** Loop headers, the once-per-message and once-per-thread-per-day guards, and the per-sender, per-rule and global daily caps bound how much mail the rules can send, even between two auto-responders.
+- **Changing the rules.** Impossible from email or from any token: writes need Jon's session, and the processor cannot seal a rules document. An agent can only pause, engage the kill switch, or disable.
+
+Tests: `packages/core/src/rules/rules.test.ts` (all fixtures above, plus forged and mis-sealed documents), `packages/api/src/rules-api.test.ts`, and the Terraform runs `rules_are_sealed_by_the_api_and_only_opened_by_the_processor`, `auto_send_is_off_by_default` and `auto_send_flag_grants_the_processor_ses_as_the_mailbox_only`.
+
+## Thunderbird bridge
+
+Thunderbird on Jon's Linux desktop talks IMAP and SMTP to a bridge on the same machine (`packages/bridge`, guide in [THUNDERBIRD.md](THUNDERBIRD.md)). The bridge talks HTTPS to the API with the bridge token and decrypts bodies locally with the envelope private key, which never leaves that machine.
+
+- **Loopback only.** Both listeners bind `127.0.0.1` and the bridge refuses any other address. There is no TLS on loopback: the traffic never leaves the machine, and anyone who can read loopback traffic can also read the key file. Thunderbird's warning about an unencrypted connection is expected.
+- **App password.** Generated by the bridge, shown once, stored only as an scrypt hash in `~/.config/lojo-mail/bridge.json` (mode 0600; the bridge refuses group- or world-readable files). Failed logins back off. The bridge token and the private key come from 0600 files or from a command such as `pass`, run without a shell.
+- **Sending stays human-approved.** SMTP submissions become drafts (origin `client`) in the approval queue. The bridge never mints an approval and cannot: minting needs a human session, and the bridge token has no `send` scope. A local "confirm" dialog was rejected because any process on the desktop could click it, and because the web app's approval binds the exact content Jon reviewed. Bcc (not covered by the approval hash) and attachments are refused at SMTP time.
+- **`compose` scope.** Lets the bridge draft to people the mailbox has never written to (Jon typing a new address in Thunderbird), which agent tokens cannot. It grants nothing else and never implies `send`.
+- **No trash.** The bridge cannot move mail to trash. Deleting in Thunderbird archives the message with the label `thunderbird-deleted`, which the bridge hides; it stays recoverable in the web app.
+- **On disk.** Only UIDs, message ids and sizes, in `~/.local/state/lojo-mail/`. Decrypted mail is held in a bounded in-memory cache.
+
 ## Controls
 
 ### Transport
@@ -220,8 +285,8 @@ Tests: `packages/core/src/security.test.ts`, `packages/api/src/security.test.ts`
 
 ### IAM
 
-- Processor: `s3:GetObject` and `s3:DeleteObject` on `raw/*`, `s3:ListBucket` limited to the `raw/` prefix (for the sweep), `s3:PutObject` on `objects/*` and `ai-context/*`, KMS `GenerateDataKey` for the `draft` and `ai-context` contexts, KMS through S3/DynamoDB only for storage, DynamoDB `GetItem`/`PutItem`/`UpdateItem`/`Query` on the tables and their indexes, `sqs:SendMessage` on its DLQ, `ssm:GetParameter` on `envelope-public-jwk` and the provider keys (`grok-api-key`, `openai-api-key`, `gemini-api-key`, `vertex-sa-json`) under `/lojo-mail/`, logs, and `bedrock:InvokeModel` only on the selected chat model (when `llm_provider = bedrock`) and the Titan embedding model (when `embed_provider = bedrock`). No SES send.
-- API: the same DynamoDB actions, `s3:GetObject` on `objects/*` and `ai-context/*`, `s3:PutObject` on `objects/*` (the sealed sent copy), KMS as described under key custody, `ses:SendEmail`/`ses:SendRawEmail` constrained by `ses:FromAddress`, `ssm:GetParameter` on the named `/lojo-mail/` parameters it reads (tokens, agent tokens, session secret, passphrase hash, envelope public key, PGP keys, provider keys), logs, Bedrock only for the selected models. Only the API can read `agent-tokens`. No access to `raw/*`.
+- Processor: `s3:GetObject` on `rules/*` with KMS `Decrypt` for the `rules` context only, `s3:GetObject` and `s3:DeleteObject` on `raw/*`, `s3:ListBucket` limited to the `raw/` prefix (for the sweep), `s3:PutObject` on `objects/*` and `ai-context/*`, KMS `GenerateDataKey` for the `draft` and `ai-context` contexts, KMS through S3/DynamoDB only for storage, DynamoDB `GetItem`/`PutItem`/`UpdateItem`/`Query` on the tables and their indexes, `sqs:SendMessage` on its DLQ, `ssm:GetParameter` on `envelope-public-jwk` and the provider keys (`grok-api-key`, `openai-api-key`, `gemini-api-key`, `vertex-sa-json`) under `/lojo-mail/`, logs, and `bedrock:InvokeModel` only on the selected chat model (when `llm_provider = bedrock`) and the Titan embedding model (when `embed_provider = bedrock`). No SES send, unless `auto_send_enabled = true`, which adds `ses:SendEmail`/`ses:SendRawEmail` constrained by `ses:FromAddress` for auto-send rules.
+- API: the same DynamoDB actions, `s3:GetObject` and `s3:PutObject` on `rules/*` with KMS `GenerateDataKey`/`Decrypt` for the `rules` context, `s3:GetObject` on `objects/*` and `ai-context/*`, `s3:PutObject` on `objects/*` (the sealed sent copy), KMS as described under key custody, `ses:SendEmail`/`ses:SendRawEmail` constrained by `ses:FromAddress`, `ssm:GetParameter` on the named `/lojo-mail/` parameters it reads (tokens, agent tokens, the bridge token, session secret, passphrase hash, envelope public key, PGP keys, provider keys), logs, Bedrock only for the selected models. Only the API can read `agent-tokens`. No access to `raw/*`.
 - No `dynamodb:Scan` and no `dynamodb:DeleteItem` anywhere. Every read path is `GetItem` or `Query` on a declared index. A unit test fails if `ScanCommand` appears in `packages/*/src`.
 - No `*` resource on data APIs. No IAM write. No SES identity administration from the runtime roles.
 - **Receipt rule set activation defaults ON** (`manage_active_rule_set = true`). A read-only audit found no active receipt rule set in any region, so activating this one is what starts delivery. A region has one active set, and turning this flag off later deactivates receiving for every identity in the region. Re-check with `aws ses describe-active-receipt-rule-set` before apply.
@@ -238,12 +303,12 @@ Tests: `packages/core/src/security.test.ts`, `packages/api/src/security.test.ts`
   - The ADD is atomic, so concurrent calls never lose each other's counts. Only the check is racy.
   - What this means: the budget protects against a slow drain, such as a newsletter flood or a prompt-injection loop, not against a spike. For a hard ceiling on money, set a spending limit or a prepaid balance at the model provider, and keep the AWS budget alarm from [COSTS.md](COSTS.md). Setting `processor_reserved_concurrency` to a small number, such as 2, also bounds the burst.
 - Audit row per attempt: time, message id, provider, model, action, token counts, outcome, SHA-256 of the prompt. Not the prompt, not the body.
-- Suggested replies are drafts. The phishing score is advisory; mail is never auto-deleted.
+- Suggested replies are drafts. The phishing score is advisory; mail is never auto-deleted. Rules Jon writes can trash (restorable) and, when enabled, auto-send under the guards above.
 
 ### Application auth
 
-- Bearer API tokens with scopes `read`, `write`, `send`, `body`, `admin`. MCP tools check the same scopes. Agent tokens are limited to `read`, `write`, and `body`.
-- Human-only routes: login-derived sessions for approval minting, trash, full export.
+- Bearer API tokens with scopes `read`, `write`, `send`, `body`, `compose`, `admin`. MCP tools check the same scopes. Agent tokens are limited to `read`, `write`, and `body`. `compose` belongs to the bridge token only and never implies `send`.
+- Human-only routes: login-derived sessions for approval minting, trash, full export, saving rules, and resuming rules or releasing the kill switch.
 - `POST /v1/search` needs `read`, and only matches body text for callers with `body`. `POST /v1/threads/:id/summarize` needs `write` (it spends tokens) **and** `body` (a summary is message text). `GET /v1/action-items` needs `read` and `body`. Semantic search (`mode: "semantic"`) needs `body` too: the vectors are derived from body text, so ranking by them would let a `read` token test guesses about message contents; a refused query spends nothing. `POST /v1/vectors/backfill` needs `write` and `body`. The MCP tools `summarize_thread` and `get_action_items` declare the same pairs. Test: `packages/api/src/security.test.ts` → `[P1] API: read and write tokens get no message text`, and `packages/mcp/src/tools.test.ts`.
 - Production boot refuses the well-known dev token values, in the Lambda and in `npm run dev` when `NODE_ENV=production`. The dev server binds `127.0.0.1` unless `LOJO_HOST` says otherwise.
 - The web app has no built-in token. It signs in with the passphrase.
@@ -277,6 +342,9 @@ Tests: `packages/core/src/security.test.ts`, `packages/api/src/security.test.ts`
 - The processor sees plaintext. Review changes to `packages/pipeline` and `packages/core/src/ingest.ts` as if they were changes to an MTA.
 - The API role can read drafts and the AI-context copy (see key custody). `ai_context_days = 0` narrows that to drafts.
 - A human session is as strong as the passphrase. Use a long one from the password manager.
+- Auto-send rules send mail Jon has not read. The guards bound who gets it, what it can say and how often, but a compromised allowlisted sender can still get a short automatic reply. Keep `auto_send_enabled` off unless a rule needs it, keep allowlists short, and prefer templates to AI text.
+- A rule that matches on model output (category, priority, labels) can be steered by the email it is judging. Trash is restorable, but nothing purges it yet, and nothing reminds Jon to look.
+- The Thunderbird bridge puts the envelope private key and the bridge token on Santa Computa. Anyone with Jon's desktop session can read his mail through it. Use full-disk encryption and a screen lock; prefer `pass` or another agent-backed store over plain files.
 - SES production access is account-level. Guard the passphrase and the `send` token accordingly.
 - MTA-STS in `testing` mode does not fail closed.
 - Reprocessing raw MIME re-exposes plaintext to the processor. Raw is kept only until it is processed, or 7 days.

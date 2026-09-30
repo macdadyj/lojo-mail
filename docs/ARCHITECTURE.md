@@ -62,7 +62,8 @@ flowchart LR
 2. An SES receipt rule requires TLS, scans for spam/virus, and writes the raw MIME object into S3 under `raw/`. The S3 action names no KMS key; the bucket's default SSE-KMS (customer-managed key, bucket key on) encrypts it at rest, so the processor reads it with a plain `GetObject`. An S3 notification invokes the processor for each new `raw/` object. A scheduled sweep every 15 minutes ingests anything the notification missed, and raises an alarm when it does. Once live, the rule names `lojo@<domain>` and `dmarc@<domain>` only. The first deploy runs with `receiving_stage = "test"`, which names only `lojo-test@<domain>` until the [DEPLOY.md](DEPLOY.md) checklist passes. Other SES identities in the account stay untouched.
 3. An S3 event invokes the processor Lambda. The function parses MIME, reads the SES verdict headers, seals the body and each attachment to Jon's public key into `objects/`, writes metadata to DynamoDB, runs the AI pipeline, and deletes the `raw/` object. AI failure never fails receipt. Any other failure throws; S3's async invoke retries twice, then the event lands in an SQS dead-letter queue with its `raw/` key, and a CloudWatch alarm fires. `docs/RUNBOOK.md` has the redrive.
 4. The HTTP API and the MCP server read that index. Bodies stay sealed until something that holds Jon's private key opens them, which in production is only the browser.
-5. Outbound mail is built by the API and sent with SESv2 only with a one-time approval token that a human web session minted for that exact content, after the server checked that the content is what Jon had on screen. The AI pipeline has no sender dependency, and the MCP server has no send tool.
+5. Outbound mail is built by the API and sent with SESv2 only with a one-time approval token that a human web session minted for that exact content, after the server checked that the content is what Jon had on screen. The MCP server has no send tool. The one exception is an auto-send mail rule Jon wrote, which the processor may send only when `auto_send_enabled` is on and every guard passes (see [Mail rules](#mail-rules)).
+6. Before a new inbound message is stored, Jon's rules (if any) decide its labels, folder and read state, so it lands in its final place in one write. After it is stored, a reply rule writes a draft for approval, or, under the auto-send guards, sends.
 
 ## Components
 
@@ -76,6 +77,7 @@ flowchart LR
 | `@lojo/local` | `packages/local` | `lojo-local` CLI and a tool-calling adapter so a local model (Ollama, or any OpenAI-compatible server) can search, read, summarize, and draft |
 | `@lojo/web` | `packages/web` | Vite + React PWA |
 | `@lojo/importer` | `packages/importer` | Idempotent `.eml` / mbox / vCard / CSV import, into a local store or into AWS |
+| `@lojo/bridge` | `packages/bridge` | Local IMAP4rev1 + SMTP submission bridge on 127.0.0.1 for Thunderbird. Decrypts on Jon's desktop; submissions become drafts for approval |
 
 Local development uses an in-memory DynamoDB (`MemoryDynamo`) behind the same store class the Lambdas use, so key schemas, conditional writes, index queries, and the 400 KB item limit behave like DynamoDB. Blobs go to memory or to a directory, and the KMS wrapper is a local AES key. No AWS calls. Both Lambdas are ESM bundles on `nodejs22.x`; `npm run bundles:check` imports each built bundle.
 
@@ -98,6 +100,7 @@ S3 holds:
 - `objects/{id}.bin` — the envelope of the body (text, HTML, and the sensitive half of the AI annotation).
 - `objects/{id}/{attachmentId}.bin` — one envelope per attachment. DynamoDB keeps only the keys, so items stay small whatever the attachment size.
 - `ai-context/{id}.bin` — a KMS-sealed, truncated text copy of recent inbound mail for server-side AI. Expires after `ai_context_days` (30); `0` turns it off.
+- `rules/current.bin` — Jon's mail rules, KMS-sealed under `{ purpose: "rules" }`. The API writes it; the processor can only open it.
 
 The index is queryable without Jon's key. That is a deliberate usability tradeoff, not an accident. These fields are stored in the clear inside DynamoDB (still encrypted at rest by KMS):
 
@@ -118,7 +121,7 @@ See [SECURITY.md](SECURITY.md) for what that does and does not protect.
 1. **TLS on the wire.** Inbound receipt rule sets `tls_policy = Require`. Outbound uses an SESv2 configuration set with `tls_policy = REQUIRE`. MTA-STS and TLS-RPT records are in the DNS plan.
 2. **KMS at rest.** One customer-managed key encrypts the bucket (with a bucket key, to keep request cost down) and the DynamoDB tables. SES may use it only for data keys, only from this account, and only for this receipt rule set (`aws:SourceArn`).
 3. **Per-message envelope.** `P-256 ECDH + HKDF-SHA256 + AES-256-GCM`, with the message id (and attachment id) as additional authenticated data. The processor seals to Jon's public key. The private key is never written to AWS, to the repo, or to disk by the server. The web app fetches `GET /v1/messages/:id/body` and opens it in the tab.
-4. **KMS data keys for server-readable data.** Drafts and the AI-context copy are sealed with per-item KMS data keys under an encryption context (`purpose` plus the id). IAM conditions on that context decide which role can create or open each kind. See SECURITY.md, key custody.
+4. **KMS data keys for server-readable data.** Drafts, the AI-context copy and the rules document are sealed with per-item KMS data keys under an encryption context (`purpose` plus the id). IAM conditions on that context decide which role can create or open each kind. See SECURITY.md, key custody.
 5. **OpenPGP, optional.** WKD publishing, detection of inbound encrypted mail (stored armored, not stripped), and outbound encryption to every recipient plus Jon's own key, signed when a signing key is configured. This is the only path that is end-to-end against SES.
 
 ## AI
@@ -140,13 +143,13 @@ The pipeline asks for one JSON object: summary, category, priority, action items
 
 Cost guards: daily token budget in DynamoDB, body truncation, skip mail that looks like a list (`List-Id` + `List-Unsubscribe`, or `Precedence: bulk|list|junk`). Every model call, skip, and failure is an audit event. Prompts are not stored; the audit row keeps a SHA-256 of the prompt, the token counts, and the message id.
 
-The model cannot send. The ingest path does not receive a `MailSender`. Drafts land as `suggested`. Sending needs the `send` scope *and* an approval token that only a signed-in human session can mint; see SECURITY.md, human approval. Priority and labels from the model are advisory: phishing-scored mail is demoted out of triage and labels pass an allowlist.
+The model cannot send. It has no tools, and a suggested reply lands as a `suggested` draft. The ingest path receives a `MailSender` only through the rules runtime, only when `LOJO_AUTO_SEND=on`, and only uses it for a human-written auto-send rule that passes every guard. Sending needs the `send` scope *and* an approval token that only a signed-in human session can mint; see SECURITY.md, human approval. Priority and labels from the model are advisory: phishing-scored mail is demoted out of triage and labels pass an allowlist.
 
 In production the API has no envelope private key. Draft reply and summarize use the AI-context copy when it exists, or text the browser opened locally and sent as `sourceText`.
 
 ## Interfaces
 
-- **HTTP API** under `/v1`. Two kinds of principal: API tokens with scopes `read`, `write`, `send`, `body`, `admin`, and human sessions from `POST /v1/session/login` (passphrase). Each route declares its scope or requires a human. API Gateway throttles the stage.
+- **HTTP API** under `/v1`. Two kinds of principal: API tokens with scopes `read`, `write`, `send`, `body`, `compose`, `admin`, and human sessions from `POST /v1/session/login` (passphrase). Each route declares its scope or requires a human. API Gateway throttles the stage.
 - **MCP** (`@lojo/mcp`). Each tool declares the scopes it needs, and a client sees only the tools its token's scopes allow. There is no send, approve, or trash tool; agents call `submit_for_approval`, and every tool result is wrapped as untrusted content. Two transports, same tools:
   - stdio (`npm run mcp`), for Cursor and other local clients. It asks `/v1/session` which scopes its token has and uses the intersection with `LOJO_API_SCOPES` (default `read`).
   - Streamable HTTP at `POST /mcp` on the API, for remote clients such as Grok. Stateless JSON-RPC (initialize, ping, tools/list, tools/call, batches of up to 20). Bearer API or agent tokens only; web sessions and browser origins are refused. Tool calls re-enter the REST API in-process with the caller's token, so the same route checks apply.
@@ -155,13 +158,26 @@ In production the API has no envelope private key. Draft reply and summarize use
 - **PWA** (`@lojo/web`): passphrase sign-in, inbox, triage, thread with AI summary and attachment download, compose with draft, rewrite, and one-click approve-and-send, a Drafts view with the approval queue, search, labels, settings. The API URL comes from `VITE_LOJO_API_URL` at build time, with an override in Settings. Phone layout stacks the list and the reader.
 - **Outbound** via SESv2 `SendEmail` (and raw MIME when OpenPGP armor must be preserved). DKIM is Easy DKIM on the domain identity. Custom MAIL FROM is `mail.<domain>`.
 
-## IMAP / JMAP (later, not in v1)
+## Mail rules
 
-Apple Mail and Thunderbird need a standard access protocol. The store is already shaped like JMAP (`Mailbox`, `Email`, `Thread`, `EmailSubmission`):
+`packages/core/src/rules/`. A rules document (JSON, `config/rules.example.json`) lists rules in order. Each has match conditions on metadata (sender, recipients, subject, `List-Id`, bulk, attachments, model category, priority and labels) and actions: label, move to inbox, archive or spam, mark read, trash, or reply.
 
-- Preferred later step: a JMAP facade (RFC 8620 / 8621) in front of `MailStore`, authenticated with the same scoped tokens, bound to the tailnet rather than the public internet.
-- IMAP is the compatibility fallback (Apple Mail still wants it). A small IMAP facade would map folders to `folder` and speak IDLE for push. It should not run on a public port 143.
-- Neither facade is required for the web app, the API, or MCP, so they are not in the first release.
+- Jon saves rules from a signed-in session (`PUT /v1/rules`, or `npm run rules -- push`, which signs in with the passphrase). The API seals them to `rules/current.bin`. The processor loads them for each inbound message.
+- Filing actions are folded into the message before its one `PutMessage`: labels accumulate, the last move wins, trash wins over moves. Trash keeps the message and sets `trashedAt`, `trashedBy: rule:<id>` and `keepUntil`. `POST /v1/messages/:id/restore` undoes it.
+- A reply rule runs after the message is stored. By default it writes a draft with origin `rule` into the approval queue. `mode: "autoSend"` sends only when the deployment allows it (`auto_send_enabled`), the kill switch is off, the rule was written by a human, and the guards in SECURITY.md pass: sender allowlist, DMARC pass, loop headers, text constraints, rate limits. Otherwise it is the same draft.
+- Header-derived loop signals (`Auto-Submitted`, `Precedence`, `List-Id`, null `Return-Path`, and so on) are stored on the message as codes (`replyBlockers`), so `POST /v1/rules/test` gives the same answer later without the headers.
+- A failing rule never fails delivery: load errors and reply errors are audited and the message is stored as if there were no rules. Every rule action is an audit event.
+
+## Thunderbird and other IMAP clients
+
+`packages/bridge` runs on Jon's desktop (Santa Computa) as a systemd user service. It speaks IMAP4rev1 (with IDLE, MOVE, SPECIAL-USE, UIDPLUS-style stable UIDs) and SMTP submission on `127.0.0.1` only, and HTTPS to the API with the bridge token. See [THUNDERBIRD.md](THUNDERBIRD.md).
+
+- Folders map one to one: INBOX, Archive, Sent, Drafts, Junk (`spam`), Trash.
+- Messages are listed with `GET /v1/folders/:folder/messages`, and each body envelope is fetched and opened on the desktop with the envelope private key. The bridge rebuilds a MIME message from the metadata, the decrypted text and HTML, and the decrypted attachments. Plaintext stays in memory; only UIDs and sizes are written to disk.
+- Flags and labels sync back: `\Seen` to `POST /v1/messages/:id/flags`, `\Flagged` and keywords to labels, moves to `move` or `archive`. Delete archives with a hidden `thunderbird-deleted` label, because the bridge cannot trash.
+- SMTP submissions become drafts (origin `client`) and are submitted to the approval queue. Jon approves them in the web app.
+
+JMAP (RFC 8620 / 8621) remains a possible later facade; the store is already shaped like it.
 
 ## What the September 2026 audit already found
 
