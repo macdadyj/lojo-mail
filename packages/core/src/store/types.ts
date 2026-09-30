@@ -17,7 +17,8 @@ export interface MailStore {
   listMessages(query?: ListQuery): Promise<StoredMessage[]>;
   /** Oldest first. */
   listThreadMessages(threadId: string): Promise<StoredMessage[]>;
-  updateMessage(id: string, patch: MessagePatch): Promise<StoredMessage>;
+  /** `remove` drops attributes, for example the trash markers on restore. */
+  updateMessage(id: string, patch: MessagePatch, remove?: Array<keyof MessagePatch>): Promise<StoredMessage>;
   /** Every stored vector made by one embedder, from the sparse `vectors` index (id, date, vec only). */
   listVectors(vecModel: string): Promise<Array<{ id: string; vec: string }>>;
 

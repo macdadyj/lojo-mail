@@ -85,7 +85,7 @@ export interface DraftInput {
   inReplyTo?: string;
   pgp?: PgpMode;
   /** Who wrote it. Defaults to agent, which may only address known correspondents. */
-  origin?: Exclude<DraftOrigin, "ai">;
+  origin?: Extract<DraftOrigin, "human" | "agent" | "client">;
 }
 
 export interface DraftPatch {
@@ -120,6 +120,8 @@ function viewOf(message: StoredMessage, opened: SealedBody | null, contextText: 
   const view: MessageView = {
     id: message.id,
     threadId: message.threadId,
+    rfcMessageId: message.rfcMessageId,
+    references: message.references,
     folder: message.folder,
     origin: message.origin,
     from: message.from,
@@ -137,6 +139,11 @@ function viewOf(message: StoredMessage, opened: SealedBody | null, contextText: 
     locked: opened === null,
   };
   if (message.verdicts) view.verdicts = message.verdicts;
+  if (message.inReplyTo) view.inReplyTo = message.inReplyTo;
+  if (message.replyTo) view.replyTo = message.replyTo;
+  if (message.trashedAt) view.trashedAt = message.trashedAt;
+  if (message.trashedBy) view.trashedBy = message.trashedBy;
+  if (message.keepUntil) view.keepUntil = message.keepUntil;
   if (contextText !== null) view.contextText = contextText;
   if (opened) {
     view.text = opened.text;
@@ -310,6 +317,19 @@ export class Mailbox {
   async listInbox(limit = 50, opts: ViewOptions = {}): Promise<MessageView[]> {
     const messages = await this.deps.store.listMessages({ folder: "inbox", limit });
     return Promise.all(messages.map((message) => this.present(message, opts)));
+  }
+
+  /** Newest first. The bridge maps each folder to an IMAP mailbox. */
+  async listFolder(folder: Folder, limit: number, opts: ViewOptions = {}): Promise<MessageView[]> {
+    const messages = await this.deps.store.listMessages({ folder, limit });
+    return Promise.all(messages.map((message) => this.present(message, opts)));
+  }
+
+  async setUnread(messageId: string, unread: boolean): Promise<StoredMessage> {
+    await this.requireMessage(messageId);
+    const updated = await this.deps.store.updateMessage(messageId, { unread });
+    await refreshThread(this.deps.store, updated.threadId, updated.subject);
+    return updated;
   }
 
   async triage(limit = 50, opts: ViewOptions = {}): Promise<MessageView[]> {
@@ -489,7 +509,9 @@ export class Mailbox {
     const to = addresses(input.to);
     const cc = addresses(input.cc);
     if (to.length === 0) throw new MailError("At least one recipient is required", "invalid");
-    if (origin === "agent") await this.assertKnownRecipients([...to, ...cc].map((item) => item.email), input.threadId);
+    const parent = !input.threadId && input.inReplyTo ? (await this.deps.store.getMessagesByRfcId(input.inReplyTo))[0] : undefined;
+    const threadId = input.threadId ?? parent?.threadId;
+    if (origin === "agent") await this.assertKnownRecipients([...to, ...cc].map((item) => item.email), threadId);
     const id = newId("drf");
     const now = this.now().toISOString();
     const draft: Draft = {
@@ -505,8 +527,9 @@ export class Mailbox {
       createdAt: now,
       updatedAt: now,
     };
-    if (input.threadId) draft.threadId = input.threadId;
+    if (threadId) draft.threadId = threadId;
     if (input.inReplyTo) draft.inReplyTo = input.inReplyTo;
+    if (parent) draft.references = [...parent.references, parent.rfcMessageId];
     await this.deps.store.putDraft(draft);
     return draft;
   }
@@ -814,7 +837,9 @@ export class Mailbox {
     if (folder === "trash" && actor !== "human") {
       throw new MailError("Only a signed-in human can move mail to trash", "forbidden");
     }
-    await this.requireMessage(messageId);
+    const message = await this.requireMessage(messageId);
+    if (folder === "drafts") throw new MailError("Messages cannot be filed as drafts", "invalid");
+    if (folder === "sent" && message.origin !== "sent") throw new MailError("Only mail Jon sent can be filed in Sent", "invalid");
     const patch: { folder: Folder; unread?: boolean } = { folder };
     if (folder !== "inbox") patch.unread = false;
     const updated = await this.deps.store.updateMessage(messageId, patch);

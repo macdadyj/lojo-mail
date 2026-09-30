@@ -1,4 +1,8 @@
-export type Scope = "read" | "write" | "send" | "body" | "admin";
+/**
+ * `compose` lets Jon's own mail client (the local bridge) draft to any address;
+ * other tokens may only draft to known correspondents. It never implies send.
+ */
+export type Scope = "read" | "write" | "send" | "body" | "compose" | "admin";
 
 export function asScope(value: string): Scope {
   switch (value) {
@@ -6,6 +10,7 @@ export function asScope(value: string): Scope {
     case "write":
     case "send":
     case "body":
+    case "compose":
     case "admin":
       return value;
     default:
@@ -20,6 +25,7 @@ export function hasScope(scopes: readonly Scope[], required: Scope): boolean {
     case "write":
     case "send":
     case "body":
+    case "compose":
     case "admin":
       return scopes.includes(required);
     default: {

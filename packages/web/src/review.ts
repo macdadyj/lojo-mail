@@ -45,6 +45,10 @@ function writer(who: Writer): string | null {
       return "an assistant";
     case "ai":
       return "the AI";
+    case "client":
+      return "your mail client (Thunderbird, through the local bridge)";
+    case "rule":
+      return "one of your mail rules";
     default: {
       const unhandled: never = who;
       return unhandled;

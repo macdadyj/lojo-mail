@@ -1,6 +1,10 @@
 import type { Sessions } from "./session.ts";
 
-export type Scope = "read" | "write" | "send" | "body" | "admin";
+/**
+ * `compose` lets Jon's own mail client (the local bridge) draft to any address;
+ * other tokens may only draft to known correspondents. It never implies send.
+ */
+export type Scope = "read" | "write" | "send" | "body" | "compose" | "admin";
 
 export type PrincipalKind = "token" | "human";
 
@@ -10,7 +14,10 @@ export interface Principal {
   scopes: Scope[];
 }
 
-export const DEV_TOKEN_VALUES = ["dev-only-change-me", "dev-read-only", "dev-send-change-me"] as const;
+export const DEV_TOKEN_VALUES = ["dev-only-change-me", "dev-read-only", "dev-send-change-me", "dev-bridge-change-me"] as const;
+
+/** The Thunderbird bridge: reads and decrypts locally, syncs flags and moves, and turns SMTP submissions into drafts. */
+export const BRIDGE_SCOPES: readonly Scope[] = ["read", "write", "body", "compose"];
 
 /** Prefixes reserved for human sessions and approval tokens. An API token can never look like either. */
 const RESERVED_PREFIXES = ["hs_", "apv_"] as const;
@@ -21,6 +28,7 @@ function knownScope(value: string): Scope | null {
     case "write":
     case "send":
     case "body":
+    case "compose":
     case "admin":
       return value;
     default:
@@ -48,6 +56,7 @@ export function hasScope(scopes: readonly Scope[], required: Scope): boolean {
     case "write":
     case "send":
     case "body":
+    case "compose":
     case "admin":
       return scopes.includes(required);
     default: {
@@ -162,5 +171,15 @@ export function tokenBookFromEnv(env: NodeJS.ProcessEnv, production: boolean): T
   if (env.LOJO_AGENT_TOKENS) {
     for (const agent of parseAgentTokens(env.LOJO_AGENT_TOKENS, production)) book.add(agent.token, { label: agent.label, scopes: agent.scopes });
   }
+  const bridgeToken = env.LOJO_BRIDGE_TOKEN ?? (production ? "" : "dev-bridge-change-me");
+  if (bridgeToken) addBridgeToken(book, bridgeToken, production);
   return book;
+}
+
+/** The bridge token always has exactly BRIDGE_SCOPES: never send, never admin. */
+export function addBridgeToken(book: TokenBook, token: string, production: boolean): void {
+  if (production && token.length < MIN_AGENT_TOKEN_CHARS) {
+    throw new Error(`The bridge token must be at least ${MIN_AGENT_TOKEN_CHARS} characters`);
+  }
+  book.add(token, { label: "bridge", scopes: [...BRIDGE_SCOPES] });
 }

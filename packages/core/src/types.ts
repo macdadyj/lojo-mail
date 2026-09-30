@@ -137,6 +137,12 @@ export interface StoredMessage {
   vec?: string;
   /** Which embedder produced `vec`. The sparse `vectors` index is keyed on it. */
   vecModel?: string;
+  /** Set when a rule moved the message to trash. Rules never hard delete. */
+  trashedAt?: string;
+  /** `rule:<id>` or `human`. */
+  trashedBy?: string;
+  /** Earliest time anything may purge it. Until then it is always restorable. */
+  keepUntil?: string;
   createdAt: string;
 }
 
@@ -153,7 +159,11 @@ export interface Thread {
 
 export type DraftStatus = "suggested" | "edited" | "pending_approval" | "sending" | "sent" | "discarded";
 
-export type DraftOrigin = "human" | "agent" | "ai";
+/**
+ * Who wrote a draft. `client` is Jon's own mail client through the local bridge
+ * (a token with the `compose` scope); `rule` is one of Jon's mail rules.
+ */
+export type DraftOrigin = "human" | "agent" | "ai" | "client" | "rule";
 
 export type PgpMode = "auto" | "off";
 
@@ -180,6 +190,10 @@ export interface Draft {
   approvalContentHash?: string;
   approvalExpiresAt?: string;
   approvalUsedAt?: string;
+  /** The rule that wrote or auto-sent this draft. */
+  ruleId?: string;
+  /** Set when a rule sent this draft without an approval token (see rules/autosend.ts). */
+  autoSentAt?: string;
 }
 
 export interface AuditEvent {
@@ -218,6 +232,9 @@ export interface MessagePatch {
   vec?: string;
   vecModel?: string;
   threadId?: string;
+  trashedAt?: string;
+  trashedBy?: string;
+  keepUntil?: string;
 }
 
 export interface LojoConfig {
@@ -256,6 +273,10 @@ export interface LojoConfig {
 export interface MessageView {
   id: string;
   threadId: string;
+  rfcMessageId: string;
+  inReplyTo?: string;
+  references: string[];
+  replyTo?: Address;
   folder: Folder;
   origin: MessageOrigin;
   from: Address;
@@ -271,6 +292,9 @@ export interface MessageView {
   pgpEncrypted: boolean;
   verdicts?: Verdicts;
   ai: AiPublic | null;
+  trashedAt?: string;
+  trashedBy?: string;
+  keepUntil?: string;
   /** True when the server cannot open the body. The browser fetches `/v1/messages/:id/body` and opens it locally. */
   locked: boolean;
   text?: string;

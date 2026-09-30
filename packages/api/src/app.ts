@@ -84,6 +84,12 @@ function actorOf(principal: Principal): Actor {
   return principal.kind === "human" ? "human" : "agent";
 }
 
+/** Only Jon's own mail client (the `compose` scope) may draft to people the mailbox has never written to. */
+function draftOriginOf(principal: Principal): "human" | "agent" | "client" {
+  if (principal.kind === "human") return "human";
+  return principal.scopes.includes("compose") ? "client" : "agent";
+}
+
 /** Draft text can quote sealed mail, so it needs `body` or a human session. */
 function canReadText(principal: Principal): boolean {
   return principal.kind === "human" || hasScope(principal.scopes, "body");
@@ -196,6 +202,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   app.get("/v1/inbox", need("read"), async (c) => c.json({ messages: await mailbox.listInbox(50, views(c)) }));
+  /** Newest first, up to `limit` (1-5000, default 500). Metadata only unless the caller has `body`. */
+  app.get("/v1/folders/:folder/messages", need("read"), async (c) => {
+    const raw = Number(c.req.query("limit") ?? "500");
+    const limit = Number.isInteger(raw) ? Math.min(Math.max(raw, 1), 5000) : 500;
+    return c.json({ messages: await mailbox.listFolder(folder(c.req.param("folder")), limit, views(c)) });
+  });
   app.get("/v1/triage", need("read"), async (c) => c.json({ messages: await mailbox.triage(50, views(c)) }));
   app.get("/v1/threads/:id", need("read"), async (c) => c.json(await mailbox.readThread(c.req.param("id"), views(c, wantsFlag(c, "context")))));
   /** A summary is message text, so it needs `body`; `write` because it spends tokens. */
@@ -260,7 +272,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ...(typeof input.threadId === "string" ? { threadId: input.threadId } : {}),
       ...(typeof input.inReplyTo === "string" ? { inReplyTo: input.inReplyTo } : {}),
       ...(pgp ? { pgp } : {}),
-      origin: principal.kind === "human" ? "human" : "agent",
+      origin: draftOriginOf(principal),
     });
     return c.json(await mailbox.getDraft(draft.id, { withText: canReadText(principal) }), 201);
   });
@@ -323,6 +335,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const labels = strings((await body<{ labels: string[] }>(c)).labels, "labels");
     if (!labels) throw new MailError("labels is required", "invalid");
     return c.json(await mailbox.setLabels(c.req.param("id"), labels));
+  });
+  app.post("/v1/messages/:id/flags", need("write"), async (c) => {
+    const input = await body<{ unread: boolean }>(c);
+    if (typeof input.unread !== "boolean") throw new MailError("unread must be true or false", "invalid");
+    return c.json(await mailbox.setUnread(c.req.param("id"), input.unread));
   });
   app.post("/v1/messages/:id/archive", need("write"), async (c) => c.json(await mailbox.archive(c.req.param("id"))));
   app.post("/v1/messages/:id/move", need("write"), async (c) => {

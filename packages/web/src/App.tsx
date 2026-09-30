@@ -167,6 +167,8 @@ function DraftRow({ row }: { row: DraftView }) {
         <span className={draft.status === "pending_approval" ? "chip now" : "chip"}>{statusLabel(draft.status)}</span>
         {draft.origin === "ai" ? <span className="chip">AI</span> : null}
         {draft.origin === "agent" ? <span className="chip">assistant</span> : null}
+        {draft.origin === "client" ? <span className="chip">Thunderbird</span> : null}
+        {draft.origin === "rule" ? <span className="chip">rule</span> : null}
       </div>
     </a>
   );

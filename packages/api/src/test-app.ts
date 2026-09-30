@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { memoryWorld, reviewOf, type WorldOptions } from "@lojo/core/testing";
 import { createApp, type AccessLogEntry } from "./app.ts";
-import { TokenBook } from "./auth.ts";
+import { BRIDGE_SCOPES, TokenBook } from "./auth.ts";
 import { LoginThrottle, Sessions, hashPassphrase } from "./session.ts";
 
 export const TEST_PASSPHRASE = "correct horse battery staple";
@@ -18,6 +18,7 @@ export async function testApp(opts: WorldOptions & { dev?: boolean; now?: () => 
   tokens.add("send-token", { label: "send", scopes: ["read", "write", "send"] });
   tokens.add("body-token", { label: "body", scopes: ["read", "body"] });
   tokens.add("admin-token", { label: "admin", scopes: ["admin"] });
+  tokens.add("bridge-token", { label: "bridge", scopes: [...BRIDGE_SCOPES] });
   const sessions = new Sessions({
     secret: randomBytes(32),
     passphraseHash: cachedHash,

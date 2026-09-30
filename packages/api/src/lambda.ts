@@ -16,7 +16,7 @@ import { documentClient, dynamoLike, KmsKeyWrapper, S3BlobStore, tableNamesFromE
 import { getConnInfo, handle } from "hono/aws-lambda";
 import styleGuide from "../../../config/style-guide.md";
 import { createApp } from "./app.ts";
-import { TokenBook, agentTokensOrNone, parseScopes } from "./auth.ts";
+import { TokenBook, addBridgeToken, agentTokensOrNone, parseScopes } from "./auth.ts";
 import { LoginThrottle, Sessions } from "./session.ts";
 import { SesSender } from "./ses.ts";
 
@@ -56,6 +56,14 @@ async function buildApp() {
   const agentTokens = await parameter(env("LOJO_AGENT_TOKENS_PARAM", "/lojo-mail/agent-tokens"));
   const warnAgentTokens = (message: string) => console.error(JSON.stringify({ event: "agent_tokens_invalid", message }));
   for (const agent of agentTokensOrNone(agentTokens, true, warnAgentTokens)) tokens.add(agent.token, { label: agent.label, scopes: agent.scopes });
+  const bridgeToken = await parameter(env("LOJO_BRIDGE_TOKEN_PARAM", "/lojo-mail/bridge-token"));
+  if (bridgeToken) {
+    try {
+      addBridgeToken(tokens, bridgeToken, true);
+    } catch (error) {
+      console.error(JSON.stringify({ event: "bridge_token_invalid", message: error instanceof Error ? error.message : String(error) }));
+    }
+  }
 
   const secret = await parameter(env("LOJO_SESSION_SECRET_PARAM", "/lojo-mail/session-secret"));
   const passphraseHash = await parameter(env("LOJO_PASSPHRASE_HASH_PARAM", "/lojo-mail/human-passphrase-hash"));

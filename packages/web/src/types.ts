@@ -91,8 +91,8 @@ export interface Draft {
   cc: Address[];
   subject: string;
   status: DraftStatus;
-  origin: "human" | "agent" | "ai";
-  lastEditedBy?: "human" | "agent" | "ai";
+  origin: "human" | "agent" | "ai" | "client" | "rule";
+  lastEditedBy?: "human" | "agent" | "ai" | "client" | "rule";
   aiGenerated: boolean;
   pgp: "auto" | "off";
   createdAt: string;

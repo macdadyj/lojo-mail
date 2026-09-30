@@ -94,5 +94,5 @@ const port = Number(process.env.PORT ?? 8787);
 serve({ fetch: app.fetch, port, hostname: host }, () => {
   console.log(`lojo-mail api http://${host}:${port}${storeFile ? ` (store ${storeFile}, locked)` : " (seeded demo, unlocked)"}`);
   if (!process.env.LOJO_HUMAN_PASSPHRASE) console.log(`web sign-in passphrase (dev default): ${DEV_PASSPHRASE}`);
-  if (!production) console.log("local API tokens: dev-only-change-me (read,write), dev-read-only, dev-send-change-me");
+  if (!production) console.log("local API tokens: dev-only-change-me (read,write), dev-read-only, dev-send-change-me, dev-bridge-change-me (bridge)");
 });
