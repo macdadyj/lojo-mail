@@ -339,3 +339,48 @@ variable "mta_sts_id" {
   description = "MTA-STS record id. Bump it when docs/mta-sts.txt changes."
   default     = "202609290000"
 }
+
+variable "web_hosting_enabled" {
+  type        = bool
+  description = "Host the built PWA (packages/web/dist) and the MTA-STS policy on a private S3 bucket behind CloudFront (origin access control) with ACM certificates. Writes Route 53 records in zone_id, so it needs zone_id. Build the web app first: the response headers policy is read from packages/web/dist/_headers. See docs/RUNBOOK.md section 9."
+  default     = false
+
+  validation {
+    condition     = !var.web_hosting_enabled || length(var.zone_id) > 0
+    error_message = "web_hosting_enabled requires zone_id."
+  }
+
+  validation {
+    condition     = !var.web_hosting_enabled || var.aws_region == "us-east-1"
+    error_message = "CloudFront certificates must live in us-east-1, and this stack keeps them in the default provider region."
+  }
+}
+
+variable "web_app_label" {
+  type        = string
+  description = "Host label for the web app. The FQDN is <label>.<domain>."
+  default     = "app"
+}
+
+variable "web_mta_sts_label" {
+  type        = string
+  description = "Host label for the MTA-STS policy host. It must be mta-sts for receivers to find it."
+  default     = "mta-sts"
+
+  validation {
+    condition     = var.web_mta_sts_label == "mta-sts"
+    error_message = "MTA-STS requires the host mta-sts.<domain>."
+  }
+}
+
+variable "web_hosting_publish_mta_sts_txt" {
+  type        = bool
+  description = "Publish the _mta-sts TXT record (v=STSv1; id=mta_sts_id). Leave false until https://mta-sts.<domain>/.well-known/mta-sts.txt answers over HTTPS."
+  default     = false
+}
+
+variable "web_hosting_publish_tls_rpt" {
+  type        = bool
+  description = "Publish the _smtp._tls TXT record (v=TLSRPTv1; rua=mailto:<dmarc_rua_local_part>@<domain>)."
+  default     = true
+}

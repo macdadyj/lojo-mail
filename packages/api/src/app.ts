@@ -140,6 +140,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
     app.use("*", cors({ origin: deps.corsOrigin, allowHeaders: ["authorization", "content-type"] }));
   }
 
+  // API Gateway forwards OPTIONS to the $default route instead of answering the preflight itself.
+  // The gateway's CORS configuration adds the allow-* headers to this response; the browser needs a 2xx.
+  app.options("*", (c) => c.body(null, 204));
+
   app.get("/v1/health", (c) => c.json({ ok: true, unlocked: mailbox.unlocked }));
 
   app.post("/v1/session/login", async (c) => {

@@ -11,6 +11,12 @@ const allowed = new Set(policy.Statement.flatMap((statement) => statement.Action
 // Resource types behind flags that default off (create-mode identity, manage_dns) are listed
 // as optional: the policy omits them on purpose.
 const NEEDS = {
+  aws_acm_certificate: ["acm:RequestCertificate", "acm:DescribeCertificate"],
+  aws_acm_certificate_validation: ["acm:DescribeCertificate"],
+  aws_cloudfront_distribution: ["cloudfront:CreateDistribution", "cloudfront:GetDistribution", "cloudfront:TagResource"],
+  aws_cloudfront_origin_access_control: ["cloudfront:CreateOriginAccessControl", "cloudfront:GetOriginAccessControl"],
+  aws_cloudfront_response_headers_policy: ["cloudfront:CreateResponseHeadersPolicy", "cloudfront:GetResponseHeadersPolicy"],
+  aws_s3_object: ["s3:PutObject", "s3:GetObject"],
   aws_apigatewayv2_api: ["apigateway:POST", "apigateway:GET"],
   aws_apigatewayv2_integration: ["apigateway:POST"],
   aws_apigatewayv2_route: ["apigateway:POST"],
