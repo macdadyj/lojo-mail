@@ -32,7 +32,7 @@ Outbound attachment data on à la carte is an extra $0.12 per GB. Irrelevant at 
 
 | Line | À la carte, AI on Ollama | À la carte, AI on Grok | Notes |
 | --- | ---: | ---: | --- |
-| KMS key | $1.00 | $1.00 | $1 per CMK per month. This is the fixed cost. |
+| KMS key | $1.00 | $1.00 | $1 per CMK per month in year one. Rotation is on, and each of the first two yearly rotations adds $1, so $2 in year two and $3 from year three. This is the fixed cost. |
 | KMS requests | ~$0.03 | ~$0.05 | $0.03 per 10,000 requests. Bucket keys keep S3 from calling KMS per object. |
 | S3 storage + a few thousand requests | ~$0.05 | ~$0.05 | $0.023/GB-month standard. Raw MIME is deleted after ingest (7-day safety net); the AI-context copies expire after 30 days. Noncurrent versions expire after 1 day for `raw/` and `ai-context/`, 30 days elsewhere. |
 | DynamoDB on-demand + PITR | ~$0.10 | ~$0.10 | Pennies of requests. Reads are index `Query` calls, not scans. Six GSIs double write units for indexed items, still pennies. PITR is $0.20/GB-month. |
