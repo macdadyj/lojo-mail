@@ -1,0 +1,53 @@
+# lojo-mail Thunderbird bridge: IMAP on 127.0.0.1:1143, SMTP submission on 127.0.0.1:1587.
+# A systemd --user unit. scripts/install-bridge.sh installs it to
+# ~/.config/systemd/user/ and rewrites ExecStart to the absolute path of the
+# node it found, since user units do not see nvm/fnm shims on PATH.
+#
+#   systemctl --user status lojo-mail-bridge
+#   journalctl --user -u lojo-mail-bridge -f
+#
+# If the token or envelope key come from `pass` (tokenCommand /
+# privateKeyCommand in bridge.json), gpg must reach your agent:
+#   - gpg-agent listens on $XDG_RUNTIME_DIR/gnupg/S.gpg-agent, which this unit
+#     can reach. Unlock the key once per login (or use a long cache TTL);
+#     pinentry cannot prompt from a service.
+#   - A non-default GNUPGHOME or PASSWORD_STORE_DIR must be set below.
+#   - gpg writes to ~/.gnupg (random_seed, trustdb); uncomment the
+#     ReadWritePaths line for it.
+
+[Unit]
+Description=lojo-mail local IMAP/SMTP bridge for Thunderbird
+Documentation=file://%h/.local/share/lojo-mail/THUNDERBIRD.md
+After=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node %h/.local/share/lojo-mail/bridge.mjs serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+#Environment=GNUPGHOME=%h/.gnupg
+#Environment=PASSWORD_STORE_DIR=%h/.password-store
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+# The bridge only writes its UID state. bridge.json stays read-only to the
+# service; `lojo-bridge reset-password` runs outside it.
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/lojo-mail
+#ReadWritePaths=-%h/.gnupg
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+# Node's JIT needs writable+executable pages, so MemoryDenyWriteExecute stays off.
+MemoryDenyWriteExecute=no
+
+[Install]
+WantedBy=default.target
