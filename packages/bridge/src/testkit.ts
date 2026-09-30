@@ -3,7 +3,7 @@ import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { testApp } from "@lojo/api/testing";
-import { sendFromList } from "@lojo/core";
+import { sendFromList, type ClientSendLimits } from "@lojo/core";
 import { ImapFlow } from "imapflow";
 import { hashPassword } from "./auth.ts";
 import { startBridge, type RunningBridge } from "./bridge.ts";
@@ -33,6 +33,7 @@ export interface HarnessOptions {
   bridgeSend?: boolean;
   deleteToTrash?: boolean;
   sendFrom?: string;
+  clientSendLimits?: ClientSendLimits;
 }
 
 export async function harness(options: HarnessOptions = {}): Promise<Harness> {
@@ -41,6 +42,7 @@ export async function harness(options: HarnessOptions = {}): Promise<Harness> {
     bridgeTrash: options.bridgeTrash ?? false,
     bridgeSend: options.bridgeSend ?? false,
     ...(options.sendFrom ? { config: { sendFrom: sendFromList("lojo@cyberphysical.us", options.sendFrom) } } : {}),
+    ...(options.clientSendLimits ? { deps: { clientSendLimits: options.clientSendLimits } } : {}),
   });
   const dir = mkdtempSync(join(tmpdir(), "lojo-bridge-test-"));
   const statePath = join(dir, "bridge-state.json");
