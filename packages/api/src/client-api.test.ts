@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fixture } from "@lojo/core/testing";
-import { addBridgeToken, bridgeTrashFromEnv, hasScope, parseAgentTokens, parseScopes, TokenBook, tokenBookFromEnv } from "./auth.ts";
+import { addBridgeToken, bridgeSendFromEnv, bridgeTrashFromEnv, hasScope, parseAgentTokens, parseScopes, TokenBook, tokenBookFromEnv } from "./auth.ts";
 import { testApp } from "./test-app.ts";
 
 test("folders list newest first with the threading metadata a mail client needs", async () => {
@@ -70,25 +70,51 @@ test("inbound mail cannot be filed as sent or as a draft", async () => {
 });
 
 test("production refuses a short bridge token and the dev one", () => {
-  assert.throws(() => addBridgeToken(new TokenBook(true), "short", true, false), /at least 32/);
-  assert.throws(() => addBridgeToken(new TokenBook(true), "dev-bridge-change-me", true, false));
+  const off = { trash: false, send: false };
+  assert.throws(() => addBridgeToken(new TokenBook(true), "short", true, off), /at least 32/);
+  assert.throws(() => addBridgeToken(new TokenBook(true), "dev-bridge-change-me", true, off));
   const book = new TokenBook(true);
-  addBridgeToken(book, "b".repeat(40), true, false);
+  addBridgeToken(book, "b".repeat(40), true, off);
   assert.deepEqual(book.principal(`Bearer ${"b".repeat(40)}`)?.scopes, ["read", "write", "body", "compose"]);
-  addBridgeToken(book, "t".repeat(40), true, true);
+  addBridgeToken(book, "t".repeat(40), true, { trash: true, send: false });
   assert.deepEqual(book.principal(`Bearer ${"t".repeat(40)}`)?.scopes, ["read", "write", "body", "compose", "trash"]);
+  addBridgeToken(book, "s".repeat(40), true, { trash: true, send: true });
+  assert.deepEqual(book.principal(`Bearer ${"s".repeat(40)}`)?.scopes, ["read", "write", "body", "compose", "trash", "client-send"]);
+  assert.equal(book.principal(`Bearer ${"s".repeat(40)}`)?.label, "bridge");
 });
 
-test("the trash scope comes only from LOJO_BRIDGE_TRASH=on, never from a scope list or an agent token", () => {
+test("the bridge gets trash only from LOJO_BRIDGE_TRASH=on; no scope list can grant trash", () => {
   assert.equal(bridgeTrashFromEnv({}), false);
   assert.equal(bridgeTrashFromEnv({ LOJO_BRIDGE_TRASH: "true" }), false);
   assert.equal(bridgeTrashFromEnv({ LOJO_BRIDGE_TRASH: "on" }), true);
-  assert.throws(() => parseScopes("read,write,trash", ["read"]), /bridge token only/);
-  assert.throws(() => parseAgentTokens(JSON.stringify([{ label: "grok", token: "g".repeat(40), scopes: ["read", "trash"] }]), true), /not allowed/);
+  assert.throws(() => parseScopes("read,write,trash", ["read"]), /not allowed in a scope list/);
   assert.equal(hasScope(["admin"], "trash"), false, "admin does not imply trash");
   const book = tokenBookFromEnv({ LOJO_BRIDGE_TOKEN: "x".repeat(40), LOJO_BRIDGE_TRASH: "on", LOJO_API_TOKEN: "a".repeat(40) }, true);
   assert.ok(book.principal(`Bearer ${"x".repeat(40)}`)?.scopes.includes("trash"));
   assert.ok(!book.principal(`Bearer ${"a".repeat(40)}`)?.scopes.includes("trash"));
+});
+
+test("client-send comes only from LOJO_BRIDGE_SEND=on, on the bridge token; never from a scope list, an agent token, or admin", () => {
+  assert.equal(bridgeSendFromEnv({}), false);
+  assert.equal(bridgeSendFromEnv({ LOJO_BRIDGE_SEND: "true" }), false);
+  assert.equal(bridgeSendFromEnv({ LOJO_BRIDGE_SEND: "on" }), true);
+  assert.throws(() => parseScopes("read,client-send", ["read"]), /not allowed in a scope list/);
+  assert.throws(() => parseAgentTokens(JSON.stringify([{ label: "grok", token: "g".repeat(40), scopes: ["read", "client-send"] }]), true), /not allowed/);
+  for (const scope of ["send", "compose", "admin"]) {
+    assert.throws(() => parseAgentTokens(JSON.stringify([{ label: "grok", token: "g".repeat(40), scopes: ["read", scope] }]), true), /not allowed/, scope);
+  }
+  assert.equal(hasScope(["admin"], "client-send"), false, "admin does not imply client-send");
+  const env = { LOJO_BRIDGE_TOKEN: "x".repeat(40), LOJO_BRIDGE_SEND: "on", LOJO_API_TOKEN: "a".repeat(40), LOJO_SEND_TOKEN: "s".repeat(40) };
+  const book = tokenBookFromEnv(env, true);
+  assert.ok(book.principal(`Bearer ${"x".repeat(40)}`)?.scopes.includes("client-send"));
+  assert.ok(!book.principal(`Bearer ${"a".repeat(40)}`)?.scopes.includes("client-send"));
+  assert.ok(!book.principal(`Bearer ${"s".repeat(40)}`)?.scopes.includes("client-send"));
+});
+
+test("agent tokens may hold trash (Jon opts in per agent) and are labelled per agent", () => {
+  const [agent] = parseAgentTokens(JSON.stringify([{ label: "cursor", token: "c".repeat(40), scopes: ["read", "write", "body", "trash"] }]), true);
+  assert.deepEqual(agent?.scopes, ["read", "write", "body", "trash"]);
+  assert.equal(agent?.label, "agent:cursor");
 });
 
 test("the bridge with the trash scope soft-deletes: Trash with a retention window, audited, restorable", async () => {
@@ -111,10 +137,10 @@ test("the bridge with the trash scope soft-deletes: Trash with a retention windo
   assert.ok((await t.store.listAudit()).some((event) => event.action === "message.restored"));
 });
 
-test("agent, admin, and write tokens still cannot trash, and the bridge token cannot use MCP", async () => {
-  const t = await testApp({ bridgeTrash: true });
+test("tokens without the trash scope cannot trash, and the bridge token cannot use MCP", async () => {
+  const t = await testApp({ bridgeTrash: true, bridgeSend: true });
   const { message } = await t.ingest(fixture("personal.eml"));
-  for (const token of ["write-token", "admin-token", "send-token"]) {
+  for (const token of ["write-token", "admin-token", "send-token", "agent-token"]) {
     assert.equal((await t.call(`/v1/messages/${message.id}/move`, { token, body: { folder: "trash" } })).status, 403, token);
   }
   assert.equal((await t.store.getMessage(message.id))?.folder, "inbox");

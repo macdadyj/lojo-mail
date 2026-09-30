@@ -2,9 +2,9 @@
 
 Three ways to search and work the mailbox from an assistant, and one switch for which model the server itself uses. All of them go through the same HTTP API with a scoped bearer token, so the rules are the same everywhere:
 
-- No assistant can send. There is no send tool. Sending needs the `send` scope **and** a one-time approval token that only Jon's signed-in web session can mint for that exact content ([SECURITY.md](SECURITY.md#human-approval-for-sending)). The most an assistant can do is `submit_for_approval`, which puts a draft in the web app's approval queue.
+- No assistant can send. There is no send tool. Sending needs the `send` scope **and** a one-time approval token that only Jon's signed-in web session can mint for that exact content ([SECURITY.md](SECURITY.md#human-approval-for-sending)), or Jon pressing Send in Thunderbird (the bridge-only `client-send` scope). Assistant replies are drafts: they show up in Thunderbird's Drafts folder, and Jon sends them himself. See [BOTS.md](BOTS.md) for the full bot setup.
 - Message text (bodies, AI summaries, action items, semantic search) needs the `body` scope. Without it a token sees headers, labels, and the short snippet.
-- Trash, full export, and approval are human-only. No agent token and no MCP client reaches them. The one exception is the Thunderbird bridge token, which can hold the `trash` scope (soft delete to Trash, audited, restorable) when `bridge_trash_enabled` is on; `/mcp` refuses any token that holds it.
+- Soft delete to Trash needs the `trash` scope, which Jon grants per agent token (audited as `agent:<label>`, restorable for the retention window, capped at 100 per agent per day). Hard delete does not exist for anyone. Full export and approval are human-only.
 - Every tool result is wrapped as untrusted content, because it is mail that anyone can write.
 
 | Client | Transport | Where it runs | Default scopes |
@@ -12,9 +12,9 @@ Three ways to search and work the mailbox from an assistant, and one switch for 
 | Cursor | stdio MCP server (`packages/mcp`) or remote MCP at `/mcp` | Jon's machine / API Gateway | `read` |
 | Grok (xAI API, Grok Build, grok.com) | remote MCP at `POST /mcp`, Streamable HTTP | xAI's servers call the API | `read` |
 | Local models (Ollama, llama.cpp, vLLM, LM Studio) | `lojo-local` CLI and tool-calling adapter (`packages/local`) | Jon's machine | whatever the token has, narrowed by `LOJO_API_SCOPES` |
-| Thunderbird | local IMAP + SMTP bridge (`packages/bridge`), see [THUNDERBIRD.md](THUNDERBIRD.md) | Santa Computa, 127.0.0.1 | the bridge token: `read`, `write`, `body`, `compose` |
+| Thunderbird | local IMAP + SMTP bridge (`packages/bridge`), see [THUNDERBIRD.md](THUNDERBIRD.md) | Santa Computa, 127.0.0.1 | the bridge token: `read`, `write`, `body`, `compose`, plus `trash` and `client-send` when enabled; refused by `/mcp` |
 
-Assistants cannot change Jon's mail rules. With `write` they can only pause the rules, engage the auto-send kill switch, or disable one rule (`POST /v1/rules/switches`, `POST /v1/rules/:id/disable`); with `read` they can list them and dry-run them against a message (`GET /v1/rules`, `POST /v1/rules/test`). See [SECURITY.md](SECURITY.md#mail-rules-and-automation).
+Assistants cannot change Jon's mail rules. With `write` they can only pause the rules, engage the auto-send or global send kill switch, or disable one rule (`POST /v1/rules/switches`, `POST /v1/rules/:id/disable`); with `read` they can list them and dry-run them against a message (`GET /v1/rules`, `POST /v1/rules/test`). See [SECURITY.md](SECURITY.md#mail-rules-and-automation).
 
 ## Tokens: one per client
 
@@ -24,7 +24,7 @@ Give every client its own token so it can be revoked alone. Every request is log
 [
   { "label": "cursor", "token": "<openssl rand -hex 32>", "scopes": ["read"] },
   { "label": "grok",   "token": "<openssl rand -hex 32>", "scopes": ["read"] },
-  { "label": "local",  "token": "<openssl rand -hex 32>", "scopes": ["read", "write", "body"] }
+  { "label": "local",  "token": "<openssl rand -hex 32>", "scopes": ["read", "write", "body", "trash"] }
 ]
 ```
 
@@ -36,7 +36,7 @@ shred -u agent-tokens.json
 
 Rules the API enforces when it loads the list:
 
-- Scopes are limited to `read`, `write`, and `body`. `send` and `admin` are refused for agent tokens.
+- Scopes are limited to `read`, `write`, `body`, and `trash`. `send`, `admin`, `compose`, and `client-send` are refused for agent tokens.
 - Tokens are at least 32 characters. Labels are 1–32 lowercase letters, digits, or dashes, and unique. A token acts as `agent:<label>`.
 - If any entry breaks a rule, **no** agent token works, and the API logs `agent_tokens_invalid` with the reason (never the token). The web app and the main API token keep working, so a typo cannot lock Jon out.
 - The API reloads its parameters every 5 minutes (`LOJO_CONFIG_TTL_MS`), so adding or revoking a token takes effect within 5 minutes. To apply it at once, force a cold start: `aws lambda update-function-configuration --function-name lojo-mail-api --description "rotate $(date +%s)"`.
@@ -45,9 +45,10 @@ Which scopes to grant:
 
 | Scope | Adds | Consider it for |
 | --- | --- | --- |
-| `read` | inbox, triage, threads and search over metadata and snippets, labels, drafts list | every client |
-| `write` | labels, archive, move (not to trash), create and edit drafts, `draft_reply` and `summarize_thread` (these spend model tokens), `submit_for_approval` | clients that should triage or draft |
+| `read` | inbox, any folder, triage, threads and search over metadata and snippets, labels, drafts list | every client |
+| `write` | labels, archive, move (not to trash), restore from Trash, create and edit drafts, `draft_reply` and `summarize_thread` (these spend model tokens), `submit_for_approval` | clients that should triage or draft |
 | `body` | message text, AI summaries, action items, semantic search | only clients whose model provider you are content to show mail text to |
+| `trash` | `trash_message` (soft delete, restorable; 100 per agent per day) | clients you trust to clean up; everything is restorable from Trash |
 
 `body` on the Grok token means mail text goes to xAI. `body` on the local token keeps text between the API and Jon's own machine.
 
@@ -128,7 +129,8 @@ npm run local -- inbox --triage
 npm run local -- search "lease renewal" --semantic
 npm run local -- read thr_…
 npm run local -- summarize thr_… --local       # summarized on Ollama; the text never reaches a cloud model
-npm run local -- draft thr_… --local --instruction "decline politely"   # goes to Drafts
+npm run local -- draft thr_… --local --instruction "decline politely"   # goes to Drafts (and Thunderbird)
+npm run local -- label msg_… todo                                        # also: move, archive, trash, restore, folder, drafts
 npm run local -- draft thr_… --local --submit  # also queues it for Jon's approval
 npm run local -- ask "who still owes me a reply?"   # the model picks tools itself
 npm run local -- backfill --limit 25           # embed older mail for semantic search (write + body)

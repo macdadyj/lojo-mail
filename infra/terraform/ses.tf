@@ -33,6 +33,16 @@ locals {
   ))
   dkim_tokens = tolist(local.dkim_attributes[0].tokens)
 
+  # SES authorizes a send against whichever identity is verified: the address
+  # itself or its domain. Both are listed; the FromAddress condition still pins
+  # the exact addresses.
+  extra_send_identity_arns = flatten([
+    for address in var.send_from_addresses : [
+      "arn:aws:ses:${var.aws_region}:${local.account_id}:identity/${address}",
+      "arn:aws:ses:${var.aws_region}:${local.account_id}:identity/${split("@", address)[1]}",
+    ]
+  ])
+
   receipt_rule_arn_pattern = "arn:aws:ses:${var.aws_region}:${local.account_id}:receipt-rule-set/${var.project}:receipt-rule/*"
 }
 
@@ -49,6 +59,12 @@ resource "aws_sesv2_configuration_set" "outbound" {
 
   sending_options {
     sending_enabled = true
+  }
+
+  # Addresses that hard-bounced or complained are not mailed again from this
+  # configuration set, whatever the account-level setting is.
+  suppression_options {
+    suppressed_reasons = ["BOUNCE", "COMPLAINT"]
   }
 }
 

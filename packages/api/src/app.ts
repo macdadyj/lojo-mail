@@ -4,7 +4,7 @@ import { handleMcpPost, mcpMethodNotAllowed, type McpHttpReply } from "@lojo/mcp
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
-import { hasScope, type Principal, type Scope, type TokenBook } from "./auth.ts";
+import { BRIDGE_LABEL, hasScope, type Principal, type Scope, type TokenBook } from "./auth.ts";
 import { LoginRateLimited, sourceKey, type LoginThrottle, type Sessions } from "./session.ts";
 
 interface AppDeps {
@@ -35,7 +35,7 @@ type Requirement = Scope | "human";
 
 const PUBLIC_PATHS = new Set(["/v1/health", "/v1/session/login"]);
 
-function statusFor(error: MailError): 400 | 403 | 404 | 409 | 423 | 502 | 503 {
+function statusFor(error: MailError): 400 | 403 | 404 | 409 | 423 | 429 | 502 | 503 {
   switch (error.code) {
     case "not_found":
       return 404;
@@ -49,6 +49,8 @@ function statusFor(error: MailError): 400 | 403 | 404 | 409 | 423 | 502 | 503 {
       return 502;
     case "unavailable":
       return 503;
+    case "rate_limited":
+      return 429;
     case "invalid":
     case "budget":
       return 400;
@@ -86,16 +88,26 @@ function actorOf(principal: Principal): Actor {
   return principal.kind === "human" ? "human" : "agent";
 }
 
-/** Soft delete is Jon's session, or the bridge token when Jon granted it `trash`. Never an agent token. */
+/** Soft delete is Jon's session, or a token Jon granted `trash`: the bridge, or an agent (capped per day in the mailbox). */
 function trashActorOf(principal: Principal): TrashActor {
   if (principal.kind === "human") return "human";
-  if (hasScope(principal.scopes, "trash")) return "bridge";
-  throw new MailError("Only a signed-in human, or the Thunderbird bridge with the trash scope, can move mail to trash", "forbidden");
+  if (hasScope(principal.scopes, "trash")) {
+    if (principal.label === BRIDGE_LABEL) return "bridge";
+    if (principal.label.startsWith("agent:")) return `agent:${principal.label.slice("agent:".length)}`;
+  }
+  throw new MailError("Moving mail to trash needs a signed-in human or a token with the trash scope", "forbidden");
 }
 
-function isMcpScope(scope: Scope): scope is Exclude<Scope, "trash"> {
-  return scope !== "trash";
+/** Jon's mail client. Its credential is never an agent: it cannot reach MCP. */
+function isBridge(principal: Principal): boolean {
+  return principal.label === BRIDGE_LABEL || principal.scopes.includes("client-send");
 }
+
+function isMcpScope(scope: Scope): scope is Exclude<Scope, "client-send"> {
+  return scope !== "client-send";
+}
+
+const MAX_CLIENT_SEND_BASE64 = 6_000_000;
 
 /** Only Jon's own mail client (the `compose` scope) may draft to people the mailbox has never written to. */
 function draftOriginOf(principal: Principal): "human" | "agent" | "client" {
@@ -197,7 +209,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (token.startsWith("hs_")) return c.json({ error: "MCP takes an API token, not a web session" }, 403);
     const principal = deps.tokens.principal(authorization, null);
     if (!principal) return c.json({ error: "unauthorized" }, 401, MCP_CHALLENGE);
-    if (principal.scopes.includes("trash")) return c.json({ error: "The Thunderbird bridge token cannot be used for MCP" }, 403);
+    if (isBridge(principal)) return c.json({ error: "The Thunderbird bridge token cannot be used for MCP" }, 403);
     const mailbox = new HttpMailClient("http://lojo.internal", token, (url, init) => Promise.resolve(app.request(url, init)));
     const reply = mcpResponse(await handleMcpPost(await c.req.text(), c.req.raw.headers, { label: principal.label, scopes: principal.scopes.filter(isMcpScope), mailbox }));
     deps.accessLog?.({ principal: principal.label, method: "POST", path: "/mcp", status: reply.status });
@@ -216,7 +228,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.get("/v1/session", (c) => {
     const { kind, label, scopes } = c.get("principal");
-    return c.json({ kind, label, scopes });
+    return c.json({ kind, label, scopes, sendFrom: mailbox.config.sendFrom });
   });
 
   app.get("/v1/inbox", need("read"), async (c) => c.json({ messages: await mailbox.listInbox(50, views(c)) }));
@@ -275,12 +287,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json(await mailbox.getDraft(c.req.param("id"), { withText }));
   });
   app.post("/v1/drafts", need("write"), async (c) => {
-    const input = await body<{ to: string[]; cc: string[]; subject: string; text: string; threadId: string; inReplyTo: string; pgp: PgpMode }>(c);
+    const input = await body<{ to: string[]; cc: string[]; subject: string; text: string; threadId: string; inReplyTo: string; pgp: PgpMode; clientMessageId: string }>(c);
     const to = strings(input.to, "to");
-    if (!to?.length || typeof input.subject !== "string" || typeof input.text !== "string") {
+    const principal = c.get("principal");
+    const origin = draftOriginOf(principal);
+    if (!to || (to.length === 0 && origin !== "client") || typeof input.subject !== "string" || typeof input.text !== "string") {
       throw new MailError("to, subject, and text are required", "invalid");
     }
-    const principal = c.get("principal");
     const pgp = pgpMode(input.pgp);
     const draft = await mailbox.createDraft({
       to,
@@ -290,7 +303,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ...(typeof input.threadId === "string" ? { threadId: input.threadId } : {}),
       ...(typeof input.inReplyTo === "string" ? { inReplyTo: input.inReplyTo } : {}),
       ...(pgp ? { pgp } : {}),
-      origin: draftOriginOf(principal),
+      ...(origin === "client" && typeof input.clientMessageId === "string" ? { clientMessageId: input.clientMessageId } : {}),
+      origin,
     });
     return c.json(await mailbox.getDraft(draft.id, { withText: canReadText(principal) }), 201);
   });
@@ -349,6 +363,21 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json(await mailbox.approveAndSend(c.req.param("id"), token));
   });
 
+  /**
+   * Jon pressing Send in Thunderbird: the bridge relays the message as built.
+   * Only `client-send` (the bridge token, when Jon enabled it) reaches this.
+   */
+  app.post("/v1/client/send", need("client-send"), async (c) => {
+    const input = await body<{ raw: string; envelopeFrom: string; recipients: string[] }>(c);
+    const recipients = strings(input.recipients, "recipients");
+    if (typeof input.raw !== "string" || !input.raw || typeof input.envelopeFrom !== "string" || !recipients) {
+      throw new MailError("raw (base64), envelopeFrom, and recipients are required", "invalid");
+    }
+    if (input.raw.length > MAX_CLIENT_SEND_BASE64) throw new MailError("The message is too large", "invalid");
+    const raw = Buffer.from(input.raw, "base64");
+    return c.json(await mailbox.clientSend({ raw, envelopeFrom: input.envelopeFrom, recipients }));
+  });
+
   app.post("/v1/messages/:id/labels", need("write"), async (c) => {
     const labels = strings((await body<{ labels: string[] }>(c)).labels, "labels");
     if (!labels) throw new MailError("labels is required", "invalid");
@@ -366,11 +395,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
   /** Replaces the whole document. Human sessions only; tokens can only make rules safer (below). */
   app.put("/v1/rules", need("human"), async (c) => c.json({ rules: await mailbox.putRules(await body<unknown>(c), actorOf(c.get("principal"))) }));
   app.post("/v1/rules/switches", need("write"), async (c) => {
-    const input = await body<{ paused: boolean; killSwitch: boolean }>(c);
-    const switches: { paused?: boolean; killSwitch?: boolean } = {};
+    const input = await body<{ paused: boolean; killSwitch: boolean; sendKillSwitch: boolean }>(c);
+    const switches: { paused?: boolean; killSwitch?: boolean; sendKillSwitch?: boolean } = {};
     if (typeof input.paused === "boolean") switches.paused = input.paused;
     if (typeof input.killSwitch === "boolean") switches.killSwitch = input.killSwitch;
-    if (Object.keys(switches).length === 0) throw new MailError("Send paused and/or killSwitch as true or false", "invalid");
+    if (typeof input.sendKillSwitch === "boolean") switches.sendKillSwitch = input.sendKillSwitch;
+    if (Object.keys(switches).length === 0) throw new MailError("Send paused, killSwitch and/or sendKillSwitch as true or false", "invalid");
     return c.json({ rules: await mailbox.setRuleSwitches(switches, actorOf(c.get("principal"))) });
   });
   app.post("/v1/rules/:id/disable", need("write"), async (c) => c.json({ rules: await mailbox.disableRule(c.req.param("id"), actorOf(c.get("principal"))) }));

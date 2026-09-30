@@ -8,9 +8,10 @@ Thunderbird ──IMAP 127.0.0.1:1143──┐
                                    └─ decrypts with ~/.config/lojo-mail/envelope.private.jwk
 ```
 
-Two things work differently from ordinary mail:
+Thunderbird is a full client for `lojo@cyberphysical.us`: you read, sort, reply, forward, attach, and send there, and never need the web app for normal mail. Three things are worth knowing:
 
-- **Sending queues a draft.** Nothing leaves until you approve it in the lojo-mail web app.
+- **Send means send.** With `bridge_send_enabled = true` (the default), Send in Thunderbird goes straight out through SES. No web approval: you at your own mail client are the approval. The global send kill switch, the From list, size limits, and rate limits still apply. With it off, Thunderbird sends go to the web approval queue as before.
+- **Bot replies wait in Drafts.** Grok, Cursor, and local models can sort your mail and write replies, but they cannot send. Their replies appear in Drafts with the tag `bot-draft`. Open one, edit it if you like, and press Send: that is the approval. See [BOTS.md](BOTS.md).
 - **Deleting moves to Trash, and Trash is emptied on a schedule.** A delete is a soft delete: the message stays in Trash, restorable, for the retention window (30 days by default, never less than 7). After that, the server-side trash purge may delete it for good, once Jon turns the purge on (`trash_purge_mode = purge`; it only reports until then). Details in section 4.
 
 ## 1. Prerequisites
@@ -30,7 +31,7 @@ Two things work differently from ordinary mail:
      (umask 077; printf '%s\n' 'PASTE-THE-TOKEN' > ~/.config/lojo-mail/bridge-token)
      ```
 
-   The API gives this token exactly `read`, `write`, `body`, `compose`. The bridge checks `GET /v1/session` at start and refuses to run with a token that has `send` or `admin`.
+   The API gives this token `read`, `write`, `body`, `compose`, plus `trash` (with `bridge_trash_enabled`) and `client-send` (with `bridge_send_enabled`). `client-send` is Jon at Thunderbird: no other token can hold it, not even `admin`, and `/mcp` refuses any token that has it. The bridge checks `GET /v1/session` at start and refuses to run with a token that has `send` or `admin`.
 3. **The envelope private key**, `keys/envelope.private.jwk` from `npm run keygen`, the key the mailbox seals to. Copy it out of your password manager:
 
    ```bash
@@ -86,7 +87,7 @@ The bridge publishes the service's fixed folders with SPECIAL-USE flags, so Thun
 | Thunderbird | lojo-mail folder |
 | --- | --- |
 | Inbox | inbox |
-| Drafts | drafts (Thunderbird's drafts stay local, see below) |
+| Drafts | open drafts: yours, bots' (tagged `bot-draft`), and AI suggestions |
 | Sent | sent |
 | Archive | archive |
 | Junk | spam |
@@ -94,34 +95,45 @@ The bridge publishes the service's fixed folders with SPECIAL-USE flags, so Thun
 
 Check these under Account Settings:
 
-- **Copies & Folders:** Sent in "Sent", Drafts in "Drafts". You can turn off "Place a copy in", because the bridge drops that copy anyway (the real one appears in Sent after you approve).
+- **Copies & Folders:** Sent in "Sent", Drafts in "Drafts". **Turn off "Place a copy in"**: the service files the Sent copy itself (sealed, with your Bcc list), and the bridge drops Thunderbird's copy, so leaving it on only makes Thunderbird upload every message twice.
+- **Extra From addresses:** Account Settings → Manage Identities → Add, for each address in Terraform `send_from_addresses` (for example `jon@lojo.engineering`). Use the same outgoing server (`127.0.0.1:1587`). Any other From is refused.
 - **Copies & Folders → Archive options:** choose **A single folder**. The default yearly subfolders need CREATE, which lojo-mail does not support.
 - **Server Settings → When I delete a message:** choose **Move it to this folder: Trash**. "Just mark it as deleted" also works (the bridge moves the message to Trash on expunge). Avoid "Remove it immediately": the bridge treats it the same as a move to Trash, but Thunderbird will tell you the message is gone when it is not.
 - **Junk Settings:** Junk in "Junk". Marking junk adds the `junk` label; moving to Junk moves the message to spam.
 
 ## 4. What each action does
 
-**Sending.** The bridge turns every submission into a draft (origin `client`) and puts it in the approval queue. SMTP answers `Queued for Jon's approval as draft drf_...`, and a desktop notification appears if `notify-send` is installed. **Nothing is sent until you approve it in the web app.** Replies keep their thread through `In-Reply-To`. The body is the plain-text part; HTML-only mail is converted to text.
+**Sending.** Press Send and the message goes out through SES at once. SMTP answers `Sent through lojo-mail (SES ...)` and a sealed copy appears in Sent within seconds (it keeps your Bcc list, visible only to you). Everything Thunderbird composes works:
 
-The bridge never approves or sends by itself, and it cannot:
+- **Several To and Cc recipients, and Bcc.** Bcc recipients get the message; the Bcc header is removed before it leaves.
+- **Attachments**, inline images, vCards, and attached OpenPGP keys, up to **4 MB for the whole message** (about 3 MB of attachments after encoding). Thunderbird sees the limit through SMTP `SIZE` and warns before sending. Larger files: share a link.
+- **Replies and forwards** keep `In-Reply-To` and `References`, so the recipient's client threads them, and the Sent copy joins the thread in lojo-mail.
+- **From** is `lojo@cyberphysical.us` or one of the extra identities you listed in `send_from_addresses`; the envelope sender must match.
 
-- Minting an approval needs a signed-in human session (your passphrase). The bridge would have to store the passphrase or prompt for it on Santa.
-- A local "confirm send?" dialog is no protection: any process running as you, or malware, can spoof it or click it.
-- The web app's approval binds the hash of the exact content you reviewed. A second approval path would weaken that.
-- The bridge token has no `send` scope. The API returns 403 even if the bridge tried.
+**Refused at send time** (Thunderbird shows the SMTP error and keeps the message in the compose window or Outbox):
 
-**Refused at send time** (Thunderbird shows the SMTP error):
+- **The global send kill switch is on** (`550 ... kill switch`). It stops Thunderbird sends, approved drafts, and rule auto-send together. Turn it on or off in the web app under Rules → "Stop all sending". Agents may turn it on, never off.
+- **Rate limits** (`451`, temporary, Thunderbird retries): by default 30 messages per 10 minutes, 200 messages and 500 recipients per UTC day, 50 recipients per message. Terraform `client_send_limits` changes them.
+- **A From address that is not on the list**, or over 4 MB.
 
-- **Bcc.** The approval covers the To and Cc lines only, so every recipient must be visible there.
-- **Attachments**, including inline images, attached OpenPGP keys, and vCards. The service cannot send attachments yet.
-- **A From address other than `lojo@cyberphysical.us`.**
-- **Messages over 10 MB.**
+Bounces and complaints: the SES configuration set suppresses addresses that hard-bounced or complained, so a second send to them is dropped by SES instead of hurting the domain's reputation. Every send and every refusal is in the audit log (`send.client`) with counts only.
 
-**Drafts.** Thunderbird saves drafts with IMAP APPEND. The bridge accepts and drops them, so drafts stay in Thunderbird's local copy only. They are not synced to the web app until you send.
+**Sending with `bridge_send_enabled = false`.** The bridge turns each submission into a client draft in the web approval queue and answers `Queued for Jon's approval as draft drf_...`. Nothing leaves until you approve it in the web app. In this mode Bcc and attachments are refused, because the approval covers the visible text only.
+
+**Drafts.** The Drafts folder shows every open draft on the service:
+
+- **Your own drafts.** Thunderbird saves drafts with IMAP APPEND; each save becomes a client draft on the service (so it also shows in the web app), keeps Thunderbird's Message-ID so Thunderbird finds it again, and replaces the previous version. Drafts are stored as plain text: a draft with an attachment is refused (`NO [CANNOT]`), so keep such drafts in Local Folders or just send them.
+- **Bot drafts**, written by an agent (Grok, Cursor, a local model) or a rule, carry the tag `bot-draft`, so you can make a saved search or a colour for them. AI reply suggestions that the service writes at delivery for personal mail appear here too.
+- **Approve and send a bot draft:** open it (double-click, or Edit Draft), check it, and press Send. The service matches the sent message to the draft by its hidden `X-Lojo-Draft-Id` header (removed before sending), marks the draft sent, and records whether you sent it unchanged or edited it. There is no separate approve button: the Send you pressed through the bridge is the approval, and only the bridge credential on Santa can do that.
+- **Discard a draft:** delete it in Thunderbird. It is discarded on the service (not sent, kept in the audit log). Drafts can only be deleted, not moved elsewhere.
 
 **Reading.** Opening a message marks it read in lojo-mail. Stars (`\Flagged`) become the `flagged` label, "Answered" becomes `answered`, and Thunderbird's tags become labels: Important `important`, Work `work`, Personal `personal`, To Do `todo`, Later `later`. Other tag keywords become labels of the same name when they are simple words. Labels such as `quarantined` cannot be changed from Thunderbird.
 
-**Moving.** Moves to Inbox, Archive, or Junk move the message in lojo-mail. Moving into Sent or Drafts is refused. COPY is refused: lojo-mail keeps one copy of each message.
+**Moving and copying.** Moves to Inbox, Archive, Junk, or Trash move the message in lojo-mail. Moving into Sent or Drafts is refused. lojo-mail keeps one copy of each message, so **Copy to another folder moves it** (the original disappears from the source folder; Thunderbird copes). Copy within the same folder does nothing.
+
+**Searching.** Thunderbird's search (quick filter, Search Messages, saved searches with "search online") runs over IMAP SEARCH against headers, flags, dates, and the decrypted text: From, To, Cc, Bcc (Sent), Subject, body, and tags all work.
+
+**New mail.** While Thunderbird idles on a folder (IMAP IDLE, on by default), the bridge checks the newest messages every 15 seconds (`newMailSeconds` in `bridge.json`, 5 to 600) and pushes new mail at once; a full resync of flags and moves runs every 60 seconds (`pollSeconds`). Bodies and attachments are decrypted locally by the bridge when Thunderbird opens them.
 
 **Deleting.** Delete in Thunderbird (Delete key, move to Trash, or mark deleted and expunge) moves the message to Trash in lojo-mail. This is a soft delete, never a hard delete:
 
@@ -135,7 +147,7 @@ This needs two things, both set by Jon: Terraform `bridge_trash_enabled = true` 
 
 The `trash` scope belongs to the bridge token alone. Agent tokens, `admin` tokens, and the MCP server cannot get it, and it cannot hard delete: only the server's purge policy can, and only after the window.
 
-**Not supported:** creating, renaming, or deleting folders; COPY; Bcc; sending attachments; CONDSTORE/QRESYNC; server-side sort or threading. Thunderbird works without these.
+**Not supported:** creating, renaming, or deleting folders; drafts with attachments; messages over 4 MB; CONDSTORE/QRESYNC; server-side sort or threading. Thunderbird works without these.
 
 ## 5. Troubleshooting
 
@@ -155,7 +167,12 @@ The log is JSON lines with ids, counts, and status codes only: never tokens, pas
 - **Service fails with `226/NAMESPACE` or similar:** your systemd cannot apply one of the sandboxing options in user units. Comment out the failing line in `~/.config/systemd/user/lojo-mail-bridge.service` and run `systemctl --user daemon-reload`.
 - **Token or key in `pass`:** gpg-agent must hold the key unlocked; pinentry cannot prompt from a service. See the comments in the unit file.
 - **Large folders:** each folder shows the newest 2000 messages (`folderLimit` in `bridge.json`, up to 5000).
-- **New mail is slow to appear:** the bridge checks the API every 60 seconds while Thunderbird idles (`pollSeconds`).
+- **New mail is slow to appear:** the bridge checks for new mail every `newMailSeconds` (15) while Thunderbird idles, and does a full resync every `pollSeconds` (60). Check that "Allow immediate server notifications when new messages arrive" is on (Server Settings) and "Check for new messages every" is set.
+- **Send answers `Queued for Jon's approval`:** the API has `LOJO_BRIDGE_SEND` off (`bridge_send_enabled = false`), or it has not reloaded yet (up to 5 minutes). `lojo-bridge check` prints the send mode; the log says `token.no_client_send`.
+- **`550 ... kill switch`:** someone engaged the global send kill switch. Release it in the web app (Rules → "Allow sending again"). Only your signed-in session can.
+- **`451 ... rate limit`:** wait; Thunderbird's Outbox retries. Raise `client_send_limits` if the defaults are too low for you.
+- **`552 Message is over 4000000 bytes`:** remove or shrink attachments.
+- **An old draft stays in Drafts after sending:** it was edited so much that the service could not match it (different subject, recipients, and no `X-Lojo-Draft-Id`). Delete it.
 
 ## 6. Security notes
 
@@ -163,7 +180,7 @@ The log is JSON lines with ids, counts, and status codes only: never tokens, pas
 - **In memory:** decrypted messages live in the bridge's memory cache (64 MB, least recently used). The bridge never writes plaintext to disk.
 - **Network:** both listeners bind `127.0.0.1` only. The bridge refuses a config that asks for any other address, and it refuses a non-HTTPS API URL except `localhost` for development.
 - **Who can read your mail:** anyone with your desktop session can use the bridge or read the key. Use full-disk encryption and lock the screen. `pass` with a gpg-agent timeout is better than plain files.
-- **What the token can do:** read, change flags, labels, and folders, move mail to Trash (with `trash`; restorable for the window), read bodies, and create drafts to anyone. It cannot hard delete, send, approve, or administer. Every Trash move is audited with `by:bridge`, so a stolen token trashing mail shows up in the web app's Trash view and the audit log. If Santa is lost, delete `/lojo-mail/bridge-token` in SSM (or set a new value). The API stops accepting the old token when it reloads.
+- **What the token can do:** read, change flags, labels, and folders, move mail to Trash (with `trash`; restorable for the window), read bodies, create drafts, and send as the addresses on the From list (with `client-send`), within the rate limits and only while the kill switch is off. It cannot hard delete, approve web drafts, change rules or settings, or administer. A stolen bridge token plus the ability to reach the API can send mail as you until you rotate it, so treat it like a mail password: keep it in `pass` or a mode-600 file, and rotate `/lojo-mail/bridge-token` if Santa is lost. Every send is audited (`send.client`), and the kill switch stops it at once. Every Trash move is audited with `by:bridge`, so a stolen token trashing mail shows up in the web app's Trash view and the audit log. If Santa is lost, delete `/lojo-mail/bridge-token` in SSM (or set a new value). The API stops accepting the old token when it reloads.
 
 ## 7. Uninstall
 

@@ -1,8 +1,8 @@
-import { MailError, type Folder } from "@lojo/core";
+import { FOLDERS, MailError, type Folder } from "@lojo/core";
 import { z } from "zod";
 import { asScope, hasScope, type Scope } from "./scopes.ts";
 
-/** Folders an assistant may move mail to. Trash needs a human in the web app. */
+/** Folders an assistant may move mail to. Trash has its own tool and scope (trash_message). */
 export const AGENT_FOLDERS = ["inbox", "archive", "spam"] as const satisfies readonly Folder[];
 export type AgentFolder = (typeof AGENT_FOLDERS)[number];
 
@@ -14,7 +14,10 @@ export interface DraftRequest {
   threadId?: string;
 }
 
-/** What an assistant can do. There is deliberately no send, approve, trash, or full export. */
+/**
+ * What an assistant can do. There is deliberately no send, approve, hard
+ * delete, settings change, or full export. Trash is a soft delete behind its own scope.
+ */
 export interface MailClient {
   search(query: string, mode: "keyword" | "semantic", includeContext: boolean): Promise<unknown>;
   readThread(threadId: string, includeContext: boolean): Promise<unknown>;
@@ -27,6 +30,10 @@ export interface MailClient {
   setLabels(messageId: string, labels: string[]): Promise<unknown>;
   archive(messageId: string): Promise<unknown>;
   move(messageId: string, folder: AgentFolder): Promise<unknown>;
+  listFolder(folder: Folder, limit: number): Promise<unknown>;
+  listDrafts(): Promise<unknown>;
+  trash(messageId: string): Promise<unknown>;
+  restore(messageId: string): Promise<unknown>;
   actionItems(): Promise<unknown>;
   exportIndex(): Promise<unknown>;
 }
@@ -69,16 +76,17 @@ const draftSchema = z.object({
 });
 const labelSchema = z.object({ messageId: z.string(), labels: z.array(z.string()) });
 const moveSchema = z.object({ messageId: z.string(), folder: z.enum(AGENT_FOLDERS) });
+const folderSchema = z.object({ folder: z.enum(FOLDERS), limit: z.number().int().positive().max(500).optional() });
 
 function requireBody(ctx: ToolContext, wanted: boolean | undefined): boolean {
   if (wanted && !hasScope(ctx.scopes, "body")) throw new MailError("includeContext needs the body scope", "forbidden");
   return Boolean(wanted);
 }
 
-/** MCP tool annotations. Nothing here deletes, sends, or reaches outside the mailbox. */
+/** MCP tool annotations. Nothing here sends, hard-deletes, or reaches outside the mailbox; trash_message is the one soft delete. */
 export interface ToolAnnotations {
   readOnlyHint: boolean;
-  destructiveHint: false;
+  destructiveHint: boolean;
   idempotentHint: boolean;
   openWorldHint: false;
 }
@@ -89,6 +97,8 @@ const MARKS_READ: ToolAnnotations = { readOnlyHint: false, destructiveHint: fals
 /** Spends model tokens and writes the audit log; the mailbox itself is unchanged. */
 const SPENDS: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 const CHANGES: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+/** Moves mail out of Jon's view until he restores it; the purge deletes it after the retention window. */
+const SOFT_DELETES: ToolAnnotations = { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false };
 
 export const tools = [
   {
@@ -169,9 +179,42 @@ export const tools = [
     name: "move_message",
     annotations: CHANGES,
     scopes: ["write"],
-    description: "Move a message to inbox, archive, or spam. Trash is only available to Jon in the web app.",
+    description: "Move a message to inbox, archive, or spam. To delete, use trash_message.",
     schema: moveSchema,
     run: (args: z.infer<typeof moveSchema>, ctx: ToolContext) => ctx.mailbox.move(args.messageId, args.folder),
+  },
+  {
+    name: "list_folder",
+    annotations: READ_ONLY,
+    scopes: ["read"],
+    description: "List one folder (inbox, sent, drafts, spam, trash, archive), newest first. Metadata only unless the token has body.",
+    schema: folderSchema,
+    run: (args: z.infer<typeof folderSchema>, ctx: ToolContext) => ctx.mailbox.listFolder(args.folder, args.limit ?? 50),
+  },
+  {
+    name: "list_drafts",
+    annotations: READ_ONLY,
+    scopes: ["read"],
+    description: "List drafts with their status and origin. Drafts appear in Jon's Thunderbird Drafts folder; he sends them himself.",
+    schema: z.object({}),
+    run: (_args: Record<string, never>, ctx: ToolContext) => ctx.mailbox.listDrafts(),
+  },
+  {
+    name: "trash_message",
+    annotations: SOFT_DELETES,
+    scopes: ["write", "trash"],
+    description:
+      "Move a message to Trash. This is a soft delete: Jon can restore it (restore_message, Thunderbird, or the web app) until the retention window ends. Capped per agent per day. Never a hard delete.",
+    schema: messageSchema,
+    run: (args: z.infer<typeof messageSchema>, ctx: ToolContext) => ctx.mailbox.trash(args.messageId),
+  },
+  {
+    name: "restore_message",
+    annotations: CHANGES,
+    scopes: ["write"],
+    description: "Take a message out of Trash, back to the inbox.",
+    schema: messageSchema,
+    run: (args: z.infer<typeof messageSchema>, ctx: ToolContext) => ctx.mailbox.restore(args.messageId),
   },
   {
     name: "get_action_items",

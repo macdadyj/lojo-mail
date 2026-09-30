@@ -2,6 +2,7 @@ import { KMSClient } from "@aws-sdk/client-kms";
 import { S3Client } from "@aws-sdk/client-s3";
 import { GetParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
 import {
+  clientSendLimitsFromEnv,
   createEmbedder,
   createLlmClient,
   DynamoMailStore,
@@ -16,7 +17,7 @@ import { documentClient, dynamoLike, KmsKeyWrapper, S3BlobStore, tableNamesFromE
 import { getConnInfo, handle } from "hono/aws-lambda";
 import styleGuide from "../../../config/style-guide.md";
 import { createApp } from "./app.ts";
-import { TokenBook, addBridgeToken, agentTokensOrNone, bridgeTrashFromEnv, parseScopes } from "./auth.ts";
+import { TokenBook, addBridgeToken, agentTokensOrNone, bridgeOptionsFromEnv, parseScopes } from "./auth.ts";
 import { LoginThrottle, Sessions } from "./session.ts";
 import { SesSender } from "./ses.ts";
 
@@ -59,7 +60,7 @@ async function buildApp() {
   const bridgeToken = await parameter(env("LOJO_BRIDGE_TOKEN_PARAM", "/lojo-mail/bridge-token"));
   if (bridgeToken) {
     try {
-      addBridgeToken(tokens, bridgeToken, true, bridgeTrashFromEnv(process.env));
+      addBridgeToken(tokens, bridgeToken, true, bridgeOptionsFromEnv(process.env));
     } catch (error) {
       console.error(JSON.stringify({ event: "bridge_token_invalid", message: error instanceof Error ? error.message : String(error) }));
     }
@@ -102,6 +103,7 @@ async function buildApp() {
     embedder,
     sender: SesSender.fromEnv(),
     autoSendEnabled: process.env.LOJO_AUTO_SEND === "on",
+    clientSendLimits: clientSendLimitsFromEnv(process.env),
     styleGuide: process.env.LOJO_STYLE_GUIDE ?? styleGuide,
     ...(ownPgpPublicKey ? { ownPgpPublicKey } : {}),
     ...(signingKey ? { pgpSigningKey: { armoredKey: signingKey, ...(signingPassphrase ? { passphrase: signingPassphrase } : {}) } } : {}),

@@ -245,6 +245,7 @@
         "ses:PutConfigurationSetDeliveryOptions",
         "ses:PutConfigurationSetReputationOptions",
         "ses:PutConfigurationSetSendingOptions",
+        "ses:PutConfigurationSetSuppressionOptions",
         "ses:ListTagsForResource",
         "ses:TagResource",
         "ses:UntagResource"

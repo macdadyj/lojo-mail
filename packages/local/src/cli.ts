@@ -16,6 +16,13 @@ const USAGE = `lojo-local: search and operate lojo-mail from a local model
   lojo-local search <query> [--semantic] [--context] [--json]
   lojo-local inbox [--triage] [--limit N] [--json]
   lojo-local read <threadId> [--context] [--json]
+  lojo-local folder <inbox|sent|drafts|archive|spam|trash> [--limit N] [--json]
+  lojo-local drafts
+  lojo-local label <messageId> <label...>              replaces the labels
+  lojo-local move <messageId> <inbox|archive|spam>
+  lojo-local archive <messageId>
+  lojo-local trash <messageId>                          soft delete, needs the trash scope
+  lojo-local restore <messageId>
   lojo-local summarize <threadId> [--local]
   lojo-local draft <messageId> [--submit]               server model drafts the reply
   lojo-local draft <threadId> --local [--submit] [--instruction "..."]
@@ -35,7 +42,8 @@ Environment
 
 --local runs the model on this machine: thread text goes from the API to
 Ollama and nowhere else. It needs a token with the body scope. Nothing here
-can send mail; drafts go to Jon's approval queue in the web app.`;
+can send mail or hard delete; drafts land in Jon's Thunderbird Drafts folder
+and the web queue, and he sends them himself.`;
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -144,6 +152,27 @@ try {
       }
       break;
     }
+    case "folder":
+      printMessages(await callTool("list_folder", { folder: need(rest[0], "folder"), limit: limit(50) }, ctx));
+      break;
+    case "drafts":
+      console.log(await callTool("list_drafts", {}, ctx));
+      break;
+    case "label":
+      console.log(await callTool("label_message", { messageId: need(rest[0], "messageId"), labels: rest.slice(1) }, ctx));
+      break;
+    case "move":
+      console.log(await callTool("move_message", { messageId: need(rest[0], "messageId"), folder: need(rest[1], "folder") }, ctx));
+      break;
+    case "archive":
+      console.log(await callTool("archive_message", { messageId: need(rest[0], "messageId") }, ctx));
+      break;
+    case "trash":
+      console.log(await callTool("trash_message", { messageId: need(rest[0], "messageId") }, ctx));
+      break;
+    case "restore":
+      console.log(await callTool("restore_message", { messageId: need(rest[0], "messageId") }, ctx));
+      break;
     case "summarize": {
       const threadId = need(rest[0], "threadId");
       if (values.local) console.log(await summarizeLocally(ctx, localLlm(), threadId));

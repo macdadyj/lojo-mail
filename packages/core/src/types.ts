@@ -16,8 +16,11 @@ export type MessageOrigin = "inbound" | "sent" | "import";
 /** Who is acting on the mailbox. Agents are default-deny for destructive actions. */
 export type Actor = "human" | "agent";
 
-/** Who may soft-delete: Jon's session, or the Thunderbird bridge token when it holds the `trash` scope. */
-export type TrashActor = "human" | "bridge";
+/**
+ * Who may soft-delete: Jon's session, the Thunderbird bridge token, or an agent
+ * token Jon granted the `trash` scope (`agent:<label>`, capped per day).
+ */
+export type TrashActor = "human" | "bridge" | `agent:${string}`;
 
 export interface Address {
   name?: string;
@@ -121,6 +124,8 @@ export interface StoredMessage {
   from: Address;
   to: Address[];
   cc: Address[];
+  /** Sent mail only: the Bcc recipients Jon's client sent to. Never in the delivered message. */
+  bcc?: Address[];
   replyTo?: Address;
   subject: string;
   date: string;
@@ -146,7 +151,7 @@ export interface StoredMessage {
   vecModel?: string;
   /** Set when the message moved to trash. Only the trash purge (trash/purge.ts) ever hard deletes. */
   trashedAt?: string;
-  /** `rule:<id>`, `human`, or `bridge`. */
+  /** `rule:<id>`, `human`, `bridge`, or `agent:<label>`. */
   trashedBy?: string;
   /** Earliest time the purge may delete it. Until then it is always restorable. */
   keepUntil?: string;
@@ -201,6 +206,13 @@ export interface Draft {
   ruleId?: string;
   /** Set when a rule sent this draft without an approval token (see rules/autosend.ts). */
   autoSentAt?: string;
+  /**
+   * Set when Jon sent this draft from his own mail client through the bridge.
+   * `unchanged` records whether what went out still matched the draft text.
+   */
+  clientSent?: { at: string; unchanged: boolean };
+  /** The Message-ID Jon's mail client gave the draft it saved, so it can find the draft again. */
+  clientMessageId?: string;
 }
 
 export interface AuditEvent {
@@ -242,6 +254,7 @@ export interface MessagePatch {
   trashedAt?: string;
   trashedBy?: string;
   keepUntil?: string;
+  bcc?: Address[];
 }
 
 export interface LojoConfig {
@@ -249,6 +262,8 @@ export interface LojoConfig {
   localPart: string;
   region: string;
   mailbox: string;
+  /** Addresses Jon's client may send as: the mailbox first, then LOJO_SEND_FROM extras (each a verified SES identity). */
+  sendFrom: string[];
   dmarcMailbox: string;
   llmProvider: LlmProviderName;
   dailyTokenBudget: number;
@@ -289,6 +304,7 @@ export interface MessageView {
   from: Address;
   to: Address[];
   cc: Address[];
+  bcc?: Address[];
   subject: string;
   date: string;
   snippet: string;

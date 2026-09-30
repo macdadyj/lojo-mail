@@ -1,5 +1,5 @@
 import { SESv2Client, SendEmailCommand, type SendEmailCommandInput } from "@aws-sdk/client-sesv2";
-import { buildRawMessage, type MailSender, type OutboundMessage } from "@lojo/core";
+import { buildRawMessage, type MailSender, type OutboundMessage, type RawOutbound } from "@lojo/core";
 
 /** Always Raw, so every header goes through the same sanitizer and threading headers survive. */
 export function sesInput(message: OutboundMessage, configurationSet?: string): SendEmailCommandInput {
@@ -14,6 +14,19 @@ export function sesInput(message: OutboundMessage, configurationSet?: string): S
   };
 }
 
+/**
+ * Jon's client message as built, sent to every envelope recipient. The
+ * Destination carries Bcc, which is why the message itself must not.
+ */
+export function sesRawInput(message: RawOutbound, configurationSet?: string): SendEmailCommandInput {
+  return {
+    FromEmailAddress: message.from,
+    Destination: { ToAddresses: message.destinations },
+    ConfigurationSetName: configurationSet,
+    Content: { Raw: { Data: message.raw } },
+  };
+}
+
 export class SesSender implements MailSender {
   constructor(
     private readonly client: { send: (command: SendEmailCommand) => Promise<{ MessageId?: string }> },
@@ -25,7 +38,15 @@ export class SesSender implements MailSender {
   }
 
   async send(message: OutboundMessage): Promise<{ messageId: string }> {
-    const out = await this.client.send(new SendEmailCommand(sesInput(message, this.configurationSet)));
+    return this.dispatch(sesInput(message, this.configurationSet));
+  }
+
+  async sendRaw(message: RawOutbound): Promise<{ messageId: string }> {
+    return this.dispatch(sesRawInput(message, this.configurationSet));
+  }
+
+  private async dispatch(input: SendEmailCommandInput): Promise<{ messageId: string }> {
+    const out = await this.client.send(new SendEmailCommand(input));
     if (!out.MessageId) throw new Error("SES returned no MessageId");
     return { messageId: out.MessageId };
   }

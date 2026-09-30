@@ -20,7 +20,10 @@ export interface BridgeConfig {
   privateKeyFile?: string;
   privateKeyCommand?: string[];
   appPasswordHash: string;
+  /** Full resync of the selected mailbox while Thunderbird idles. */
   pollSeconds: number;
+  /** How often an idling connection checks the newest messages for new mail. */
+  newMailSeconds: number;
   folderLimit: number;
   notify: boolean;
   /**
@@ -124,6 +127,7 @@ export function parseConfig(raw: unknown): BridgeConfig {
     smtpPort: port(raw, "smtpPort", DEFAULT_SMTP_PORT),
     appPasswordHash,
     pollSeconds: boundedInt(raw, "pollSeconds", 60, 5, 3600),
+    newMailSeconds: boundedInt(raw, "newMailSeconds", 15, 5, 600),
     folderLimit: boundedInt(raw, "folderLimit", 2000, 1, 5000),
     notify: raw.notify === undefined ? true : raw.notify === true,
     deleteToTrash: raw.deleteToTrash === undefined ? true : raw.deleteToTrash === true,

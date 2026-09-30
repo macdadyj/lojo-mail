@@ -1,10 +1,12 @@
 /**
  * `compose` lets Jon's own mail client (the local bridge) draft to any address;
  * other tokens may only draft to known correspondents. It never implies send.
+ * `trash` is soft delete (restorable for the retention window); Jon grants it
+ * per agent token and `admin` does not imply it. The API's `client-send` scope
+ * belongs to the Thunderbird bridge alone and is never an MCP scope.
  */
-export type Scope = "read" | "write" | "send" | "body" | "compose" | "admin";
+export type Scope = "read" | "write" | "send" | "body" | "compose" | "trash" | "admin";
 
-/** The API's bridge-only `trash` scope is not an MCP scope: no tool can reach Trash. */
 export function knownScope(value: string): Scope | null {
   switch (value) {
     case "read":
@@ -12,6 +14,7 @@ export function knownScope(value: string): Scope | null {
     case "send":
     case "body":
     case "compose":
+    case "trash":
     case "admin":
       return value;
     default:
@@ -26,15 +29,16 @@ export function asScope(value: string): Scope {
 }
 
 export function hasScope(scopes: readonly Scope[], required: Scope): boolean {
-  if (scopes.includes("admin")) return true;
   switch (required) {
+    case "trash":
+      return scopes.includes(required);
     case "read":
     case "write":
     case "send":
     case "body":
     case "compose":
     case "admin":
-      return scopes.includes(required);
+      return scopes.includes("admin") || scopes.includes(required);
     default: {
       const unexpected: never = required;
       throw new Error(`Unknown scope ${String(unexpected)}`);

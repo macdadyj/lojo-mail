@@ -17,6 +17,22 @@ export interface SessionInfo {
   kind: string;
   label: string;
   scopes: string[];
+  /** Addresses Jon may send as. Older APIs omit it; the bridge then allows its own address only. */
+  sendFrom?: string[];
+}
+
+export interface ClientSendRequest {
+  raw: Uint8Array;
+  envelopeFrom: string;
+  recipients: string[];
+}
+
+export interface ClientSendReply {
+  messageId: string;
+  sentId: string | null;
+  bcc: number;
+  draftId: string | null;
+  draftUnchanged: boolean | null;
 }
 
 export type AttachmentPayload = { kind: "bytes"; bytes: Uint8Array } | { kind: "envelope"; envelope: EnvelopeBlob };
@@ -36,6 +52,8 @@ export interface DraftRequest {
   subject: string;
   text: string;
   inReplyTo?: string;
+  threadId?: string;
+  clientMessageId?: string;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -145,5 +163,28 @@ export class ApiClient {
 
   async submitDraft(id: string): Promise<DraftView> {
     return this.json<DraftView>("POST", `/v1/drafts/${encodeURIComponent(id)}/submit`);
+  }
+
+  /** Drafts with their text, for the Drafts mailbox. */
+  async listDrafts(): Promise<DraftView[]> {
+    const out = await this.json<{ drafts: DraftView[] }>("GET", "/v1/drafts?text=1");
+    return out.drafts;
+  }
+
+  async discardDraft(id: string): Promise<void> {
+    await this.json("POST", `/v1/drafts/${encodeURIComponent(id)}/discard`);
+  }
+
+  async restore(id: string): Promise<void> {
+    await this.json("POST", `/v1/messages/${encodeURIComponent(id)}/restore`);
+  }
+
+  /** Needs `client-send`: the message goes out through SES as built, with no approval step. */
+  clientSend(input: ClientSendRequest): Promise<ClientSendReply> {
+    return this.json<ClientSendReply>("POST", "/v1/client/send", {
+      raw: Buffer.from(input.raw).toString("base64"),
+      envelopeFrom: input.envelopeFrom,
+      recipients: input.recipients,
+    });
   }
 }

@@ -4,7 +4,7 @@ import { fixture } from "@lojo/core/testing";
 import { agentWorld } from "./test-agent.ts";
 import { UNTRUSTED_PREAMBLE, callTool, tools } from "./tools.ts";
 
-test("the tool list has no send, approve, trash, or full export", () => {
+test("the tool list has no send, approve, hard delete, settings change, or full export", () => {
   const names = tools.map((tool) => tool.name);
   assert.deepEqual(names.sort(), [
     "archive_message",
@@ -13,14 +13,19 @@ test("the tool list has no send, approve, trash, or full export", () => {
     "export_mailbox",
     "get_action_items",
     "label_message",
+    "list_drafts",
+    "list_folder",
     "list_inbox",
     "move_message",
     "read_thread",
+    "restore_message",
     "search_mail",
     "submit_for_approval",
     "summarize_thread",
+    "trash_message",
   ]);
-  assert.ok(tools.every((tool) => tool.scopes.every((scope) => scope === "read" || scope === "write" || scope === "body")));
+  assert.ok(tools.every((tool) => tool.scopes.every((scope) => scope === "read" || scope === "write" || scope === "body" || scope === "trash")));
+  assert.deepEqual(tools.find((tool) => tool.name === "trash_message")?.scopes, ["write", "trash"]);
   assert.deepEqual(tools.find((tool) => tool.name === "search_mail")?.scopes, ["read"]);
   assert.deepEqual(tools.find((tool) => tool.name === "summarize_thread")?.scopes, ["write", "body"]);
   assert.deepEqual(tools.find((tool) => tool.name === "get_action_items")?.scopes, ["read", "body"]);

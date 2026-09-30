@@ -10,6 +10,7 @@ import {
   sameHash,
 } from "./approval.ts";
 import type { BlobStore } from "./blob/store.ts";
+import { DEFAULT_CLIENT_SEND_LIMITS, sendFromClient, type ClientSendInput, type ClientSendLimits, type ClientSendResult } from "./client-send.ts";
 import {
   attachmentContext,
   decodeEnvelope,
@@ -20,13 +21,13 @@ import {
 import { aiContextContext, draftContext, serverOpen, serverSeal, type KeyWrapper } from "./crypto/server-seal.ts";
 import { MailError } from "./errors.ts";
 import { embedForStorage, embeddingInput, ingestRaw, refreshThread } from "./ingest.ts";
-import { newId, sha256, utcDay } from "./ids.ts";
+import { newId, normalizeMessageId, sha256, utcDay } from "./ids.ts";
 import { buildRawMessage, cleanEmail, cleanHeaderValue } from "./mime/compose.ts";
 import { encryptText, type PgpSigningKey } from "./openpgp/mail.ts";
 import { dryRunRules, loadRules, saveRules, type DryRun } from "./rules/engine.ts";
 import type { RuleAuthor, RulesDocument } from "./rules/types.ts";
 import { emptyRules, parseRulesDocument, rulesHash } from "./rules/validate.ts";
-import type { MailSender, OutboundMessage } from "./send.ts";
+import { sesRfcId, type MailSender, type OutboundMessage } from "./send.ts";
 import type { MailStore } from "./store/types.ts";
 import type {
   ActionItem,
@@ -66,6 +67,9 @@ export interface MailboxDeps {
   sender?: MailSender | null;
   /** Whether the processor may auto-send (LOJO_AUTO_SEND=on). The API never sends for a rule itself. */
   autoSendEnabled?: boolean;
+  clientSendLimits?: ClientSendLimits;
+  /** How many messages one agent token may move to Trash per UTC day. */
+  agentTrashPerDay?: number;
   styleGuide: string;
   /** Jon's own OpenPGP public key, so his sent copy of encrypted mail is readable to him elsewhere. */
   ownPgpPublicKey?: string;
@@ -93,6 +97,8 @@ export interface DraftInput {
   pgp?: PgpMode;
   /** Who wrote it. Defaults to agent, which may only address known correspondents. */
   origin?: Extract<DraftOrigin, "human" | "agent" | "client">;
+  /** Client drafts only: the Message-ID of the draft as Thunderbird saved it. */
+  clientMessageId?: string;
 }
 
 export interface DraftPatch {
@@ -148,6 +154,7 @@ function viewOf(message: StoredMessage, opened: SealedBody | null, contextText: 
   if (message.verdicts) view.verdicts = message.verdicts;
   if (message.inReplyTo) view.inReplyTo = message.inReplyTo;
   if (message.replyTo) view.replyTo = message.replyTo;
+  if (message.bcc && message.bcc.length > 0) view.bcc = message.bcc;
   if (message.trashedAt) view.trashedAt = message.trashedAt;
   if (message.trashedBy) view.trashedBy = message.trashedBy;
   if (message.keepUntil) view.keepUntil = message.keepUntil;
@@ -519,7 +526,8 @@ export class Mailbox {
     const origin = input.origin ?? "agent";
     const to = addresses(input.to);
     const cc = addresses(input.cc);
-    if (to.length === 0) throw new MailError("At least one recipient is required", "invalid");
+    // Thunderbird saves drafts before the To line is filled in.
+    if (to.length === 0 && origin !== "client") throw new MailError("At least one recipient is required", "invalid");
     const parent = !input.threadId && input.inReplyTo ? (await this.deps.store.getMessagesByRfcId(input.inReplyTo))[0] : undefined;
     const threadId = input.threadId ?? parent?.threadId;
     if (origin === "agent") await this.assertKnownRecipients([...to, ...cc].map((item) => item.email), threadId);
@@ -541,6 +549,7 @@ export class Mailbox {
     if (threadId) draft.threadId = threadId;
     if (input.inReplyTo) draft.inReplyTo = input.inReplyTo;
     if (parent) draft.references = [...parent.references, parent.rfcMessageId];
+    if (origin === "client" && input.clientMessageId) draft.clientMessageId = normalizeMessageId(input.clientMessageId).slice(0, 250);
     await this.deps.store.putDraft(draft);
     return draft;
   }
@@ -584,8 +593,10 @@ export class Mailbox {
     return updated;
   }
 
+  /** Discarding a draft that already went out or was already discarded is a no-op: Thunderbird deletes a draft right after sending it. */
   async discardDraft(id: string): Promise<Draft> {
     const draft = await this.requireDraft(id);
+    if (draft.status === "sent" || draft.status === "discarded") return draft;
     if (!EDITABLE.has(draft.status)) throw new MailError(`Draft is ${draft.status}`, "invalid");
     const updated: Draft = { ...withoutApproval(draft), status: "discarded", updatedAt: this.now().toISOString() };
     await this.deps.store.putDraft(updated);
@@ -728,6 +739,7 @@ export class Mailbox {
     if (actor !== "human") throw new MailError("Only a signed-in human can approve a send", "forbidden");
     const draft = await this.requireDraft(draftId);
     if (!EDITABLE.has(draft.status)) throw new MailError(`Draft is ${draft.status}`, "invalid");
+    if (draft.to.length === 0) throw new MailError("Add a recipient before approving", "invalid");
     const stored = this.contentHash(draft, await this.readDraftText(draft));
     const seen = this.contentHash(
       {
@@ -753,12 +765,6 @@ export class Mailbox {
     });
     await this.audit("send.approval_minted", "ok", { messageId: draftId });
     return { approvalToken: token, expiresAt };
-  }
-
-  private sesRfcId(sesMessageId: string): string {
-    if (sesMessageId.includes("@")) return sesMessageId;
-    const host = this.deps.config.region === "us-east-1" ? "email.amazonses.com" : `${this.deps.config.region}.amazonses.com`;
-    return `${sesMessageId}@${host}`;
   }
 
   private async outboundFor(draft: Draft, text: string): Promise<OutboundMessage> {
@@ -799,6 +805,10 @@ export class Mailbox {
     if (!approvalToken) throw new MailError("An approval token is required", "forbidden");
     const draft = await this.requireDraft(draftId);
     if (!EDITABLE.has(draft.status)) throw new MailError(`Draft is ${draft.status}`, "invalid");
+    if ((await this.getRules()).sendKillSwitch) {
+      await this.audit("send.refused", "kill_switch", { messageId: draftId });
+      throw new MailError("Sending is stopped: the global send kill switch is on", "forbidden");
+    }
     const tokenHash = hashApprovalToken(approvalToken);
     if (!draft.approvalTokenHash || !sameHash(draft.approvalTokenHash, tokenHash)) {
       await this.audit("send.refused", "bad_token", { messageId: draftId });
@@ -829,9 +839,23 @@ export class Mailbox {
     }
     await this.deps.store.putDraft({ ...claimed, status: "sent", sentMessageId: sent.messageId, updatedAt: this.now().toISOString() });
     await this.audit("send.approved", "sent", { messageId: draftId, detail: sent.messageId });
-    const copy = buildRawMessage({ ...outbound, armored: undefined }, { messageId: this.sesRfcId(sent.messageId), date: this.now() });
+    const copy = buildRawMessage({ ...outbound, armored: undefined }, { messageId: sesRfcId(sent.messageId, this.deps.config.region), date: this.now() });
     await ingestRaw(copy, { ...this.deps, llm: null, now: this.now() }, { origin: "sent", deliveryId: `sent:${sent.messageId}` });
     return sent;
+  }
+
+  /** Jon pressing Send in his own mail client (the bridge token's `client-send` scope). No approval token: see client-send.ts. */
+  async clientSend(input: ClientSendInput): Promise<ClientSendResult> {
+    return sendFromClient(
+      {
+        ...this.deps,
+        limits: this.deps.clientSendLimits ?? DEFAULT_CLIENT_SEND_LIMITS,
+        now: () => this.now(),
+        rules: () => this.getRules(),
+        draftText: (draft) => this.readDraftText(draft),
+      },
+      input,
+    );
   }
 
   async setLabels(messageId: string, labels: string[]): Promise<StoredMessage> {
@@ -863,13 +887,22 @@ export class Mailbox {
 
   /**
    * Soft delete: a move to Trash with a retention window, never a hard delete.
-   * Callers are Jon's session or the bridge token with the `trash` scope; the
-   * API decides which (agent tokens and the MCP never reach this).
+   * Callers are Jon's session, the bridge token, or an agent token Jon granted
+   * `trash`; the API decides which. Agents are capped per day.
    */
   async trash(messageId: string, by: TrashActor): Promise<StoredMessage> {
     const message = await this.requireMessage(messageId);
     if (message.folder === "trash") return message;
     const at = this.now();
+    if (by.startsWith("agent:")) {
+      const day = utcDay(at);
+      const cap = this.deps.agentTrashPerDay ?? 100;
+      const count = await this.deps.store.bumpCounter(`trash:${by}:${day}`, new Date(Date.parse(`${day}T00:00:00Z`) + 2 * 86_400_000));
+      if (count > cap) {
+        await this.audit("message.trash_refused", "rate_limited", { messageId, detail: `by:${by} cap:${cap}` });
+        throw new MailError(`${by} has moved ${cap} messages to Trash today, its daily limit`, "rate_limited");
+      }
+    }
     const retentionDays = (await this.getRules()).trashRetentionDays;
     const patch: MessagePatch = {
       folder: "trash",
@@ -916,20 +949,23 @@ export class Mailbox {
   }
 
   /** Anyone with `write` can make the rules safer (pause, kill switch on, disable a rule); only Jon can undo it. */
-  async setRuleSwitches(input: { paused?: boolean; killSwitch?: boolean }, actor: Actor): Promise<RulesDocument> {
-    if (actor !== "human" && (input.paused === false || input.killSwitch === false)) {
-      throw new MailError("Only a signed-in human can resume rules or release the kill switch", "forbidden");
+  async setRuleSwitches(input: { paused?: boolean; killSwitch?: boolean; sendKillSwitch?: boolean }, actor: Actor): Promise<RulesDocument> {
+    if (actor !== "human" && (input.paused === false || input.killSwitch === false || input.sendKillSwitch === false)) {
+      throw new MailError("Only a signed-in human can resume rules or release a kill switch", "forbidden");
     }
     const doc = await this.getRules();
     const next: RulesDocument = {
       ...doc,
       ...(input.paused !== undefined ? { paused: input.paused } : {}),
       ...(input.killSwitch !== undefined ? { killSwitch: input.killSwitch } : {}),
+      ...(input.sendKillSwitch !== undefined ? { sendKillSwitch: input.sendKillSwitch } : {}),
       updatedAt: this.now().toISOString(),
       updatedBy: authorOf(actor),
     };
     await saveRules(this.deps.blobs, this.deps.keys, next);
-    await this.audit("rules.switches", "ok", { detail: `by:${actor} paused:${next.paused} killSwitch:${next.killSwitch}` });
+    await this.audit("rules.switches", "ok", {
+      detail: `by:${actor} paused:${next.paused} killSwitch:${next.killSwitch} sendKillSwitch:${next.sendKillSwitch === true}`,
+    });
     return next;
   }
 
