@@ -295,8 +295,16 @@ run "tables_have_the_indexes_the_store_queries" {
   command = plan
 
   assert {
-    condition     = toset([for i in aws_dynamodb_table.messages.global_secondary_index : i.name]) == toset(["folder", "thread", "rfc"])
-    error_message = "messages needs folder, thread, and rfc GSIs"
+    condition     = toset([for i in aws_dynamodb_table.messages.global_secondary_index : i.name]) == toset(["folder", "thread", "rfc", "vectors"])
+    error_message = "messages needs folder, thread, rfc, and vectors GSIs"
+  }
+
+  assert {
+    condition = one([
+      for i in aws_dynamodb_table.messages.global_secondary_index : i
+      if i.name == "vectors" && i.hash_key == "vecModel" && i.projection_type == "INCLUDE" && toset(i.non_key_attributes) == toset(["vec"])
+    ]) != null
+    error_message = "the vectors GSI must be keyed on vecModel and project only vec, matching TABLE_SCHEMAS"
   }
 
   assert {
@@ -472,6 +480,68 @@ run "bedrock_provider_can_invoke_its_model" {
     ])
     error_message = "both roles need bedrock:InvokeModel on the foundation model behind the inference profile"
   }
+}
+
+run "bedrock_embeddings_grant_only_the_titan_model" {
+  command = plan
+
+  variables {
+    embed_provider = "bedrock"
+  }
+
+  assert {
+    condition = alltrue([
+      for doc in [data.aws_iam_policy_document.processor, data.aws_iam_policy_document.api] :
+      toset(flatten([for s in doc.statement : s.resources if s.sid == "Bedrock"])) == toset(["arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0"])
+    ])
+    error_message = "embeddings on Bedrock grant InvokeModel on the Titan model only, not the chat model"
+  }
+
+  assert {
+    condition     = aws_lambda_function.processor.environment[0].variables.LOJO_EMBED_PROVIDER == "bedrock" && aws_lambda_function.api.environment[0].variables.LOJO_EMBED_PROVIDER == "bedrock"
+    error_message = "both Lambdas must use the same embedder, or queries and stored vectors will not match"
+  }
+}
+
+run "embeddings_are_off_by_default" {
+  command = plan
+
+  assert {
+    condition     = aws_lambda_function.processor.environment[0].variables.LOJO_EMBED_PROVIDER == "none"
+    error_message = "the next apply must not start paying for embeddings unless embed_provider is set"
+  }
+}
+
+run "provider_keys_and_agent_tokens_are_readable_only_where_needed" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for name in ["grok-api-key", "openai-api-key", "gemini-api-key", "vertex-sa-json"] :
+      contains(flatten([for s in data.aws_iam_policy_document.processor.statement : s.resources if s.sid == "ReadConfig"]), "arn:aws:ssm:us-east-1:111122223333:parameter/lojo-mail/${name}")
+    ])
+    error_message = "the processor reads the selected provider's key"
+  }
+
+  assert {
+    condition     = contains(flatten([for s in data.aws_iam_policy_document.api.statement : s.resources if s.sid == "ReadConfig"]), "arn:aws:ssm:us-east-1:111122223333:parameter/lojo-mail/agent-tokens")
+    error_message = "the API reads the agent token list"
+  }
+
+  assert {
+    condition     = !contains(flatten([for s in data.aws_iam_policy_document.processor.statement : s.resources]), "arn:aws:ssm:us-east-1:111122223333:parameter/lojo-mail/agent-tokens")
+    error_message = "the processor never needs API tokens"
+  }
+}
+
+run "unknown_embed_provider_is_refused" {
+  command = plan
+
+  variables {
+    embed_provider = "opensearch"
+  }
+
+  expect_failures = [var.embed_provider]
 }
 
 run "api_stage_is_throttled" {
