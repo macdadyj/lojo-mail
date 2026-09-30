@@ -8,6 +8,13 @@ Region for this domain: **us-east-1**. SES already has a verified identity there
 
 IAM user `grok-rw` can use Route 53, Route 53 Domains, and SES. That is not enough to apply this stack. Apply needs permission to create KMS, S3, DynamoDB, Lambda, IAM roles, API Gateway, SQS, CloudWatch Logs and alarms, and SSM parameters, and to read the existing SES identity. Use a principal that has those rights. Do not attach a broader policy to `grok-rw` from this repo, and do not put that user's keys in git.
 
+For the 4f5280c rollout the apply rights were attached to `grok-rw` as two customer managed policies, because one policy hit IAM's 6,144-character limit:
+
+- `GrokLojoMailDeployAndBilling`: [`infra/iam/apply-policy.json`](../infra/iam/apply-policy.json) plus billing actions that are not in this repo.
+- `GrokLojoMailWebHosting`: [`infra/iam/apply-policy-web-hosting.json`](../infra/iam/apply-policy-web-hosting.json), the CloudFront and ACM actions for `web_hosting_enabled`.
+
+Keep the two files in step with those policies. `scripts/apply-policy.test.mjs` checks that together they cover every resource type and that each file fits the limit. New CloudFront or ACM actions go in the web hosting file.
+
 `grok-rw` is the right user later for the DNS edits in the plan output (DMARC `rua`, TLS-RPT, MTA-STS) and for Route 53 Domains. It cannot create the DNSSEC signing key.
 
 Other SES identities in the account, `cyberdevsec.com` and `jon@lojo.engineering`, are out of scope. Do not import them and do not point this receipt rule at them.

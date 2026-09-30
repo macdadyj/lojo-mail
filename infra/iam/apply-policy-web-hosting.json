@@ -1,0 +1,32 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "WebHostingCloudfrontAcm",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateDistribution",
+        "cloudfront:GetDistribution",
+        "cloudfront:UpdateDistribution",
+        "cloudfront:DeleteDistribution",
+        "cloudfront:TagResource",
+        "cloudfront:ListTagsForResource",
+        "cloudfront:CreateOriginAccessControl",
+        "cloudfront:GetOriginAccessControl",
+        "cloudfront:UpdateOriginAccessControl",
+        "cloudfront:DeleteOriginAccessControl",
+        "cloudfront:CreateResponseHeadersPolicy",
+        "cloudfront:GetResponseHeadersPolicy",
+        "cloudfront:UpdateResponseHeadersPolicy",
+        "cloudfront:DeleteResponseHeadersPolicy",
+        "cloudfront:CreateInvalidation",
+        "acm:RequestCertificate",
+        "acm:DescribeCertificate",
+        "acm:DeleteCertificate",
+        "acm:AddTagsToCertificate",
+        "acm:ListTagsForCertificate"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

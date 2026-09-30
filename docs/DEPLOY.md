@@ -6,7 +6,7 @@ Run this as the apply principal from [RUNBOOK.md](RUNBOOK.md#who-can-apply), in 
 
 ## Required permissions
 
-The apply principal needs exactly the actions below. The same set is in [`infra/iam/apply-policy.json`](../infra/iam/apply-policy.json), ready to attach. `scripts/apply-policy.test.mjs` fails CI when a new Terraform resource type has no matching actions there. Every resource carries `default_tags`, so each service also needs its tagging actions.
+The apply principal needs exactly the actions below. They are split across two policy files, each ready to attach as one customer managed policy (a single one no longer fits IAM's 6,144-character limit): [`infra/iam/apply-policy.json`](../infra/iam/apply-policy.json) (live as `GrokLojoMailDeployAndBilling`, which also carries billing actions) and [`infra/iam/apply-policy-web-hosting.json`](../infra/iam/apply-policy-web-hosting.json) (live as `GrokLojoMailWebHosting`: the CloudFront and ACM actions, needed only with `web_hosting_enabled`). `scripts/apply-policy.test.mjs` fails CI when a new Terraform resource type has no matching actions in either file, or when a file outgrows the limit. Every resource carries `default_tags`, so each service also needs its tagging actions.
 
 | Service | Actions |
 | --- | --- |

@@ -198,7 +198,7 @@ A read-only look at the account, not an apply:
 - Leave these records alone: ACM validation CNAME, the six DKIM CNAMEs, `_amazonses`, the `mail.` MX and TXT, NS, and SOA. Do not add a second SPF TXT.
 - `autodiscover` and `_amazonchime` look like WorkMail leftovers. They are optional cleanup after Jon confirms WorkMail is gone.
 - Registrar is Gandi, managed through Route 53 Domains. DNSSEC is off. Enabling it is optional and needs a KMS signing key the current deploy user cannot create.
-- IAM user `grok-rw` can use Route 53, Route 53 Domains, and SES. It cannot create KMS, S3, Lambda, DynamoDB, IAM, API Gateway, or SSM. Apply uses a different principal. This repo does not grant `grok-rw` anything.
+- IAM user `grok-rw` can use Route 53, Route 53 Domains, and SES. It cannot create KMS, S3, Lambda, DynamoDB, IAM, API Gateway, or SSM. That was the September audit; for the 4f5280c rollout Jon attached the apply rights to `grok-rw` as two managed policies, `GrokLojoMailDeployAndBilling` and `GrokLojoMailWebHosting` (see RUNBOOK.md, Who can apply). Terraform does not attach them.
 
 `ses_identity_mode = existing` (the default) reads that identity and creates the receipt rule set, the bucket, the key, and the functions. `terraform output dns_plan` lists suggested additions and does not create them: a `rua` on the existing DMARC record (to `dmarc@<domain>`, not a second TXT), TLS-RPT, MTA-STS once the policy host exists, OpenPGP WKD hosting, and a lower MX TTL only before a future region move. `manage_dns = true` is refused in existing mode so a plan cannot overwrite those records.
 

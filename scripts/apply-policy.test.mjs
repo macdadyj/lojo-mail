@@ -4,8 +4,14 @@ import { join } from "node:path";
 import test from "node:test";
 
 const TF_DIR = "infra/terraform";
-const policy = JSON.parse(readFileSync("infra/iam/apply-policy.json", "utf8"));
-const allowed = new Set(policy.Statement.flatMap((statement) => statement.Action));
+// Two customer managed policies on the apply principal: GrokLojoMailDeployAndBilling
+// (apply-policy.json, plus billing actions kept outside the repo) and GrokLojoMailWebHosting
+// (apply-policy-web-hosting.json). One policy no longer fits IAM's 6,144-character limit.
+const POLICY_FILES = ["infra/iam/apply-policy.json", "infra/iam/apply-policy-web-hosting.json"];
+const MANAGED_POLICY_MAX_CHARS = 6144;
+const policies = Object.fromEntries(POLICY_FILES.map((file) => [file, JSON.parse(readFileSync(file, "utf8"))]));
+const policy = policies["infra/iam/apply-policy.json"];
+const allowed = new Set(Object.values(policies).flatMap((doc) => doc.Statement.flatMap((statement) => statement.Action)));
 
 // Create (and, where the provider reads it back separately, read) actions per resource type.
 // Resource types behind flags that default off (create-mode identity, manage_dns) are listed
@@ -70,8 +76,22 @@ test("[deploy] the alarms' cloudwatch:PutMetricAlarm is in the apply policy", ()
   assert.ok(allowed.has("cloudwatch:PutMetricAlarm"));
 });
 
+test("[deploy] each apply policy fits one IAM managed policy (6,144 characters without whitespace)", () => {
+  for (const [file, doc] of Object.entries(policies)) {
+    assert.ok(JSON.stringify(doc).length <= MANAGED_POLICY_MAX_CHARS, `${file} is ${JSON.stringify(doc).length} characters`);
+  }
+});
+
+test("[deploy] CloudFront and ACM actions live only in the web hosting policy", () => {
+  const webOnly = (action) => action.startsWith("cloudfront:") || action.startsWith("acm:");
+  const deploy = policy.Statement.flatMap((statement) => statement.Action);
+  const web = policies["infra/iam/apply-policy-web-hosting.json"].Statement.flatMap((statement) => statement.Action);
+  assert.deepEqual(deploy.filter(webOnly), []);
+  assert.ok(web.length > 0 && web.every(webOnly));
+});
+
 test("the apply policy passes roles to Lambda only", () => {
-  const pass = policy.Statement.filter((statement) => statement.Action.includes("iam:PassRole"));
+  const pass = Object.values(policies).flatMap((doc) => doc.Statement).filter((statement) => statement.Action.includes("iam:PassRole"));
   assert.equal(pass.length, 1);
   assert.equal(pass[0].Condition?.StringEquals?.["iam:PassedToService"], "lambda.amazonaws.com");
 });
