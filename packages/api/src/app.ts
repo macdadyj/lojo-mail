@@ -1,4 +1,6 @@
 import { FOLDERS, MailError, type Actor, type Folder, type Mailbox, type PgpMode, type ReviewedDraft, type ViewOptions } from "@lojo/core";
+import { HttpMailClient } from "@lojo/mcp/http";
+import { handleMcpPost, mcpMethodNotAllowed, type McpHttpReply } from "@lojo/mcp/remote";
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
@@ -15,7 +17,7 @@ interface AppDeps {
   clientAddress: (c: Context<Env>) => string | undefined;
   dev: boolean;
   corsOrigin?: string[];
-  info: { mailbox: string; domain: string; llmProvider: string; dailyTokenBudget: number };
+  info: { mailbox: string; domain: string; llmProvider: string; embedProvider?: string; dailyTokenBudget: number };
 }
 
 type Vars = { principal: Principal };
@@ -112,6 +114,12 @@ function folder(value: unknown): Folder {
   throw new MailError(`folder must be one of ${FOLDERS.join(", ")}`, "invalid");
 }
 
+function mcpResponse(out: McpHttpReply): Response {
+  return new Response(out.body, { status: out.status, headers: out.headers });
+}
+
+const MCP_CHALLENGE = { "www-authenticate": 'Bearer realm="lojo-mail", error="invalid_token"' };
+
 function safeFilename(name: string): string {
   return name.replace(/[^\w.\- ]+/g, "_").slice(0, 120) || "attachment";
 }
@@ -142,6 +150,25 @@ export function createApp(deps: AppDeps): Hono<Env> {
       return c.json({ error: "Wrong passphrase" }, 401);
     }
   });
+
+  /**
+   * Remote MCP (Streamable HTTP). API tokens only: a web session bearer
+   * is refused so a browser tab can never be turned into an agent. Tool
+   * calls re-enter this app with the caller's token, so the same `need()`
+   * checks guard every route and nothing here can send mail.
+   */
+  app.post("/mcp", async (c) => {
+    const origin = c.req.header("origin");
+    if (origin && !(deps.corsOrigin ?? []).includes(origin)) return c.json({ error: "origin not allowed" }, 403);
+    const authorization = c.req.header("authorization");
+    const token = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length).trim() : "";
+    if (token.startsWith("hs_")) return c.json({ error: "MCP takes an API token, not a web session" }, 403);
+    const principal = deps.tokens.principal(authorization, null);
+    if (!principal) return c.json({ error: "unauthorized" }, 401, MCP_CHALLENGE);
+    const mailbox = new HttpMailClient("http://lojo.internal", token, (url, init) => Promise.resolve(app.request(url, init)));
+    return mcpResponse(await handleMcpPost(await c.req.text(), c.req.raw.headers, { label: principal.label, scopes: principal.scopes, mailbox }));
+  });
+  app.on(["GET", "DELETE", "PUT", "PATCH"], "/mcp", () => mcpResponse(mcpMethodNotAllowed()));
 
   app.use("/v1/*", async (c, next) => {
     if (PUBLIC_PATHS.has(c.req.path)) return next();
@@ -186,6 +213,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (typeof input.query !== "string" || !input.query) throw new MailError("query is required", "invalid");
     const mode = input.mode === "semantic" ? "semantic" : "keyword";
     return c.json({ messages: await mailbox.search(input.query, mode, views(c, input.context === true)) });
+  });
+
+  /** Embeds recent mail that has no vector from the current embedder. Reads server-side text, so it needs `body`. */
+  app.post("/v1/vectors/backfill", need("write"), need("body"), async (c) => {
+    const input = c.req.header("content-type")?.includes("application/json") ? await body<{ limit: number }>(c) : {};
+    const limit = typeof input.limit === "number" && Number.isInteger(input.limit) ? Math.min(Math.max(input.limit, 1), 50) : 25;
+    return c.json(await mailbox.backfillVectors(limit));
   });
 
   app.get("/v1/drafts", need("read"), async (c) => {
@@ -292,6 +326,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       mailbox: deps.info.mailbox,
       domain: deps.info.domain,
       llmProvider: deps.info.llmProvider,
+      embedProvider: deps.info.embedProvider ?? "none",
       dailyTokenBudget: deps.info.dailyTokenBudget,
       budgetUsed: await mailbox.store.getBudget(day),
       unlocked: mailbox.unlocked,

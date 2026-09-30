@@ -16,7 +16,7 @@ import { documentClient, dynamoLike, KmsKeyWrapper, S3BlobStore, tableNamesFromE
 import { getConnInfo, handle } from "hono/aws-lambda";
 import styleGuide from "../../../config/style-guide.md";
 import { createApp } from "./app.ts";
-import { TokenBook, parseScopes } from "./auth.ts";
+import { TokenBook, parseAgentTokens, parseScopes } from "./auth.ts";
 import { LoginThrottle, Sessions } from "./session.ts";
 import { SesSender } from "./ses.ts";
 
@@ -53,6 +53,10 @@ async function buildApp() {
   });
   const sendToken = await parameter(env("LOJO_SEND_TOKEN_PARAM", "/lojo-mail/api-token-send"));
   if (sendToken) tokens.add(sendToken, { label: "send", scopes: parseScopes(process.env.LOJO_SEND_SCOPES, ["read", "write", "send"]) });
+  const agentTokens = await parameter(env("LOJO_AGENT_TOKENS_PARAM", "/lojo-mail/agent-tokens"));
+  if (agentTokens) {
+    for (const agent of parseAgentTokens(agentTokens, true)) tokens.add(agent.token, { label: agent.label, scopes: agent.scopes });
+  }
 
   const secret = await parameter(env("LOJO_SESSION_SECRET_PARAM", "/lojo-mail/session-secret"));
   const passphraseHash = await parameter(env("LOJO_PASSPHRASE_HASH_PARAM", "/lojo-mail/human-passphrase-hash"));
@@ -106,6 +110,7 @@ async function buildApp() {
       mailbox: config.mailbox,
       domain: config.domain,
       llmProvider: config.llmProvider,
+      embedProvider: config.embedProvider,
       dailyTokenBudget: config.dailyTokenBudget,
     },
   });

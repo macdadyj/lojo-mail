@@ -85,6 +85,7 @@ const app = createApp({
     mailbox: config.mailbox,
     domain: config.domain,
     llmProvider: config.llmProvider,
+    embedProvider: config.embedProvider,
     dailyTokenBudget: config.dailyTokenBudget,
   },
 });
