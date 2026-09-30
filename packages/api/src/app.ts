@@ -35,7 +35,7 @@ type Requirement = Scope | "human";
 
 const PUBLIC_PATHS = new Set(["/v1/health", "/v1/session/login"]);
 
-function statusFor(error: MailError): 400 | 403 | 404 | 409 | 423 | 502 {
+function statusFor(error: MailError): 400 | 403 | 404 | 409 | 423 | 502 | 503 {
   switch (error.code) {
     case "not_found":
       return 404;
@@ -47,6 +47,8 @@ function statusFor(error: MailError): 400 | 403 | 404 | 409 | 423 | 502 {
       return 409;
     case "upstream":
       return 502;
+    case "unavailable":
+      return 503;
     case "invalid":
     case "budget":
       return 400;

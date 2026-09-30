@@ -1,6 +1,7 @@
 import type { LlmClient } from "../ai/types.ts";
 import { RULES_KEY, type BlobStore } from "../blob/store.ts";
 import { draftContext, rulesContext, serverOpen, serverSeal, type KeyWrapper } from "../crypto/server-seal.ts";
+import { MailError } from "../errors.ts";
 import { newId, sha256, utcDay } from "../ids.ts";
 import { buildRawMessage, cleanHeaderValue } from "../mime/compose.ts";
 import type { MailSender, OutboundMessage } from "../send.ts";
@@ -17,8 +18,22 @@ export interface RulesRuntime {
   autoSender?: MailSender | null;
 }
 
+/**
+ * A missing rules object is "no rules". AccessDenied is not: without s3:ListBucket on
+ * rules/ S3 reports a missing key that way, but it can equally hide real rules, and
+ * the switch and disable routes write back what they read. So it is a 503, never an
+ * empty ruleset; ingest catches it and delivers without rules.
+ */
 export async function loadRules(blobs: BlobStore, keys: KeyWrapper): Promise<RulesDocument | null> {
-  const bytes = await blobs.get(RULES_KEY);
+  let bytes: Uint8Array | null;
+  try {
+    bytes = await blobs.get(RULES_KEY);
+  } catch (error) {
+    if (error instanceof Error && error.name === "AccessDenied") {
+      throw new MailError(`Mail rules are unreadable: S3 denied ${RULES_KEY}. The role needs s3:GetObject on rules/* and s3:ListBucket on the rules/ prefix`, "unavailable");
+    }
+    throw error;
+  }
   if (!bytes) return null;
   const sealed = JSON.parse(new TextDecoder().decode(bytes)) as ServerSealedBlob;
   return serverOpen<RulesDocument>(sealed, rulesContext(), keys);

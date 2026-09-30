@@ -1,5 +1,8 @@
-/** `upstream`: the model provider failed or returned something unusable. */
-export type MailErrorCode = "not_found" | "locked" | "forbidden" | "invalid" | "budget" | "conflict" | "upstream";
+/**
+ * `upstream`: the model provider failed or returned something unusable.
+ * `unavailable`: storage refused a read the deployment should allow (an IAM gap), so the answer is unknown.
+ */
+export type MailErrorCode = "not_found" | "locked" | "forbidden" | "invalid" | "budget" | "conflict" | "upstream" | "unavailable";
 
 export class MailError extends Error {
   readonly code: MailErrorCode;

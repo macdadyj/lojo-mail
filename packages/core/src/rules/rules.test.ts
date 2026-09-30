@@ -141,6 +141,21 @@ test("a token-written rule never auto-sends, even if it reaches storage", async 
   assert.match((await audit(world, "rule.reply"))[0]?.detail ?? "", /not written by a human session/);
 });
 
+test("AccessDenied on the rules object is audited and delivery carries on without rules", async () => {
+  const world = await memoryWorld({ autoSend: true });
+  const get = world.blobs.get.bind(world.blobs);
+  world.blobs.get = async (key) => {
+    if (key === RULES_KEY) throw Object.assign(new Error("Access Denied"), { name: "AccessDenied" });
+    return get(key);
+  };
+  const { message } = await world.ingest(malicious("13-autoreply-clean.eml"));
+  assert.equal((await world.store.getMessage(message.id))?.folder, "inbox");
+  assert.equal(world.autoSender.sent.length, 0);
+  const [event] = await audit(world, "rules.load");
+  assert.equal(event?.outcome, "error");
+  assert.match(event?.detail ?? "", /S3 denied rules\/current\.bin/);
+});
+
 test("rules sealed under another purpose do not load, and delivery carries on without them", async () => {
   const world = await memoryWorld({ autoSend: true });
   const doc = parseRulesDocument({ rules: [MINA_AUTOREPLY] }, "human", new Date());

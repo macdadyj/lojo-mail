@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { RULES_KEY } from "@lojo/core";
 import { fixture } from "@lojo/core/testing";
 import { testApp } from "./test-app.ts";
 
@@ -31,6 +32,33 @@ test("only a signed-in human can write rules; no token can, however broad", asyn
   assert.equal(read.json.autoSendEnabled, false);
   const events = (await t.store.listAudit(50)).filter((event) => event.action === "rules.updated");
   assert.match(events[0]?.detail ?? "", /autoSend:mina/);
+});
+
+test("an empty ruleset (no rules object yet) reads as no rules", async () => {
+  const t = await testApp();
+  const res = await t.call("/v1/rules", { token: "read-token" });
+  assert.equal(res.status, 200);
+  assert.deepEqual((res.json.rules as { rules: unknown[] }).rules, []);
+});
+
+test("AccessDenied on the rules object is a 503, never an empty ruleset that a switch would write back", async () => {
+  const t = await testApp();
+  const session = await t.login();
+  await t.call("/v1/rules", { method: "PUT", token: session, body: RULES });
+  const saved = t.blobs.objects.get(RULES_KEY);
+  const get = t.blobs.get.bind(t.blobs);
+  t.blobs.get = async (key) => {
+    if (key === RULES_KEY) throw Object.assign(new Error("Access Denied"), { name: "AccessDenied" });
+    return get(key);
+  };
+
+  const read = await t.call("/v1/rules", { token: "read-token" });
+  assert.equal(read.status, 503);
+  assert.equal(read.json.code, "unavailable");
+  assert.match(String(read.json.error), /s3:ListBucket on the rules\/ prefix/);
+  assert.equal((await t.call("/v1/rules/switches", { token: "write-token", body: { paused: true } })).status, 503);
+  assert.equal((await t.call("/v1/rules/mina/disable", { token: "write-token", body: {} })).status, 503);
+  assert.deepEqual(t.blobs.objects.get(RULES_KEY), saved, "the stored rules were not overwritten");
 });
 
 test("invalid rules are a 400 with the reason", async () => {

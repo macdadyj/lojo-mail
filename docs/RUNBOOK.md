@@ -8,6 +8,13 @@ Region for this domain: **us-east-1**. SES already has a verified identity there
 
 IAM user `grok-rw` can use Route 53, Route 53 Domains, and SES. That is not enough to apply this stack. Apply needs permission to create KMS, S3, DynamoDB, Lambda, IAM roles, API Gateway, SQS, CloudWatch Logs and alarms, and SSM parameters, and to read the existing SES identity. Use a principal that has those rights. Do not attach a broader policy to `grok-rw` from this repo, and do not put that user's keys in git.
 
+For the 4f5280c rollout the apply rights were attached to `grok-rw` as two customer managed policies, because one policy hit IAM's 6,144-character limit:
+
+- `GrokLojoMailDeployAndBilling`: [`infra/iam/apply-policy.json`](../infra/iam/apply-policy.json) plus billing actions that are not in this repo.
+- `GrokLojoMailWebHosting`: [`infra/iam/apply-policy-web-hosting.json`](../infra/iam/apply-policy-web-hosting.json), the CloudFront and ACM actions for `web_hosting_enabled`.
+
+Keep the two files in step with those policies. `scripts/apply-policy.test.mjs` checks that together they cover every resource type and that each file fits the limit. New CloudFront or ACM actions go in the web hosting file.
+
 `grok-rw` is the right user later for the DNS edits in the plan output (DMARC `rua`, TLS-RPT, MTA-STS) and for Route 53 Domains. It cannot create the DNSSEC signing key.
 
 Other SES identities in the account, `cyberdevsec.com` and `jon@lojo.engineering`, are out of scope. Do not import them and do not point this receipt rule at them.
@@ -333,6 +340,7 @@ Browsers send an `OPTIONS` preflight to the API. API Gateway hands it to the `$d
 - Stop everything at once: `curl -s "$API/v1/rules/switches" -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"paused":true}'`. `{"killSwitch":true}` stops only auto-send. Any `write` token can do this; only your session can undo it (Settings, or `npm run rules -- push` with `"paused": false`).
 - Trashed by a rule by mistake: `POST /v1/messages/:id/restore`. Rule actions are in the audit log (`GET /v1/audit`, actions `rule.apply`, `rule.trash`, `rule.reply`, `rule.autosend`).
 - Trashed mail keeps a `keepUntil` date and is only removed by the trash purge below.
+- `GET /v1/rules` answering 503 `unavailable` ("S3 denied rules/current.bin") means a role is missing `s3:GetObject` on `rules/*` or `s3:ListBucket` on the `rules/` prefix (statements `ReadRules`/`RulesObject` and `ListRulesPrefix` in `iam.tf`). Without ListBucket, S3 reports a missing object as `AccessDenied`, so a mailbox with no rules saved looked broken (the 500 in the 4f5280c rollout). The API refuses to treat that as "no rules", because pause and disable write back what they read and would replace the real rules. The processor delivers without rules and audits `rules.load` / `error`. Fix the role; do not work around it.
 - Auto-send stays off until `auto_send_enabled = true` in `terraform.tfvars` and an apply; the plan shows only the processor's SES statement and `LOJO_AUTO_SEND` changing. Without it, auto-send rules write drafts for approval.
 
 ### Trash purge

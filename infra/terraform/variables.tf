@@ -379,6 +379,12 @@ variable "web_hosting_enabled" {
   }
 }
 
+variable "web_headers_path" {
+  type        = string
+  description = "The built web app's _headers file, relative to infra/terraform. The CloudFront Content-Security-Policy is read from it. Leave the default; the offline plan tests point it at a fixture."
+  default     = "../../packages/web/dist/_headers"
+}
+
 variable "web_app_label" {
   type        = string
   description = "Host label for the web app. The FQDN is <label>.<domain>."

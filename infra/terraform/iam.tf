@@ -48,6 +48,11 @@ locals {
 
   ssm_prefix = "arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter/lojo-mail"
 
+  # Without ListBucket, S3 answers a GetObject for a missing key with AccessDenied
+  # instead of NoSuchKey, and an empty ruleset (no rules/current.bin yet) became a 500.
+  # Scoped to rules/ so neither role can list mail objects.
+  rules_list_prefixes = ["rules/", "rules/*"]
+
   # A cross-region inference profile (us.…) routes to the foundation model in
   # several regions, so both ARNs are needed.
   bedrock_foundation_model = replace(var.bedrock_model_id, "/^(us|eu|apac|global)\\./", "")
@@ -130,6 +135,18 @@ data "aws_iam_policy_document" "processor" {
     sid       = "ReadRules"
     actions   = ["s3:GetObject"]
     resources = ["${aws_s3_bucket.mail.arn}/rules/*"]
+  }
+
+  statement {
+    sid       = "ListRulesPrefix"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.mail.arn]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = local.rules_list_prefixes
+    }
   }
 
   statement {
@@ -218,6 +235,18 @@ data "aws_iam_policy_document" "api" {
     sid       = "RulesObject"
     actions   = ["s3:GetObject", "s3:PutObject"]
     resources = ["${aws_s3_bucket.mail.arn}/rules/*"]
+  }
+
+  statement {
+    sid       = "ListRulesPrefix"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.mail.arn]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = local.rules_list_prefixes
+    }
   }
 
   statement {

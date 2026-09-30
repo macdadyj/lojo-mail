@@ -15,7 +15,7 @@ locals {
   web_hosts        = [local.web_app_host, local.web_mta_sts_host]
 
   # The policy is read from the build so the header can never drift from the <meta> tag.
-  web_headers_file = var.web_hosting_enabled ? file("${path.module}/../../packages/web/dist/_headers") : ""
+  web_headers_file = var.web_hosting_enabled ? file("${path.module}/${var.web_headers_path}") : ""
   web_csp          = try(regex("(?m)^\\s*Content-Security-Policy:\\s*(.+?)\\s*$", local.web_headers_file)[0], "")
 
   # AWS managed cache policy CachingOptimized. It honours the origin's Cache-Control
