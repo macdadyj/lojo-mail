@@ -4,7 +4,7 @@ Three ways to search and work the mailbox from an assistant, and one switch for 
 
 - No assistant can send. There is no send tool. Sending needs the `send` scope **and** a one-time approval token that only Jon's signed-in web session can mint for that exact content ([SECURITY.md](SECURITY.md#human-approval-for-sending)). The most an assistant can do is `submit_for_approval`, which puts a draft in the web app's approval queue.
 - Message text (bodies, AI summaries, action items, semantic search) needs the `body` scope. Without it a token sees headers, labels, and the short snippet.
-- Trash, full export, and approval are human-only. No token reaches them.
+- Trash, full export, and approval are human-only. No agent token and no MCP client reaches them. The one exception is the Thunderbird bridge token, which can hold the `trash` scope (soft delete to Trash, audited, restorable) when `bridge_trash_enabled` is on; `/mcp` refuses any token that holds it.
 - Every tool result is wrapped as untrusted content, because it is mail that anyone can write.
 
 | Client | Transport | Where it runs | Default scopes |

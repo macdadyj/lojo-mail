@@ -6,7 +6,7 @@
 #   scripts/install-bridge.sh [--api-url URL] [--address ADDRESS] [--web-url URL]
 #                             [--token-file PATH | --token-command JSON_ARGV]
 #                             [--private-key-file PATH | --private-key-command JSON_ARGV]
-#                             [--no-start]
+#                             [--no-trash] [--no-start]
 #
 # The same values can come from LOJO_BRIDGE_API_URL, LOJO_BRIDGE_ADDRESS,
 # LOJO_BRIDGE_WEB_URL, LOJO_BRIDGE_TOKEN_FILE, LOJO_BRIDGE_PRIVATE_KEY_FILE.
@@ -33,6 +33,7 @@ token_file="${LOJO_BRIDGE_TOKEN_FILE:-}"
 token_command=""
 key_file="${LOJO_BRIDGE_PRIVATE_KEY_FILE:-}"
 key_command=""
+no_trash=0
 start=1
 
 while [[ $# -gt 0 ]]; do
@@ -44,6 +45,7 @@ while [[ $# -gt 0 ]]; do
     --token-command) token_command="${2:?--token-command needs a value}"; shift 2 ;;
     --private-key-file) key_file="${2:?--private-key-file needs a value}"; shift 2 ;;
     --private-key-command) key_command="${2:?--private-key-command needs a value}"; shift 2 ;;
+    --no-trash) no_trash=1; shift ;;
     --no-start) start=0; shift ;;
     -h | --help) usage; exit 0 ;;
     *) die "unknown option $1 (see --help)" ;;
@@ -128,6 +130,7 @@ else
   fi
   init_args=(init --api-url "${api_url}" --address "${address}")
   [[ -n "${web_url}" ]] && init_args+=(--web-url "${web_url}")
+  [[ "${no_trash}" -eq 1 ]] && init_args+=(--no-trash)
   if [[ -n "${token_command}" ]]; then
     init_args+=(--token-command "${token_command}")
   else

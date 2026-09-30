@@ -290,7 +290,9 @@ terraform apply
 - [ ] With the flag off, a message that matches an auto-send rule leaves a draft under Drafts → "Waiting for your approval" and an audit row `rule.reply` / `autosend_refused` naming `auto-send is disabled on this deployment`.
 - [ ] With the flag on, a message from an allowlisted sender with DMARC pass gets one reply with `Auto-Submitted: auto-replied`, and the audit table has `rule.autosend` / `sent`. A second message from the same sender that day becomes a draft (`per-sender daily limit`).
 
-**Thunderbird.** Create the bridge token (`/lojo-mail/bridge-token`, [RUNBOOK.md](RUNBOOK.md#1-keys-and-parameters)), wait 5 minutes for the API to reload, then follow [THUNDERBIRD.md](THUNDERBIRD.md) on Santa Computa. `curl -s "$API/v1/session" -H "Authorization: Bearer $BRIDGE_TOKEN"` must show `{"kind":"token","label":"bridge","scopes":["read","write","body","compose"]}`.
+**Thunderbird.** Create the bridge token (`/lojo-mail/bridge-token`, [RUNBOOK.md](RUNBOOK.md#1-keys-and-parameters)), wait 5 minutes for the API to reload, then follow [THUNDERBIRD.md](THUNDERBIRD.md) on Santa Computa. `curl -s "$API/v1/session" -H "Authorization: Bearer $BRIDGE_TOKEN"` must show `{"kind":"token","label":"bridge","scopes":["read","write","body","compose","trash"]}`. `trash` is there because `bridge_trash_enabled` defaults to `true`: deleting in Thunderbird moves mail to Trash. Set it to `false` and the scope disappears; delete then archives with a hidden label.
+
+**Trash purge.** `trash_purge_mode` defaults to `report`: the `lojo-mail-trash-purge` Lambda runs daily and only audits what it would delete (`trash.purge_report`). Nothing is hard deleted until you set `trash_purge_mode = "purge"` and apply; the plan then shows only the purge role gaining `PurgeExpiredTrash` and `DeletePurgedObjects` and `LOJO_TRASH_PURGE` changing. `off` disables the schedule. See [RUNBOOK.md](RUNBOOK.md#trash-purge).
 
 ## If mail sits in raw/
 

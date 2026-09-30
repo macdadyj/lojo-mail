@@ -149,7 +149,7 @@ In production the API has no envelope private key. Draft reply and summarize use
 
 ## Interfaces
 
-- **HTTP API** under `/v1`. Two kinds of principal: API tokens with scopes `read`, `write`, `send`, `body`, `compose`, `admin`, and human sessions from `POST /v1/session/login` (passphrase). Each route declares its scope or requires a human. API Gateway throttles the stage.
+- **HTTP API** under `/v1`. Two kinds of principal: API tokens with scopes `read`, `write`, `send`, `body`, `compose`, `admin`, and `trash` (the bridge token only, never implied by `admin`, refused by `/mcp`), and human sessions from `POST /v1/session/login` (passphrase). Each route declares its scope or requires a human. API Gateway throttles the stage.
 - **MCP** (`@lojo/mcp`). Each tool declares the scopes it needs, and a client sees only the tools its token's scopes allow. There is no send, approve, or trash tool; agents call `submit_for_approval`, and every tool result is wrapped as untrusted content. Two transports, same tools:
   - stdio (`npm run mcp`), for Cursor and other local clients. It asks `/v1/session` which scopes its token has and uses the intersection with `LOJO_API_SCOPES` (default `read`).
   - Streamable HTTP at `POST /mcp` on the API, for remote clients such as Grok. Stateless JSON-RPC (initialize, ping, tools/list, tools/call, batches of up to 20). Bearer API or agent tokens only; web sessions and browser origins are refused. Tool calls re-enter the REST API in-process with the caller's token, so the same route checks apply.
@@ -164,6 +164,15 @@ In production the API has no envelope private key. Draft reply and summarize use
 
 - Jon saves rules from a signed-in session (`PUT /v1/rules`, or `npm run rules -- push`, which signs in with the passphrase). The API seals them to `rules/current.bin`. The processor loads them for each inbound message.
 - Filing actions are folded into the message before its one `PutMessage`: labels accumulate, the last move wins, trash wins over moves. Trash keeps the message and sets `trashedAt`, `trashedBy: rule:<id>` and `keepUntil`. `POST /v1/messages/:id/restore` undoes it.
+
+## Trash purge
+
+Every path into Trash (the web app, a rule, the bridge) is a soft delete that stamps `trashedAt`, `trashedBy` and `keepUntil` (`trashRetentionDays` in the rules document, default 30, 7 to 365). The only hard delete in the system is `packages/core/src/trash/purge.ts`, run daily by the `lojo-mail-trash-purge` Lambda (`infra/terraform/purge.tf`). It has its own role, reserved concurrency 1, and never opens mail.
+
+- `trash_purge_mode = report` (default) audits `trash.purge_report` with counts (in Trash, due, unmarked) and deletes nothing; its role has no delete permission. `purge` deletes; `off` disables the schedule.
+- A message is due only if it is still in Trash, has both `trashedAt` and `keepUntil`, `keepUntil` has passed, and it was trashed at least 7 days ago. At most 100 per run.
+- The row is deleted first with a DynamoDB condition (`folder = trash` and the same `keepUntil`), so a restore that races the purge wins. Then only that message's own objects (`objects/<id>…`, `ai-context/<id>.bin`) are deleted, and the thread is refreshed.
+- Every purge-mode run writes `trash.purge_run`; every deletion `trash.purged` (ids and dates only). S3 noncurrent versions (30 days) and DynamoDB PITR (35 days) remain the recovery path after a purge.
 - A reply rule runs after the message is stored. By default it writes a draft with origin `rule` into the approval queue. `mode: "autoSend"` sends only when the deployment allows it (`auto_send_enabled`), the kill switch is off, the rule was written by a human, and the guards in SECURITY.md pass: sender allowlist, DMARC pass, loop headers, text constraints, rate limits. Otherwise it is the same draft.
 - Header-derived loop signals (`Auto-Submitted`, `Precedence`, `List-Id`, null `Return-Path`, and so on) are stored on the message as codes (`replyBlockers`), so `POST /v1/rules/test` gives the same answer later without the headers.
 - A failing rule never fails delivery: load errors and reply errors are audited and the message is stored as if there were no rules. Every rule action is an audit event.
@@ -174,7 +183,7 @@ In production the API has no envelope private key. Draft reply and summarize use
 
 - Folders map one to one: INBOX, Archive, Sent, Drafts, Junk (`spam`), Trash.
 - Messages are listed with `GET /v1/folders/:folder/messages`, and each body envelope is fetched and opened on the desktop with the envelope private key. The bridge rebuilds a MIME message from the metadata, the decrypted text and HTML, and the decrypted attachments. Plaintext stays in memory; only UIDs and sizes are written to disk.
-- Flags and labels sync back: `\Seen` to `POST /v1/messages/:id/flags`, `\Flagged` and keywords to labels, moves to `move` or `archive`. Delete archives with a hidden `thunderbird-deleted` label, because the bridge cannot trash.
+- Flags and labels sync back: `\Seen` to `POST /v1/messages/:id/flags`, `\Flagged` and keywords to labels, moves to `move` or `archive`. Delete moves to Trash when the bridge token has the `trash` scope (`bridge_trash_enabled`, on by default) and `bridge.json` keeps `deleteToTrash`: a soft delete with `trashedBy: bridge` and `keepUntil`, audited as `message.trashed`. Without the scope, or when deleting inside Trash, it archives with a hidden `thunderbird-deleted` label.
 - SMTP submissions become drafts (origin `client`) and are submitted to the approval queue. Jon approves them in the web app.
 
 JMAP (RFC 8620 / 8621) remains a possible later facade; the store is already shaped like it.

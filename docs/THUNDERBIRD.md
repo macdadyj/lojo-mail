@@ -11,7 +11,7 @@ Thunderbird ──IMAP 127.0.0.1:1143──┐
 Two things work differently from ordinary mail:
 
 - **Sending queues a draft.** Nothing leaves until you approve it in the lojo-mail web app.
-- **Deleting archives.** The message is archived with the label `thunderbird-deleted` and hidden from Thunderbird. It stays recoverable in the web app.
+- **Deleting moves to Trash, and Trash is emptied on a schedule.** A delete is a soft delete: the message stays in Trash, restorable, for the retention window (30 days by default, never less than 7). After that, the server-side trash purge may delete it for good, once Jon turns the purge on (`trash_purge_mode = purge`; it only reports until then). Details in section 4.
 
 ## 1. Prerequisites
 
@@ -88,15 +88,15 @@ The bridge publishes the service's fixed folders with SPECIAL-USE flags, so Thun
 | Inbox | inbox |
 | Drafts | drafts (Thunderbird's drafts stay local, see below) |
 | Sent | sent |
-| Archive | archive (minus messages deleted from Thunderbird) |
+| Archive | archive |
 | Junk | spam |
-| Trash | trash (read and restore; you cannot delete into it) |
+| Trash | trash (delete moves here; move a message out to restore it) |
 
 Check these under Account Settings:
 
 - **Copies & Folders:** Sent in "Sent", Drafts in "Drafts". You can turn off "Place a copy in", because the bridge drops that copy anyway (the real one appears in Sent after you approve).
 - **Copies & Folders → Archive options:** choose **A single folder**. The default yearly subfolders need CREATE, which lojo-mail does not support.
-- **Server Settings → When I delete a message:** "Move it to this folder: Trash" or "Just mark it as deleted" both work. See below.
+- **Server Settings → When I delete a message:** choose **Move it to this folder: Trash**. "Just mark it as deleted" also works (the bridge moves the message to Trash on expunge). Avoid "Remove it immediately": the bridge treats it the same as a move to Trash, but Thunderbird will tell you the message is gone when it is not.
 - **Junk Settings:** Junk in "Junk". Marking junk adds the `junk` label; moving to Junk moves the message to spam.
 
 ## 4. What each action does
@@ -123,13 +123,17 @@ The bridge never approves or sends by itself, and it cannot:
 
 **Moving.** Moves to Inbox, Archive, or Junk move the message in lojo-mail. Moving into Sent or Drafts is refused. COPY is refused: lojo-mail keeps one copy of each message.
 
-**Deleting.** The bridge token cannot move mail to trash; only you, signed in to the web app, can. So when Thunderbird deletes (moves to Trash, or marks deleted and expunges), the bridge:
+**Deleting.** Delete in Thunderbird (Delete key, move to Trash, or mark deleted and expunge) moves the message to Trash in lojo-mail. This is a soft delete, never a hard delete:
 
-1. adds the label `thunderbird-deleted`,
-2. archives the message (unless it is already in Archive or Trash),
-3. hides messages with that label from Archive and Trash in Thunderbird.
+- The message keeps its sealed body and attachments and gets `trashedBy: bridge` and a `keepUntil` date (now plus the retention window, 30 days by default; set `trashRetentionDays` in the rules document, 7 to 365). The web app's Trash view shows the date.
+- Every delete is in the audit log (`message.trashed`, `by:bridge`).
+- **To restore,** move the message out of Trash in Thunderbird, or use Restore in the web app's Trash view. Restoring clears the date.
+- **Deleting inside Trash** only hides the message in Thunderbird (label `thunderbird-deleted`). It stays in Trash on the service until the purge.
+- **After the window,** the daily trash purge on the server may delete it for good, if Jon has set `trash_purge_mode = purge` (the default, `report`, only logs what would be deleted). For 30 days after a purge an operator can still restore it from backups (docs/RUNBOOK.md, Trash purge); after that it is gone.
 
-To recover, open Archive in the web app and remove the label. To make deletes real trash, the bridge token would need a trash scope. That is a deliberate choice you can revisit; it would let anything with the bridge token trash mail.
+This needs two things, both set by Jon: Terraform `bridge_trash_enabled = true` (the default), which gives the bridge token the `trash` scope, and `"deleteToTrash": true` in `bridge.json` (the default; `lojo-bridge init --no-trash` writes `false`). `lojo-bridge check` prints which behaviour is active. If either is off, delete falls back to the old behaviour: the message is archived with the hidden label `thunderbird-deleted`, and you recover it by removing the label in the web app.
+
+The `trash` scope belongs to the bridge token alone. Agent tokens, `admin` tokens, and the MCP server cannot get it, and it cannot hard delete: only the server's purge policy can, and only after the window.
 
 **Not supported:** creating, renaming, or deleting folders; COPY; Bcc; sending attachments; CONDSTORE/QRESYNC; server-side sort or threading. Thunderbird works without these.
 
@@ -159,7 +163,7 @@ The log is JSON lines with ids, counts, and status codes only: never tokens, pas
 - **In memory:** decrypted messages live in the bridge's memory cache (64 MB, least recently used). The bridge never writes plaintext to disk.
 - **Network:** both listeners bind `127.0.0.1` only. The bridge refuses a config that asks for any other address, and it refuses a non-HTTPS API URL except `localhost` for development.
 - **Who can read your mail:** anyone with your desktop session can use the bridge or read the key. Use full-disk encryption and lock the screen. `pass` with a gpg-agent timeout is better than plain files.
-- **What the token can do:** read, change flags, labels, and folders (never trash), read bodies, and create drafts to anyone. It cannot send, approve, or administer. If Santa is lost, delete `/lojo-mail/bridge-token` in SSM (or set a new value). The API stops accepting the old token when it reloads.
+- **What the token can do:** read, change flags, labels, and folders, move mail to Trash (with `trash`; restorable for the window), read bodies, and create drafts to anyone. It cannot hard delete, send, approve, or administer. Every Trash move is audited with `by:bridge`, so a stolen token trashing mail shows up in the web app's Trash view and the audit log. If Santa is lost, delete `/lojo-mail/bridge-token` in SSM (or set a new value). The API stops accepting the old token when it reloads.
 
 ## 7. Uninstall
 
