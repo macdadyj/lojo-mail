@@ -120,6 +120,7 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .sheet(isPresented: $showKeySetup) { KeySetupView() }
+            .onAppear { if model.launch.screen == .key { showKeySetup = true } }
             .confirmationDialog("Remove the envelope key?", isPresented: $confirmRemoveKey, titleVisibility: .visible) {
                 Button("Remove key", role: .destructive) { model.removeKey() }
             } message: {
