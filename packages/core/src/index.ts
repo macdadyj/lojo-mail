@@ -21,7 +21,7 @@ export {
 } from "./ai/embedders.ts";
 export { ServiceAccountTokens, googleHeaders, googleModelUrl, parseServiceAccount } from "./ai/google-auth.ts";
 export type { GoogleEndpoint, ServiceAccountKey } from "./ai/google-auth.ts";
-export { DEFAULT_PROVIDER_TIMEOUT_MS, estimateTokens, postJson, postJsonOrThrow } from "./ai/http.ts";
+export { DEFAULT_PROVIDER_TIMEOUT_MS, estimateTokens, postJson, postJsonOrThrow, trimSlash } from "./ai/http.ts";
 export type { FetchLike } from "./ai/http.ts";
 export { SECRET_SOURCES, loadProviderSecrets, secretsFor } from "./ai/secrets.ts";
 export type { ParameterReader } from "./ai/secrets.ts";

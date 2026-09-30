@@ -1,0 +1,19 @@
+{
+  "name": "@lojo/local",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "lojo-local": "./src/cli.ts"
+  },
+  "scripts": {
+    "start": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@lojo/core": "*",
+    "@lojo/mcp": "*"
+  },
+  "devDependencies": {
+    "@lojo/api": "*"
+  }
+}
