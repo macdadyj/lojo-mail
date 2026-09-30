@@ -72,7 +72,8 @@ flowchart LR
 | `@lojo/core` | `packages/core` | Types, MIME, envelope crypto, store interface, AI pipeline, OpenPGP helpers |
 | `@lojo/pipeline` | `packages/pipeline` | S3 Lambda handler, plus the AWS adapters (DynamoDB document store, S3 blob store, KMS key wrapper) |
 | `@lojo/api` | `packages/api` | Hono HTTP API. Lambda or `npm run dev` |
-| `@lojo/mcp` | `packages/mcp` | MCP tools over the same service layer, with scopes |
+| `@lojo/mcp` | `packages/mcp` | MCP tools over the HTTP API, with scopes: a stdio server, and the Streamable HTTP handler the API serves at `/mcp` |
+| `@lojo/local` | `packages/local` | `lojo-local` CLI and a tool-calling adapter so a local model (Ollama, or any OpenAI-compatible server) can search, read, summarize, and draft |
 | `@lojo/web` | `packages/web` | Vite + React PWA |
 | `@lojo/importer` | `packages/importer` | Idempotent `.eml` / mbox / vCard / CSV import, into a local store or into AWS |
 
@@ -84,7 +85,7 @@ DynamoDB (on-demand, SSE-KMS, point-in-time recovery, deletion protection) holds
 
 | Table | Key | Indexes |
 | --- | --- | --- |
-| messages | `id` (`msg_` + SHA-256 of the delivery id) | `folder` (folder, date), `thread` (threadId, date), `rfc` (rfcMessageId, date) |
+| messages | `id` (`msg_` + SHA-256 of the delivery id) | `folder` (folder, date), `thread` (threadId, date), `rfc` (rfcMessageId, date), `vectors` (vecModel, date; sparse, projects only `vec`) |
 | threads | `id` | `recent` (kind, lastDate); an emptied thread drops `kind` and leaves the listing |
 | drafts | `id` | `recent` (kind, updatedAt) |
 | contacts | `email` | `all` (kind, email) |
@@ -122,14 +123,20 @@ See [SECURITY.md](SECURITY.md) for what that does and does not protect.
 
 ## AI
 
-Every non-bulk inbound message, within the daily token budget, is sent to a provider behind one interface:
+Every non-bulk inbound message, within the daily token budget, is sent to a chat provider behind one interface (`LlmClient`, `packages/core/src/ai`), chosen by `llm_provider`:
 
-- `grok` — OpenAI-compatible `POST /v1/chat/completions` (default base `https://api.x.ai/v1`)
-- `bedrock` — Amazon Bedrock Runtime `Converse`
-- `ollama` — Jon's lab machine at `http://100.96.1.90:11434` (`llama3.2:1b`, embeddings via `nomic-embed-text`)
+- `grok` — xAI, OpenAI-compatible `POST /v1/chat/completions` (default base `https://api.x.ai/v1`)
+- `bedrock` — Amazon Bedrock Runtime `Converse`: Nova Micro/Lite/Pro, Claude Haiku, Llama
+- `openai` — any OpenAI-compatible endpoint (OpenAI, OpenRouter, a vLLM or llama.cpp server)
+- `gemini` — Gemini API with an AI Studio key; `vertex` — Vertex AI with a service account (JWT exchanged for an access token) or an express-mode key. Default model Gemini 2.5 Flash-Lite
+- `ollama` — Jon's lab machine at `http://100.96.1.90:11434` (`llama3.2:1b`). Only reachable from the tailnet, so from `npm run dev`, the importer, and `packages/local`, not from the Lambdas
 - `mock` — tests and offline demo
 
-The pipeline asks for one JSON object: summary, category, priority, action items and deadlines, labels, phishing score, unsubscribe info, thread summary, and a draft reply conditioned on `config/style-guide.md`. Heuristic phishing signals are merged with the model score. Embeddings are stored for semantic search when the provider can embed.
+Embeddings are a separate interface (`Embedder`) and a separate choice, `embed_provider`: `bedrock` (Titan Text Embeddings V2), `ollama` (`nomic-embed-text`, with its query/document prefixes), `openai`, `gemini`/`vertex` (`gemini-embedding-001`), `mock`, or `none` (the Terraform default). Any chat provider can pair with any embedder. [INTEGRATIONS.md](INTEGRATIONS.md) has the settings and [COSTS_COMPARE.md](COSTS_COMPARE.md) the prices.
+
+The pipeline asks for one JSON object: summary, category, priority, action items and deadlines, labels, phishing score, unsubscribe info, thread summary, and a draft reply conditioned on `config/style-guide.md`. Heuristic phishing signals are merged with the model score.
+
+**Semantic search.** At ingest, when an embedder is configured, the processor embeds the subject plus the first 2,000 characters of the body (bulk mail included, so newsletters stay findable; OpenPGP, quarantined, and DMARC-report mail excluded). The vector is truncated to `embed_dimensions` (256), L2-normalized, quantized to int8, and stored on the message item as `vec` with a `vecModel` tag (`provider/model@dims`). The sparse `vectors` index holds only messages with a vector and projects only `vec`. A query is embedded with the same model, the index is read for that tag, and messages are ranked by brute-force cosine, top 20, trash excluded. For a personal mailbox that is a few MB read per query and no always-on search service. Changing the model changes the tag, so stale vectors are ignored until `POST /v1/vectors/backfill` re-embeds mail the server can still read. Embedding failures never fail ingest, and every embedding call counts against the budget and is audited (`ai.embed`, `ai.embed_query`).
 
 Cost guards: daily token budget in DynamoDB, body truncation, skip mail that looks like a list (`List-Id` + `List-Unsubscribe`, or `Precedence: bulk|list|junk`). Every model call, skip, and failure is an audit event. Prompts are not stored; the audit row keeps a SHA-256 of the prompt, the token counts, and the message id.
 
@@ -140,7 +147,11 @@ In production the API has no envelope private key. Draft reply and summarize use
 ## Interfaces
 
 - **HTTP API** under `/v1`. Two kinds of principal: API tokens with scopes `read`, `write`, `send`, `body`, `admin`, and human sessions from `POST /v1/session/login` (passphrase). Each route declares its scope or requires a human. API Gateway throttles the stage.
-- **MCP server** (`@lojo/mcp`) over the HTTP API with an API token. Each tool declares a scope. There is no send tool; agents call `submit_for_approval`, and every tool result is wrapped as untrusted content.
+- **MCP** (`@lojo/mcp`). Each tool declares the scopes it needs, and a client sees only the tools its token's scopes allow. There is no send, approve, or trash tool; agents call `submit_for_approval`, and every tool result is wrapped as untrusted content. Two transports, same tools:
+  - stdio (`npm run mcp`), for Cursor and other local clients. It asks `/v1/session` which scopes its token has and uses the intersection with `LOJO_API_SCOPES` (default `read`).
+  - Streamable HTTP at `POST /mcp` on the API, for remote clients such as Grok. Stateless JSON-RPC (initialize, ping, tools/list, tools/call, batches of up to 20). Bearer API or agent tokens only; web sessions and browser origins are refused. Tool calls re-enter the REST API in-process with the caller's token, so the same route checks apply.
+- **Agent tokens.** One per assistant, from the SSM parameter `/lojo-mail/agent-tokens`, limited to `read`, `write`, and `body`. The API logs every authenticated request as an `api_request` line naming the token (`agent:<label>`).
+- **Local models** (`@lojo/local`). `lojo-local` runs search, inbox, read, summarize, and draft against the API, and `ask` lets a local model pick tools itself through Ollama's or an OpenAI-compatible tool-calling API. `--local` keeps summarizing and drafting on Jon's machine. See [INTEGRATIONS.md](INTEGRATIONS.md).
 - **PWA** (`@lojo/web`): passphrase sign-in, inbox, triage, thread with AI summary and attachment download, compose with draft, rewrite, and one-click approve-and-send, a Drafts view with the approval queue, search, labels, settings. The API URL comes from `VITE_LOJO_API_URL` at build time, with an override in Settings. Phone layout stacks the list and the reader.
 - **Outbound** via SESv2 `SendEmail` (and raw MIME when OpenPGP armor must be preserved). DKIM is Easy DKIM on the domain identity. Custom MAIL FROM is `mail.<domain>`.
 
@@ -173,6 +184,7 @@ A read-only look at the account, not an apply:
 ## What is intentionally not here
 
 - No always-on EC2, ECS, or Cloud Run service.
+- No OpenSearch, vector database, or other search cluster. Semantic search is brute-force cosine over a DynamoDB index.
 - No WorkMail, no Google Workspace, no outbound port 25.
 - No CloudFront distribution by default. The PWA is a static build Jon can host on an existing HTTPS origin or open locally. Serving the unlock UI over plain HTTP in production would expose the private key.
 - No live DNS changes, no terraform apply, no purchased certificates or domains.

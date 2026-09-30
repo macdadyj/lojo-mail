@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "lojo-mail": {
+      "url": "https://API_ID.execute-api.us-east-1.amazonaws.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:LOJO_CURSOR_TOKEN}"
+      }
+    }
+  }
+}

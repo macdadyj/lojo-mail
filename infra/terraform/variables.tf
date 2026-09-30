@@ -143,8 +143,8 @@ variable "llm_provider" {
   default = "grok"
 
   validation {
-    condition     = contains(["grok", "bedrock", "ollama", "mock"], var.llm_provider)
-    error_message = "llm_provider must be grok, bedrock, ollama, or mock."
+    condition     = contains(["grok", "bedrock", "ollama", "openai", "gemini", "vertex", "mock"], var.llm_provider)
+    error_message = "llm_provider must be grok, bedrock, ollama, openai, gemini, vertex, or mock."
   }
 }
 
@@ -188,6 +188,70 @@ variable "ollama_model" {
 variable "ollama_embed_model" {
   type    = string
   default = "nomic-embed-text"
+}
+
+variable "embed_provider" {
+  type        = string
+  description = "Embeddings for semantic search. none keeps the next apply cost- and behavior-neutral; bedrock (Titan v2) is the cheapest in-account option. See docs/INTEGRATIONS.md."
+  default     = "none"
+
+  validation {
+    condition     = contains(["none", "bedrock", "openai", "gemini", "vertex", "ollama", "mock"], var.embed_provider)
+    error_message = "embed_provider must be none, bedrock, openai, gemini, vertex, ollama, or mock."
+  }
+}
+
+variable "embed_dimensions" {
+  type        = number
+  description = "Stored vector size. Titan v2 accepts 256, 512, or 1024."
+  default     = 256
+
+  validation {
+    condition     = var.embed_dimensions >= 0 && var.embed_dimensions <= 4096 && floor(var.embed_dimensions) == var.embed_dimensions
+    error_message = "embed_dimensions must be a whole number from 0 to 4096."
+  }
+}
+
+variable "bedrock_embed_model_id" {
+  type    = string
+  default = "amazon.titan-embed-text-v2:0"
+}
+
+variable "openai_base_url" {
+  type        = string
+  description = "Any OpenAI-compatible /v1 endpoint (OpenAI, OpenRouter, Groq, Together, a self-hosted vLLM)."
+  default     = "https://api.openai.com/v1"
+}
+
+variable "openai_model" {
+  type    = string
+  default = "gpt-4.1-nano"
+}
+
+variable "openai_embed_model" {
+  type    = string
+  default = "text-embedding-3-small"
+}
+
+variable "gemini_model" {
+  type    = string
+  default = "gemini-2.5-flash-lite"
+}
+
+variable "gemini_embed_model" {
+  type    = string
+  default = "gemini-embedding-001"
+}
+
+variable "vertex_project" {
+  type        = string
+  description = "Google Cloud project for Vertex AI with a service account key. Empty uses Vertex express mode with an API key."
+  default     = ""
+}
+
+variable "vertex_location" {
+  type    = string
+  default = "us-central1"
 }
 
 variable "alarm_actions" {

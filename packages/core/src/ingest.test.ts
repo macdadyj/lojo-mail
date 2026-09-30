@@ -121,12 +121,14 @@ test("Jon's sent copy joins the thread and keyword search needs the key for body
   assert.equal(found[0]?.locked, false);
 });
 
-test("semantic search uses stored embeddings", async () => {
+test("semantic search uses stored vectors", async () => {
   const w = await memoryWorld();
-  await w.ingest(fixture("personal.eml"));
+  const { message } = await w.ingest(fixture("personal.eml"));
+  assert.equal(message.vecModel, "mock/mock@8");
   const hits = await w.mailbox.search("lease renewal", "semantic");
   assert.equal(hits.length, 1);
   assert.equal(hits[0]?.subject, "Lease renewal by Friday");
+  assert.equal(JSON.stringify(hits).includes(message.vec ?? "missing"), false, "vectors never leave the server");
 });
 
 const TABLES: TableNames = {

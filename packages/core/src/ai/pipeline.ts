@@ -71,8 +71,6 @@ export interface AnalyzeOutput {
   inputTokens: number;
   outputTokens: number;
   promptSha256: string;
-  embedding: number[] | null;
-  embeddingTokens: number;
 }
 
 function truncate(text: string, max: number): string {
@@ -132,23 +130,13 @@ export async function analyzeMessage(llm: LlmClient, input: AnalyzeInput): Promi
   if (result.unsubscribe.url) sensitive.unsubscribeUrl = result.unsubscribe.url;
   if (result.unsubscribe.mailto) sensitive.unsubscribeMailto = result.unsubscribe.mailto;
 
-  let embedding: number[] | null = null;
-  let embeddingTokens = 0;
-  if (llm.embed) {
-    const embedded = await llm.embed(`${input.subject}\n${truncate(input.text, 2000)}`);
-    embedding = embedded.vector;
-    embeddingTokens = embedded.tokens;
-  }
-
   return {
     result,
     aiPublic,
     sensitive,
     inputTokens: completion.inputTokens,
-    outputTokens: completion.outputTokens + embeddingTokens,
+    outputTokens: completion.outputTokens,
     promptSha256: sha256(`${prompt.system}\n${prompt.user}`),
-    embedding,
-    embeddingTokens,
   };
 }
 

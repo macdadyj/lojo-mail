@@ -1,6 +1,7 @@
 import { analyzeMessage } from "./ai/pipeline.ts";
 import { ModelOutputError } from "./ai/schema.ts";
-import type { LlmClient } from "./ai/types.ts";
+import type { Embedder, LlmClient } from "./ai/types.ts";
+import { packVector, vectorTag } from "./ai/vectors.ts";
 import { aiContextKey, attachmentKey, bodyKey, type BlobStore } from "./blob/store.ts";
 import { attachmentContext, encodeEnvelope, messageBodyContext, sealBytes, sealJson } from "./crypto/envelope.ts";
 import { aiContextContext, draftContext, serverSeal, type KeyWrapper } from "./crypto/server-seal.ts";
@@ -31,6 +32,8 @@ export interface IngestDeps {
   keys?: KeyWrapper | null;
   publicJwk: EcPublicJwk;
   llm: LlmClient | null;
+  /** Stores a vector for semantic search. Independent of `llm`; failures never block delivery. */
+  embedder?: Embedder | null;
   config: LojoConfig;
   styleGuide: string;
   now?: Date;
@@ -204,6 +207,42 @@ function skipReasonFor(
   return null;
 }
 
+const EMBED_TEXT_CHARS = 2000;
+
+export function embeddingInput(subject: string, text: string): string {
+  return `${subject}\n${truncate(text, EMBED_TEXT_CHARS)}`;
+}
+
+/**
+ * Embeds one message for the `vectors` index. Counts against the daily token
+ * budget and is audited like any other model call. Returns null when the budget
+ * is spent or the provider fails; the message is stored either way.
+ */
+export async function embedForStorage(
+  deps: { store: MailStore; embedder: Embedder; config: LojoConfig },
+  at: Date,
+  messageId: string,
+  input: string,
+): Promise<{ vec: string; vecModel: string } | null> {
+  const { embedder, store } = deps;
+  const base = { day: utcDay(at), at: at.toISOString(), messageId, provider: embedder.name, model: embedder.model, action: "ai.embed" };
+  if ((await store.getBudget(utcDay(at))) >= deps.config.dailyTokenBudget) {
+    await store.putAudit({ ...base, id: newId("aud"), outcome: "budget_exceeded" });
+    return null;
+  }
+  try {
+    const embedded = await embedder.embed(input, "document");
+    const vec = packVector(embedded.vector, embedder.dimensions);
+    await store.addBudget(utcDay(at), embedded.tokens);
+    await store.putAudit({ ...base, id: newId("aud"), outcome: "ok", inputTokens: embedded.tokens, outputTokens: 0 });
+    return { vec, vecModel: vectorTag(embedder) };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    await store.putAudit({ ...base, id: newId("aud"), outcome: "error", detail: detail.slice(0, 200) });
+    return null;
+  }
+}
+
 export async function upsertCorrespondents(store: MailStore, addresses: Array<{ email: string; name?: string }>, self: string): Promise<void> {
   for (const address of addresses) {
     const email = address.email.toLowerCase();
@@ -238,7 +277,6 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
 
   let ai: AiPublic | null = null;
   let sensitive: SealedBody["ai"] = null;
-  let embedding: number[] | null = null;
   const auditBase = { day: utcDay(now), at: now.toISOString(), messageId: id, provider: deps.llm?.name, model: deps.llm?.model };
 
   const skip = skipReasonFor(parsed, origin, classes, bulk, deps);
@@ -267,7 +305,6 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
         });
         ai = analyzed.aiPublic;
         sensitive = analyzed.sensitive;
-        embedding = analyzed.embedding;
         await deps.store.addBudget(utcDay(now), analyzed.inputTokens + analyzed.outputTokens);
         await deps.store.putAudit({
           ...auditBase,
@@ -305,6 +342,13 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
     await deps.blobs.put(contextKey, new TextEncoder().encode(JSON.stringify(sealed)), "application/json");
   }
 
+  // PGP mail has no plaintext here; quarantined mail and DMARC reports are never worth a provider call.
+  const wantsVector = deps.embedder && !parsed.pgpEncrypted && !classes.quarantined && !classes.dmarcReport;
+  const vector =
+    wantsVector && deps.embedder
+      ? await embedForStorage({ store: deps.store, embedder: deps.embedder, config: deps.config }, now, id, embeddingInput(parsed.subject, parsed.text))
+      : null;
+
   const folder = folderFor(origin, classes, options.folder);
   const message: StoredMessage = {
     id,
@@ -327,9 +371,12 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
     pgpEncrypted: parsed.pgpEncrypted,
     bodyKey: bodyKey(id),
     ai,
-    embedding,
     createdAt: now.toISOString(),
   };
+  if (vector) {
+    message.vec = vector.vec;
+    message.vecModel = vector.vecModel;
+  }
   if (Object.keys(parsed.verdicts).length > 0) message.verdicts = parsed.verdicts;
   if (contextKey) message.aiContextKey = contextKey;
   if (parsed.replyTo) message.replyTo = parsed.replyTo;

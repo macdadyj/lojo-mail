@@ -1,7 +1,7 @@
-import { cosine } from "./ai/pipeline.ts";
 import { analyzeMessage } from "./ai/pipeline.ts";
 import { ModelOutputError } from "./ai/schema.ts";
-import type { LlmClient } from "./ai/types.ts";
+import type { Embedder, LlmClient } from "./ai/types.ts";
+import { packVector, rankVectors, unpackVector, vectorTag } from "./ai/vectors.ts";
 import {
   APPROVAL_TTL_MS,
   approvalContentHash,
@@ -19,7 +19,7 @@ import {
 } from "./crypto/envelope.ts";
 import { aiContextContext, draftContext, serverOpen, serverSeal, type KeyWrapper } from "./crypto/server-seal.ts";
 import { MailError } from "./errors.ts";
-import { ingestRaw, refreshThread } from "./ingest.ts";
+import { embedForStorage, embeddingInput, ingestRaw, refreshThread } from "./ingest.ts";
 import { newId, sha256, utcDay } from "./ids.ts";
 import { buildRawMessage, cleanEmail, cleanHeaderValue } from "./mime/compose.ts";
 import { encryptText, type PgpSigningKey } from "./openpgp/mail.ts";
@@ -56,6 +56,8 @@ export interface MailboxDeps {
   /** Local dev only. The deployed API never holds the envelope private key. */
   privateJwk?: EcPrivateJwk;
   llm?: LlmClient | null;
+  /** Embeds search queries and backfills vectors. Must be the embedder the pipeline stores with. */
+  embedder?: Embedder | null;
   sender?: MailSender | null;
   styleGuide: string;
   /** Jon's own OpenPGP public key, so his sent copy of encrypted mail is readable to him elsewhere. */
@@ -220,7 +222,7 @@ export class Mailbox {
 
   private async spend(
     action: string,
-    llm: LlmClient,
+    llm: Pick<LlmClient, "name" | "model">,
     messageId: string,
     tokens: { inputTokens: number; outputTokens: number },
     promptSha256?: string,
@@ -346,21 +348,8 @@ export class Mailbox {
   }
 
   async search(query: string, mode: "keyword" | "semantic" = "keyword", opts: ViewOptions = {}): Promise<MessageView[]> {
+    if (mode === "semantic") return this.semanticSearch(query, opts);
     const messages = await this.deps.store.listMessages({ limit: 1000 });
-    if (mode === "semantic") {
-      const llm = this.deps.llm;
-      if (!llm?.embed) throw new MailError("This provider has no embeddings", "invalid");
-      await this.requireBudget();
-      const embed = llm.embed.bind(llm);
-      const embedded = await this.callModel("ai.embed_query", () => embed(query));
-      await this.spend("ai.embed_query", llm, "", { inputTokens: embedded.tokens, outputTokens: 0 });
-      const ranked = messages
-        .filter((message) => message.embedding && message.embedding.length > 0)
-        .map((message) => ({ message, score: cosine(embedded.vector, message.embedding ?? []) }))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 20);
-      return Promise.all(ranked.map((item) => this.present(item.message, opts)));
-    }
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     const hits: StoredMessage[] = [];
     for (const message of messages) {
@@ -380,6 +369,65 @@ export class Mailbox {
       if (terms.every((term) => haystack.includes(term))) hits.push(message);
     }
     return Promise.all(hits.slice(0, 50).map((message) => this.present(message, opts)));
+  }
+
+  private requireEmbedder(): Embedder {
+    if (!this.deps.embedder) throw new MailError("Semantic search is off: no embedding provider is configured", "invalid");
+    return this.deps.embedder;
+  }
+
+  /** Brute-force cosine over every vector from the current embedder. A personal mailbox fits in one Lambda's memory. */
+  private async semanticSearch(query: string, opts: ViewOptions): Promise<MessageView[]> {
+    const embedder = this.requireEmbedder();
+    await this.requireBudget();
+    const embedded = await this.callModel("ai.embed_query", () => embedder.embed(query, "query"));
+    await this.spend("ai.embed_query", embedder, "", { inputTokens: embedded.tokens, outputTokens: 0 });
+    const rows = await this.deps.store.listVectors(vectorTag(embedder));
+    const ranked = rankVectors(unpackVector(packVector(embedded.vector, embedder.dimensions)), rows, 20);
+    const views: MessageView[] = [];
+    for (const hit of ranked) {
+      const message = await this.deps.store.getMessage(hit.id);
+      if (message && message.folder !== "trash") views.push(await this.present(message, opts));
+    }
+    return views;
+  }
+
+  /**
+   * Embeds recent messages that have no vector from the current embedder, after a
+   * provider change or for mail that arrived while embeddings were off. Uses the
+   * server-readable text only (AI-context copy, or the body when unlocked in dev).
+   */
+  async backfillVectors(limit = 25): Promise<{ embedded: number; unreadable: number; failed: number; remaining: number }> {
+    const embedder = this.requireEmbedder();
+    const tag = vectorTag(embedder);
+    const pending = (await this.deps.store.listMessages({ limit: 1000 })).filter(
+      (message) => message.vecModel !== tag && !message.pgpEncrypted && !message.labels.includes("quarantined") && message.folder !== "trash",
+    );
+    let embedded = 0;
+    let unreadable = 0;
+    let failed = 0;
+    let attempted = 0;
+    let visited = 0;
+    // Unreadable messages stay pending forever (bulk mail, expired AI context), so
+    // they must not use up the limit or they would block everything behind them.
+    for (const message of pending) {
+      if (attempted >= limit) break;
+      visited += 1;
+      const text = await this.serverText(message);
+      if (text === null) {
+        unreadable += 1;
+        continue;
+      }
+      attempted += 1;
+      const vector = await embedForStorage({ store: this.deps.store, embedder, config: this.deps.config }, this.now(), message.id, embeddingInput(message.subject, text));
+      if (!vector) {
+        failed += 1;
+        continue;
+      }
+      await this.deps.store.updateMessage(message.id, vector);
+      embedded += 1;
+    }
+    return { embedded, unreadable, failed, remaining: pending.length - visited };
   }
 
   /** Plaintext for server-side AI: the unlocked body in dev, else the AI-context copy. */

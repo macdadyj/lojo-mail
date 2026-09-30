@@ -1,7 +1,20 @@
 import { KMSClient } from "@aws-sdk/client-kms";
 import { S3Client } from "@aws-sdk/client-s3";
 import { GetParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
-import { createLlmClient, DynamoMailStore, ingestRaw, loadConfig, type EcPublicJwk, type IngestDeps, type LlmClient } from "@lojo/core";
+import {
+  createEmbedder,
+  createLlmClient,
+  DynamoMailStore,
+  ingestRaw,
+  loadConfig,
+  loadProviderSecrets,
+  type EcPublicJwk,
+  type Embedder,
+  type IngestDeps,
+  type LlmClient,
+  type LojoConfig,
+  type ProviderSecrets,
+} from "@lojo/core";
 import styleGuide from "../../../config/style-guide.md";
 import { documentClient, dynamoLike, tableNamesFromEnv } from "./dynamo-doc.ts";
 import { KmsKeyWrapper } from "./kms.ts";
@@ -32,24 +45,21 @@ async function parameter(name: string, decrypt: boolean): Promise<string | undef
   }
 }
 
-async function llmOrNull(): Promise<LlmClient | null> {
-  const config = loadConfig();
-  if (config.llmProvider === "mock") return createLlmClient(config);
-  if (config.llmProvider === "ollama" || config.llmProvider === "bedrock") {
-    try {
-      return createLlmClient(config);
-    } catch (error) {
-      console.error(error instanceof Error ? error.message : error);
-      return null;
-    }
-  }
-  const keyParam = process.env.LOJO_GROK_KEY_PARAM;
-  const key = process.env.LOJO_GROK_API_KEY ?? (keyParam ? await parameter(keyParam, true) : undefined);
-  if (!key) {
-    console.error("Grok selected but no API key is available; storing mail without AI");
+/** A provider that cannot start (missing key, bad config) means mail is stored without it, never dropped. */
+function orNull<T>(what: string, build: () => T | null): T | null {
+  try {
+    return build();
+  } catch (error) {
+    console.error(`${what} disabled: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
-  return createLlmClient(config, { grokApiKey: key });
+}
+
+function providers(config: LojoConfig, secrets: ProviderSecrets): { llm: LlmClient | null; embedder: Embedder | null } {
+  return {
+    llm: orNull("AI analysis", () => createLlmClient(config, secrets)),
+    embedder: orNull("Embeddings", () => createEmbedder(config, secrets)),
+  };
 }
 
 type Deps = Omit<IngestDeps, "blobs"> & { bucket?: string };
@@ -58,12 +68,14 @@ const deps = ttlCache<Deps>(5 * 60 * 1000, async () => {
   const raw = await parameter(process.env.LOJO_PUBLIC_KEY_PARAM ?? "/lojo-mail/envelope-public-jwk", false);
   if (!raw) throw new Error("Envelope public key parameter is missing");
   const keyId = process.env.LOJO_KMS_KEY_ID;
+  const config = loadConfig();
+  const secrets = await loadProviderSecrets(config, process.env, (name) => parameter(name, true));
   return {
     store: new DynamoMailStore(dynamoLike(documentClient()), tableNamesFromEnv()),
     keys: keyId ? new KmsKeyWrapper(kms, keyId) : null,
     publicJwk: JSON.parse(raw) as EcPublicJwk,
-    llm: await llmOrNull(),
-    config: loadConfig(),
+    ...providers(config, secrets),
+    config,
     styleGuide: process.env.LOJO_STYLE_GUIDE ?? styleGuide,
     bucket: process.env.LOJO_BUCKET,
   };

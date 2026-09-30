@@ -32,10 +32,13 @@ Jon's machines (the browser tab that holds the envelope private key, the passwor
 | API Lambda role (or anyone who can change its code) | Drafts and the AI-context copy (it holds `kms:Decrypt` for those two encryption contexts). Can send as Jon. Cannot open sealed bodies or attachments. |
 | LLM provider | The truncated plaintext of messages that were actually submitted, plus the style guide. Bulk, quarantined, PGP, and over-budget mail is not submitted. |
 | Ollama on the tailnet | Same as the LLM provider, but the host is Jon's. |
+| Embedding provider (`embed_provider`) | The subject plus the first 2,000 characters of every embedded message, bulk mail included (OpenPGP, quarantined, and DMARC-report mail is never embedded), and every semantic search query. Off (`none`) by default in Terraform. |
+| An assistant connected through MCP or `lojo-local`, and the company running its model | Whatever that client's token can read. With `body`, that includes message text, which then goes to the assistant's model provider (xAI for Grok, the provider Cursor is configured with, nobody for local Ollama). |
 | Stolen API token, `read` | The index and draft metadata. No bodies, no draft text, no AI-context text, no summaries or action items. This holds even on a local server that has the private key loaded: views include opened text only for `body` or a human session. |
 | Stolen API token, `write` | Also create drafts to known correspondents, label, archive, and queue drafts for approval. Still no message text: thread summaries and action items need `body` as well. Cannot trash, cannot send, cannot mint approval. |
 | Stolen API token, `send` | Nothing more on its own. Sending also needs a one-time approval token that only a human session can mint. |
-| Stolen API token, `body` | The AI-context text of recent mail, draft text, action items, and (with `write`) model summaries of threads. Treat `body` like a read key to recent mail. |
+| Stolen API token, `body` | The AI-context text of recent mail, draft text, action items, semantic search, and (with `write`) model summaries of threads. Treat `body` like a read key to recent mail. |
+| Stolen agent token | The same as an API token with that token's scopes, which can never include `send` or `admin`. Revoke it alone by removing its entry from `/lojo-mail/agent-tokens`. |
 | Stolen human passphrase | Everything the web app can do, including approving sends and full export. It still cannot open sealed bodies without the envelope private key. Rotate it with `npm run passphrase-hash`. |
 | Stolen session signing secret | Can mint human sessions. Rotate the SSM parameter; every session dies. |
 | Stolen envelope private key | Can open every sealed body and attachment, forever. There is no forward secrecy against a later key compromise. |
@@ -118,6 +121,7 @@ A `send` scope is not approval. The review showed that an email could instruct a
 Every request carries a bearer credential. The API resolves it to a principal with `kind: "token" | "human"`.
 
 - **API tokens** (`kind: "token"`) come from SSM (`/lojo-mail/api-token`, `/lojo-mail/api-token-send`) or dev env vars. They have scopes. The MCP server holds one of these. An API token cannot become a human session.
+- **Agent tokens** are API tokens for one assistant each (Cursor, Grok, a local model), from the SecureString `/lojo-mail/agent-tokens` (a JSON array of `{label, token, scopes}`; `LOJO_AGENT_TOKENS` in dev). If an entry asks for `send` or `admin`, has a token shorter than 32 characters in production, or reuses a label, the API loads no agent tokens at all and logs `agent_tokens_invalid` (fail closed for agents; the web app and the main API token keep working). Changes take effect within the 5-minute configuration reload. Each resolves to the principal `agent:<label>`, and every authenticated request is logged as an `api_request` line with the principal, method, path, and status (never the token, a body, or a query string). Tests: `packages/api/src/auth.test.ts`, `packages/mcp/src/remote.test.ts`.
 - **Human sessions** (`kind: "human"`) come only from `POST /v1/session/login { passphrase }`.
   - The passphrase is checked against an scrypt hash in SSM `/lojo-mail/human-passphrase-hash` (created with `npm run passphrase-hash`, minimum 12 characters) using a constant-time comparison.
   - Failed sign-ins are throttled **per source**, never globally. There is no lockout that anyone else can trigger for Jon.
@@ -164,7 +168,7 @@ Every email is untrusted text. It reaches models in two places: the processor's 
 
 ### What an injected model can and cannot do
 
-| Capability | Inbound analysis model | MCP agent (`read`, `write`, `send`) |
+| Capability | Inbound analysis model | MCP agent or `lojo-local` model (`read`, `write`, `send`) |
 | --- | --- | --- |
 | Send mail | No. The pipeline has no sender. | No. No MCP tool sends. `approve-and-send` needs a human-minted token. |
 | Choose draft recipients | No. Recipients come from headers. | Only known correspondents (see below). |
@@ -175,7 +179,8 @@ Every email is untrusted text. It reaches models in two places: the processor's 
 
 ### Controls
 
-- **No send tool.** The MCP server registers no send tool. `submit_for_approval` only changes status.
+- **No send tool.** Neither the stdio MCP server, the remote `/mcp` endpoint, nor the `lojo-local` tool-calling adapter has a send, approve, or trash tool. `submit_for_approval` only changes status. All three share one catalog (`packages/mcp/src/catalog.ts`), offer a client only the tools its effective scopes allow, and execute every call as a REST request with the caller's token, so the route checks are the enforcement and the catalog is only a convenience.
+- **Remote MCP (`POST /mcp`).** Bearer API or agent tokens only. A web session (`hs_…`) gets 403, so a browser tab cannot be turned into an agent. A missing or unknown token gets 401 with a `WWW-Authenticate: Bearer` challenge. A request with an `Origin` header that is not in the API's CORS list gets 403 (the Lambda has no list, so every browser origin is refused), which blocks DNS-rebinding and cross-site calls against a local server. Stateless: no session id, nothing kept between requests. Batches are capped at 20 calls. xAI ignores `require_approval` in its remote-MCP tool; that does not matter, because approval is enforced here, not by the client.
 - **Known correspondents.** A draft created by an agent (API token → origin `agent`; `Mailbox.createDraft` defaults to `agent`) may only address known correspondents: contacts (upserted for recipients of mail Jon sent, of imported mail from Jon, and for vCard/CSV imports), or participants of the thread being replied to. An email cannot introduce a new recipient by asking.
 - **Delimited tool output.** Every MCP tool result is wrapped:
 
@@ -215,15 +220,16 @@ Tests: `packages/core/src/security.test.ts`, `packages/api/src/security.test.ts`
 
 ### IAM
 
-- Processor: `s3:GetObject` and `s3:DeleteObject` on `raw/*`, `s3:ListBucket` limited to the `raw/` prefix (for the sweep), `s3:PutObject` on `objects/*` and `ai-context/*`, KMS `GenerateDataKey` for the `draft` and `ai-context` contexts, KMS through S3/DynamoDB only for storage, DynamoDB `GetItem`/`PutItem`/`UpdateItem`/`Query` on the tables and their indexes, `sqs:SendMessage` on its DLQ, `ssm:GetParameter` on `envelope-public-jwk` and `grok-api-key` under `/lojo-mail/`, logs, and `bedrock:InvokeModel` only when `llm_provider = bedrock`. No SES send.
-- API: the same DynamoDB actions, `s3:GetObject` on `objects/*` and `ai-context/*`, `s3:PutObject` on `objects/*` (the sealed sent copy), KMS as described under key custody, `ses:SendEmail`/`ses:SendRawEmail` constrained by `ses:FromAddress`, `ssm:GetParameter` on the named `/lojo-mail/` parameters it reads (tokens, session secret, passphrase hash, envelope public key, PGP keys, Grok key), logs, Bedrock only when selected. No access to `raw/*`.
+- Processor: `s3:GetObject` and `s3:DeleteObject` on `raw/*`, `s3:ListBucket` limited to the `raw/` prefix (for the sweep), `s3:PutObject` on `objects/*` and `ai-context/*`, KMS `GenerateDataKey` for the `draft` and `ai-context` contexts, KMS through S3/DynamoDB only for storage, DynamoDB `GetItem`/`PutItem`/`UpdateItem`/`Query` on the tables and their indexes, `sqs:SendMessage` on its DLQ, `ssm:GetParameter` on `envelope-public-jwk` and the provider keys (`grok-api-key`, `openai-api-key`, `gemini-api-key`, `vertex-sa-json`) under `/lojo-mail/`, logs, and `bedrock:InvokeModel` only on the selected chat model (when `llm_provider = bedrock`) and the Titan embedding model (when `embed_provider = bedrock`). No SES send.
+- API: the same DynamoDB actions, `s3:GetObject` on `objects/*` and `ai-context/*`, `s3:PutObject` on `objects/*` (the sealed sent copy), KMS as described under key custody, `ses:SendEmail`/`ses:SendRawEmail` constrained by `ses:FromAddress`, `ssm:GetParameter` on the named `/lojo-mail/` parameters it reads (tokens, agent tokens, session secret, passphrase hash, envelope public key, PGP keys, provider keys), logs, Bedrock only for the selected models. Only the API can read `agent-tokens`. No access to `raw/*`.
 - No `dynamodb:Scan` and no `dynamodb:DeleteItem` anywhere. Every read path is `GetItem` or `Query` on a declared index. A unit test fails if `ScanCommand` appears in `packages/*/src`.
 - No `*` resource on data APIs. No IAM write. No SES identity administration from the runtime roles.
 - **Receipt rule set activation defaults ON** (`manage_active_rule_set = true`). A read-only audit found no active receipt rule set in any region, so activating this one is what starts delivery. A region has one active set, and turning this flag off later deactivates receiving for every identity in the region. Re-check with `aws ses describe-active-receipt-rule-set` before apply.
 
 ### AI
 
-- Provider keys come from the environment or SSM. They are not in the repo and not in Terraform state.
+- Provider keys come from the environment or SSM. They are not in the repo and not in Terraform state. Only the selected providers' keys are loaded. Provider error messages never include the response body, so a provider echoing the prompt cannot leak mail into logs. Every provider call has a timeout (30 s; 10 s for Ollama embeddings).
+- Vertex service-account keys are exchanged only at `https://oauth2.googleapis.com/token`, whatever `token_uri` the key file names, so a tampered key file cannot send the signed assertion elsewhere.
 - Truncation (`max_body_chars`, 8,000 by default), bulk skip, and a daily token budget (Terraform `daily_token_budget`, 100,000 by default).
 - **The budget is a soft cap, not a hard limit.** It can overshoot, and here is how:
   - Every model call reads the day's total first and refuses if it is already at or over the budget. The call's cost is known only after the provider answers. Then an atomic DynamoDB `ADD` records it. There is no reservation up front.
@@ -236,9 +242,9 @@ Tests: `packages/core/src/security.test.ts`, `packages/api/src/security.test.ts`
 
 ### Application auth
 
-- Bearer API tokens with scopes `read`, `write`, `send`, `body`, `admin`. MCP tools check the same scopes.
+- Bearer API tokens with scopes `read`, `write`, `send`, `body`, `admin`. MCP tools check the same scopes. Agent tokens are limited to `read`, `write`, and `body`.
 - Human-only routes: login-derived sessions for approval minting, trash, full export.
-- `POST /v1/search` needs `read`, and only matches body text for callers with `body`. `POST /v1/threads/:id/summarize` needs `write` (it spends tokens) **and** `body` (a summary is message text). `GET /v1/action-items` needs `read` and `body`. The MCP tools `summarize_thread` and `get_action_items` declare the same pairs. Test: `packages/api/src/security.test.ts` → `[P1] API: read and write tokens get no message text`, and `packages/mcp/src/tools.test.ts`.
+- `POST /v1/search` needs `read`, and only matches body text for callers with `body`. `POST /v1/threads/:id/summarize` needs `write` (it spends tokens) **and** `body` (a summary is message text). `GET /v1/action-items` needs `read` and `body`. Semantic search (`mode: "semantic"`) needs `body` too: the vectors are derived from body text, so ranking by them would let a `read` token test guesses about message contents; a refused query spends nothing. `POST /v1/vectors/backfill` needs `write` and `body`. The MCP tools `summarize_thread` and `get_action_items` declare the same pairs. Test: `packages/api/src/security.test.ts` → `[P1] API: read and write tokens get no message text`, and `packages/mcp/src/tools.test.ts`.
 - Production boot refuses the well-known dev token values, in the Lambda and in `npm run dev` when `NODE_ENV=production`. The dev server binds `127.0.0.1` unless `LOJO_HOST` says otherwise.
 - The web app has no built-in token. It signs in with the passphrase.
 - CORS origins are an explicit list.
@@ -265,7 +271,9 @@ Tests: `packages/core/src/security.test.ts`, `packages/api/src/security.test.ts`
 
 - A subject line is often the whole secret. The index stores subjects.
 - Snippets are stored in the clear by default (`snippetInClear`). Set it false to keep snippets out of DynamoDB.
-- Embeddings are stored in the clear when semantic search is on.
+- Embeddings are stored in the clear (int8, 256 dimensions by default, inside the KMS-encrypted table) when semantic search is on. They are derived from the subject and the first 2,000 characters of the body, bulk mail included, and embeddings can be partly inverted back to text, so treat the `vectors` index like the AI-context copy but without an expiry: someone with DynamoDB and KMS read gets an approximate, lossy view of every embedded message. `embed_provider = "none"` (the Terraform default) turns this off, and existing vectors can be removed by clearing `vec` and `vecModel` on the items.
+- The embedding provider sees the embedded text and every semantic query. Pick `ollama` (local, `npm run dev` and the importer only) or `bedrock` (stays in the AWS account) if that matters more than price.
+- An assistant with the `body` scope forwards whatever it reads to its own model provider. Give `body` only to clients whose provider you would trust with the mail itself; the local Ollama path keeps text on Jon's machines.
 - The processor sees plaintext. Review changes to `packages/pipeline` and `packages/core/src/ingest.ts` as if they were changes to an MTA.
 - The API role can read drafts and the AI-context copy (see key custody). `ai_context_days = 0` narrows that to drafts.
 - A human session is as strong as the passphrase. Use a long one from the password manager.

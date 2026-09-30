@@ -75,17 +75,34 @@ function requireBody(ctx: ToolContext, wanted: boolean | undefined): boolean {
   return Boolean(wanted);
 }
 
+/** MCP tool annotations. Nothing here deletes, sends, or reaches outside the mailbox. */
+export interface ToolAnnotations {
+  readOnlyHint: boolean;
+  destructiveHint: false;
+  idempotentHint: boolean;
+  openWorldHint: false;
+}
+
+const READ_ONLY: ToolAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+/** Reading a thread clears its unread flags. */
+const MARKS_READ: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+/** Spends model tokens and writes the audit log; the mailbox itself is unchanged. */
+const SPENDS: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+const CHANGES: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+
 export const tools = [
   {
     name: "search_mail",
+    annotations: READ_ONLY,
     scopes: ["read"],
-    description: "Search mail by keyword, or semantically when embeddings exist. includeContext searches AI-context text and needs the body scope.",
+    description: "Search mail by keyword, or semantically when embeddings exist. Semantic mode and includeContext both need the body scope.",
     schema: searchSchema,
     run: (args: z.infer<typeof searchSchema>, ctx: ToolContext) =>
       ctx.mailbox.search(args.query, args.mode ?? "keyword", requireBody(ctx, args.includeContext)),
   },
   {
     name: "read_thread",
+    annotations: MARKS_READ,
     scopes: ["read"],
     description: "Read one thread's metadata. includeContext adds server-readable AI-context text and needs the body scope.",
     schema: readThreadSchema,
@@ -93,6 +110,7 @@ export const tools = [
   },
   {
     name: "list_inbox",
+    annotations: READ_ONLY,
     scopes: ["read"],
     description: "List the inbox. Pass triage true for the priority view.",
     schema: inboxSchema,
@@ -101,6 +119,7 @@ export const tools = [
   },
   {
     name: "summarize_thread",
+    annotations: SPENDS,
     scopes: ["write", "body"],
     description: "Summarize a thread with the configured model. The summary is message text, so it needs the body scope. Spends tokens. Does not send mail.",
     schema: threadSchema,
@@ -108,6 +127,7 @@ export const tools = [
   },
   {
     name: "draft_reply",
+    annotations: CHANGES,
     scopes: ["write"],
     description: "Create or reuse a suggested reply draft. Does not send it.",
     schema: messageSchema,
@@ -115,6 +135,7 @@ export const tools = [
   },
   {
     name: "create_draft",
+    annotations: CHANGES,
     scopes: ["write"],
     description: "Create a draft to existing contacts or to participants of the thread being answered. Does not send it.",
     schema: draftSchema,
@@ -122,6 +143,7 @@ export const tools = [
   },
   {
     name: "submit_for_approval",
+    annotations: CHANGES,
     scopes: ["write"],
     description: "Put a draft in Jon's approval queue in the web app. Only Jon can approve and send it.",
     schema: draftIdSchema,
@@ -129,6 +151,7 @@ export const tools = [
   },
   {
     name: "label_message",
+    annotations: CHANGES,
     scopes: ["write"],
     description: "Replace labels on a message.",
     schema: labelSchema,
@@ -136,6 +159,7 @@ export const tools = [
   },
   {
     name: "archive_message",
+    annotations: CHANGES,
     scopes: ["write"],
     description: "Move a message to the archive.",
     schema: messageSchema,
@@ -143,6 +167,7 @@ export const tools = [
   },
   {
     name: "move_message",
+    annotations: CHANGES,
     scopes: ["write"],
     description: "Move a message to inbox, archive, or spam. Trash is only available to Jon in the web app.",
     schema: moveSchema,
@@ -150,6 +175,7 @@ export const tools = [
   },
   {
     name: "get_action_items",
+    annotations: READ_ONLY,
     scopes: ["read", "body"],
     description: "List action items extracted from unlocked inbox mail. Action items are message text, so this needs the body scope.",
     schema: z.object({}),
@@ -157,6 +183,7 @@ export const tools = [
   },
   {
     name: "export_mailbox",
+    annotations: READ_ONLY,
     scopes: ["read"],
     description: "Export a metadata index of the mailbox (no bodies). A full export is only available to Jon in the web app.",
     schema: z.object({}),

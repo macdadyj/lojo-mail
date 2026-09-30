@@ -50,9 +50,18 @@ locals {
   # A cross-region inference profile (us.…) routes to the foundation model in
   # several regions, so both ARNs are needed.
   bedrock_foundation_model = replace(var.bedrock_model_id, "/^(us|eu|apac|global)\\./", "")
-  bedrock_resources = [
+  bedrock_chat_resources = var.llm_provider == "bedrock" ? [
     "arn:aws:bedrock:*::foundation-model/${local.bedrock_foundation_model}",
     "arn:aws:bedrock:${var.aws_region}:${local.account_id}:inference-profile/${var.bedrock_model_id}",
+  ] : []
+  bedrock_embed_resources = var.embed_provider == "bedrock" ? [
+    "arn:aws:bedrock:${var.aws_region}::foundation-model/${var.bedrock_embed_model_id}",
+  ] : []
+  bedrock_resources = concat(local.bedrock_chat_resources, local.bedrock_embed_resources)
+
+  # Provider keys both Lambdas may read. Only the selected providers' are fetched at runtime.
+  provider_key_params = [
+    for name in ["grok-api-key", "openai-api-key", "gemini-api-key", "vertex-sa-json"] : "${local.ssm_prefix}/${name}"
   ]
 }
 
@@ -115,12 +124,9 @@ data "aws_iam_policy_document" "processor" {
   }
 
   statement {
-    sid     = "ReadConfig"
-    actions = ["ssm:GetParameter"]
-    resources = [
-      "${local.ssm_prefix}/envelope-public-jwk",
-      "${local.ssm_prefix}/grok-api-key",
-    ]
+    sid       = "ReadConfig"
+    actions   = ["ssm:GetParameter"]
+    resources = concat(["${local.ssm_prefix}/envelope-public-jwk"], local.provider_key_params)
   }
 
   statement {
@@ -130,7 +136,7 @@ data "aws_iam_policy_document" "processor" {
   }
 
   dynamic "statement" {
-    for_each = var.llm_provider == "bedrock" ? [1] : []
+    for_each = length(local.bedrock_resources) > 0 ? [1] : []
 
     content {
       sid       = "Bedrock"
@@ -211,19 +217,19 @@ data "aws_iam_policy_document" "api" {
   statement {
     sid     = "ReadConfig"
     actions = ["ssm:GetParameter"]
-    resources = [
+    resources = concat([
       for name in [
         "envelope-public-jwk",
         "api-token",
         "api-token-send",
+        "agent-tokens",
         "session-secret",
         "human-passphrase-hash",
         "pgp-public-key",
         "pgp-signing-key",
         "pgp-signing-passphrase",
-        "grok-api-key",
       ] : "${local.ssm_prefix}/${name}"
-    ]
+    ], local.provider_key_params)
   }
 
   statement {
@@ -242,7 +248,7 @@ data "aws_iam_policy_document" "api" {
   }
 
   dynamic "statement" {
-    for_each = var.llm_provider == "bedrock" ? [1] : []
+    for_each = length(local.bedrock_resources) > 0 ? [1] : []
 
     content {
       sid       = "Bedrock"

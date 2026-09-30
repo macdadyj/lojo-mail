@@ -6,7 +6,9 @@ export type Category = "personal" | "transactional" | "newsletter" | "notificati
 
 export type Priority = "now" | "today" | "later" | "noise";
 
-export type LlmProviderName = "grok" | "bedrock" | "ollama" | "mock";
+export type LlmProviderName = "grok" | "bedrock" | "ollama" | "openai" | "gemini" | "vertex" | "mock";
+
+export type EmbedProviderName = "ollama" | "bedrock" | "openai" | "gemini" | "vertex" | "mock" | "none";
 
 /** Where a message came from. Decides its folder; headers never do. */
 export type MessageOrigin = "inbound" | "sent" | "import";
@@ -131,7 +133,10 @@ export interface StoredMessage {
   bodyKey: string;
   aiContextKey?: string;
   ai: AiPublic | null;
-  embedding: number[] | null;
+  /** Packed int8 embedding (see ai/vectors.ts). Derived from plaintext; never returned by the API. */
+  vec?: string;
+  /** Which embedder produced `vec`. The sparse `vectors` index is keyed on it. */
+  vecModel?: string;
   createdAt: string;
 }
 
@@ -210,7 +215,8 @@ export interface MessagePatch {
   unread?: boolean;
   labels?: string[];
   ai?: AiPublic | null;
-  embedding?: number[] | null;
+  vec?: string;
+  vecModel?: string;
   threadId?: string;
 }
 
@@ -234,6 +240,17 @@ export interface LojoConfig {
   ollamaBaseUrl: string;
   ollamaModel: string;
   ollamaEmbedModel: string;
+  openaiBaseUrl: string;
+  openaiModel: string;
+  openaiEmbedModel: string;
+  geminiModel: string;
+  geminiEmbedModel: string;
+  vertexProject: string;
+  vertexLocation: string;
+  bedrockEmbedModelId: string;
+  embedProvider: EmbedProviderName;
+  /** Stored vector size. 0 keeps each model's native size. */
+  embedDimensions: number;
 }
 
 export interface MessageView {

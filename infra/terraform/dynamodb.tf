@@ -33,6 +33,11 @@ resource "aws_dynamodb_table" "messages" {
     type = "S"
   }
 
+  attribute {
+    name = "vecModel"
+    type = "S"
+  }
+
   global_secondary_index {
     name            = "thread"
     hash_key        = "threadId"
@@ -52,6 +57,17 @@ resource "aws_dynamodb_table" "messages" {
     hash_key        = "rfcMessageId"
     range_key       = "date"
     projection_type = "ALL"
+  }
+
+  # Sparse: only messages with a stored embedding. Semantic search reads every
+  # vector for the current embedder in one Query and ranks them in the Lambda,
+  # so there is no always-on vector database to pay for.
+  global_secondary_index {
+    name               = "vectors"
+    hash_key           = "vecModel"
+    range_key          = "date"
+    projection_type    = "INCLUDE"
+    non_key_attributes = ["vec"]
   }
 
   point_in_time_recovery {

@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
+import { MockEmbedder } from "./ai/embedders.ts";
 import { MockLlm } from "./ai/providers.ts";
+import type { Embedder } from "./ai/types.ts";
 import { MemoryBlobStore } from "./blob/store.ts";
 import { loadConfig } from "./config.ts";
 import { generateIdentity } from "./crypto/envelope.ts";
@@ -26,6 +28,8 @@ export interface WorldOptions {
   /** Defaults to true: the dev shape, where the mailbox holds the envelope private key. */
   unlocked?: boolean;
   llm?: MockLlm | null;
+  /** Defaults to the mock embedder. Pass null to turn semantic search off. */
+  embedder?: Embedder | null;
   config?: Partial<LojoConfig>;
   now?: () => Date;
   deps?: Pick<MailboxDeps, "ownPgpPublicKey" | "pgpSigningKey">;
@@ -42,6 +46,7 @@ export async function memoryWorld(opts: WorldOptions = {}) {
     ...opts.config,
   };
   const llm = opts.llm === undefined ? new MockLlm() : opts.llm;
+  const embedder = opts.embedder === undefined ? new MockEmbedder() : opts.embedder;
   const sender = new MemorySender();
   const mailbox = new Mailbox({
     store,
@@ -51,6 +56,7 @@ export async function memoryWorld(opts: WorldOptions = {}) {
     publicJwk,
     ...(opts.unlocked === false ? {} : { privateJwk }),
     llm,
+    embedder,
     sender,
     styleGuide: TEST_STYLE,
     ...(opts.now ? { now: opts.now } : {}),
@@ -59,10 +65,10 @@ export async function memoryWorld(opts: WorldOptions = {}) {
   const ingest = (raw: Buffer | string, options: IngestOptions = {}, model: MockLlm | null = llm): Promise<IngestResult> =>
     ingestRaw(
       raw,
-      { store, blobs, keys, publicJwk, llm: model, config, styleGuide: TEST_STYLE, ...(opts.now ? { now: opts.now() } : {}) },
+      { store, blobs, keys, publicJwk, llm: model, embedder, config, styleGuide: TEST_STYLE, ...(opts.now ? { now: opts.now() } : {}) },
       options,
     );
-  return { publicJwk, privateJwk, store, blobs, keys, config, llm, sender, mailbox, ingest };
+  return { publicJwk, privateJwk, store, blobs, keys, config, llm, embedder, sender, mailbox, ingest };
 }
 
 export type MemoryWorld = Awaited<ReturnType<typeof memoryWorld>>;

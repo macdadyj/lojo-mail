@@ -3,11 +3,13 @@ import { randomBytes } from "node:crypto";
 import { serve } from "@hono/node-server";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import {
+  createEmbedder,
   createLlmClient,
   FsBlobStore,
   generateIdentity,
   LocalKeyWrapper,
   loadConfig,
+  loadProviderSecrets,
   Mailbox,
   MemoryBlobStore,
   MemorySender,
@@ -25,10 +27,9 @@ import { DEV_PASSPHRASE, LoginThrottle, devSessions } from "./session.ts";
 const production = process.env.NODE_ENV === "production";
 const host = process.env.LOJO_HOST ?? "127.0.0.1";
 const config = loadConfig({ ...process.env, LOJO_LLM_PROVIDER: process.env.LOJO_LLM_PROVIDER ?? "mock" });
-const llm =
-  config.llmProvider === "mock"
-    ? new MockLlm()
-    : createLlmClient(config, { grokApiKey: process.env.LOJO_GROK_API_KEY });
+const secrets = await loadProviderSecrets(config, process.env);
+const llm = config.llmProvider === "mock" ? new MockLlm() : createLlmClient(config, secrets);
+const embedder = createEmbedder(config, secrets);
 const styleGuide = readFileSync(new URL("../../../config/style-guide.md", import.meta.url), "utf8");
 
 /** A local master key for draft sealing, so drafts in an imported store survive restarts. */
@@ -57,7 +58,7 @@ if (storeFile) {
   keys = new LocalKeyWrapper();
   publicJwk = identity.publicJwk;
   privateJwk = identity.privateJwk;
-  await seedDemo({ store, blobs, keys, publicJwk, llm, config, styleGuide });
+  await seedDemo({ store, blobs, keys, publicJwk, llm, embedder, config, styleGuide });
 }
 
 const mailbox = new Mailbox({
@@ -68,6 +69,7 @@ const mailbox = new Mailbox({
   publicJwk,
   ...(privateJwk ? { privateJwk } : {}),
   llm,
+  embedder,
   sender: new MemorySender(),
   styleGuide,
 });
@@ -83,6 +85,7 @@ const app = createApp({
     mailbox: config.mailbox,
     domain: config.domain,
     llmProvider: config.llmProvider,
+    embedProvider: config.embedProvider,
     dailyTokenBudget: config.dailyTokenBudget,
   },
 });

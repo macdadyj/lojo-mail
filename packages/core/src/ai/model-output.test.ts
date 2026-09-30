@@ -13,7 +13,7 @@ test("prose, malformed JSON, and wrong fields are model output errors", () => {
 
 test("a non-JSON model reply at ingest stores the message, falls back, and still counts the tokens", async () => {
   const prose = new MockLlm(() => ({ text: "I think this email is about a lease.", inputTokens: 300, outputTokens: 20 }));
-  const w = await memoryWorld({ llm: prose });
+  const w = await memoryWorld({ llm: prose, embedder: null });
   const { message } = await w.ingest(fixture("personal.eml"));
   assert.equal(message.ai?.skipped, true);
   assert.equal(message.ai?.skipReason, "error");

@@ -1,13 +1,10 @@
 import { BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
 import { assertNever } from "../errors.ts";
 import type { LojoConfig } from "../types.ts";
-import type { LlmClient, LlmCompletion, LlmEmbedding, LlmRequest } from "./types.ts";
-
-type FetchLike = typeof fetch;
-
-function estimateTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4));
-}
+import { googleEndpointFor } from "./google-endpoint.ts";
+import { googleHeaders, googleModelUrl, type GoogleEndpoint } from "./google-auth.ts";
+import { estimateTokens, postJsonOrThrow, trimSlash, type FetchLike } from "./http.ts";
+import type { LlmClient, LlmCompletion, LlmRequest, ProviderSecrets } from "./types.ts";
 
 export class MockLlm implements LlmClient {
   readonly name = "mock";
@@ -47,38 +44,34 @@ export class MockLlm implements LlmClient {
       outputTokens: estimateTokens(JSON.stringify(body)),
     };
   }
-
-  async embed(text: string): Promise<LlmEmbedding> {
-    const vector = [0, 0, 0, 0, 0, 0, 0, 0];
-    for (let i = 0; i < text.length; i += 1) {
-      const bucket = i % vector.length;
-      const current = vector[bucket] ?? 0;
-      vector[bucket] = current + text.charCodeAt(i) / 255;
-    }
-    return { vector, tokens: estimateTokens(text) };
-  }
 }
 
-export class GrokLlm implements LlmClient {
-  readonly name = "grok";
-
+/**
+ * Any `/chat/completions` endpoint: OpenAI, xAI Grok, OpenRouter, Groq, Together,
+ * or a local llama.cpp / vLLM / LM Studio / Ollama `/v1` server. The key is
+ * optional because local servers do not need one.
+ */
+export class OpenAiCompatibleLlm implements LlmClient {
   constructor(
-    private readonly opts: { apiKey: string; baseUrl: string; model: string; fetchImpl?: FetchLike },
+    private readonly opts: { name?: string; apiKey?: string; baseUrl: string; model: string; fetchImpl?: FetchLike; timeoutMs?: number },
   ) {}
+
+  get name(): string {
+    return this.opts.name ?? "openai";
+  }
 
   get model(): string {
     return this.opts.model;
   }
 
   async complete(request: LlmRequest): Promise<LlmCompletion> {
-    const fetchImpl = this.opts.fetchImpl ?? fetch;
-    const response = await fetchImpl(`${this.opts.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${this.opts.apiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
+    const payload = await postJsonOrThrow<{
+      choices?: Array<{ message?: { content?: string | null } }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    }>(
+      this.name,
+      `${trimSlash(this.opts.baseUrl)}/chat/completions`,
+      {
         model: this.opts.model,
         temperature: request.temperature ?? 0.2,
         max_tokens: request.maxTokens,
@@ -86,41 +79,42 @@ export class GrokLlm implements LlmClient {
           { role: "system", content: request.system },
           { role: "user", content: request.user },
         ],
-      }),
-    });
-    if (!response.ok) {
-      throw new Error(`Grok request failed (${response.status})`);
-    }
-    const payload = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
-    };
+      },
+      {
+        headers: this.opts.apiKey ? { authorization: `Bearer ${this.opts.apiKey}` } : {},
+        ...(this.opts.fetchImpl ? { fetchImpl: this.opts.fetchImpl } : {}),
+        ...(this.opts.timeoutMs ? { timeoutMs: this.opts.timeoutMs } : {}),
+      },
+    );
     const text = payload.choices?.[0]?.message?.content ?? "";
     return {
       text,
-      inputTokens: payload.usage?.prompt_tokens ?? estimateTokens(request.user),
+      inputTokens: payload.usage?.prompt_tokens ?? estimateTokens(request.system + request.user),
       outputTokens: payload.usage?.completion_tokens ?? estimateTokens(text),
     };
+  }
+}
+
+export class GrokLlm extends OpenAiCompatibleLlm {
+  constructor(opts: { apiKey: string; baseUrl: string; model: string; fetchImpl?: FetchLike }) {
+    super({ ...opts, name: "grok" });
   }
 }
 
 export class OllamaLlm implements LlmClient {
   readonly name = "ollama";
 
-  constructor(
-    private readonly opts: { baseUrl: string; model: string; embedModel: string; fetchImpl?: FetchLike },
-  ) {}
+  constructor(private readonly opts: { baseUrl: string; model: string; fetchImpl?: FetchLike; timeoutMs?: number }) {}
 
   get model(): string {
     return this.opts.model;
   }
 
   async complete(request: LlmRequest): Promise<LlmCompletion> {
-    const fetchImpl = this.opts.fetchImpl ?? fetch;
-    const response = await fetchImpl(`${this.opts.baseUrl.replace(/\/$/, "")}/api/chat`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const payload = await postJsonOrThrow<{ message?: { content?: string }; prompt_eval_count?: number; eval_count?: number }>(
+      "Ollama",
+      `${trimSlash(this.opts.baseUrl)}/api/chat`,
+      {
         model: this.opts.model,
         stream: false,
         messages: [
@@ -128,14 +122,12 @@ export class OllamaLlm implements LlmClient {
           { role: "user", content: request.user },
         ],
         options: { temperature: request.temperature ?? 0.2, num_predict: request.maxTokens },
-      }),
-    });
-    if (!response.ok) throw new Error(`Ollama request failed (${response.status})`);
-    const payload = (await response.json()) as {
-      message?: { content?: string };
-      prompt_eval_count?: number;
-      eval_count?: number;
-    };
+      },
+      {
+        ...(this.opts.fetchImpl ? { fetchImpl: this.opts.fetchImpl } : {}),
+        ...(this.opts.timeoutMs ? { timeoutMs: this.opts.timeoutMs } : {}),
+      },
+    );
     const text = payload.message?.content ?? "";
     return {
       text,
@@ -143,38 +135,14 @@ export class OllamaLlm implements LlmClient {
       outputTokens: payload.eval_count ?? estimateTokens(text),
     };
   }
-
-  async embed(text: string): Promise<LlmEmbedding> {
-    const fetchImpl = this.opts.fetchImpl ?? fetch;
-    const base = this.opts.baseUrl.replace(/\/$/, "");
-    const modern = await fetchImpl(`${base}/api/embed`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: this.opts.embedModel, input: text }),
-    });
-    if (modern.ok) {
-      const payload = (await modern.json()) as { embeddings?: number[][] };
-      const vector = payload.embeddings?.[0];
-      if (!vector) throw new Error("Ollama embed response had no vector");
-      return { vector, tokens: estimateTokens(text) };
-    }
-    const legacy = await fetchImpl(`${base}/api/embeddings`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: this.opts.embedModel, prompt: text }),
-    });
-    if (!legacy.ok) throw new Error(`Ollama embed failed (${legacy.status})`);
-    const payload = (await legacy.json()) as { embedding?: number[] };
-    if (!payload.embedding) throw new Error("Ollama embeddings response had no vector");
-    return { vector: payload.embedding, tokens: estimateTokens(text) };
-  }
 }
 
+/** Converse works across Bedrock chat models: Amazon Nova, Anthropic Claude, Meta Llama, Mistral. */
 export class BedrockLlm implements LlmClient {
   readonly name = "bedrock";
-  private readonly client: BedrockRuntimeClient;
+  private readonly client: Pick<BedrockRuntimeClient, "send">;
 
-  constructor(private readonly opts: { region: string; modelId: string; client?: BedrockRuntimeClient }) {
+  constructor(private readonly opts: { region: string; modelId: string; client?: Pick<BedrockRuntimeClient, "send"> }) {
     this.client = opts.client ?? new BedrockRuntimeClient({ region: opts.region });
   }
 
@@ -203,23 +171,69 @@ export class BedrockLlm implements LlmClient {
   }
 }
 
-export function createLlmClient(config: LojoConfig, secrets: { grokApiKey?: string } = {}): LlmClient {
+/** Gemini models through the Gemini API (AI Studio key) or Vertex AI. */
+export class GeminiLlm implements LlmClient {
+  constructor(
+    private readonly opts: { name?: string; model: string; endpoint: GoogleEndpoint; fetchImpl?: FetchLike; timeoutMs?: number },
+  ) {}
+
+  get name(): string {
+    return this.opts.name ?? (this.opts.endpoint.kind === "studio" ? "gemini" : "vertex");
+  }
+
+  get model(): string {
+    return this.opts.model;
+  }
+
+  async complete(request: LlmRequest): Promise<LlmCompletion> {
+    const payload = await postJsonOrThrow<{
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+    }>(
+      this.name,
+      googleModelUrl(this.opts.endpoint, this.opts.model, "generateContent"),
+      {
+        systemInstruction: { parts: [{ text: request.system }] },
+        contents: [{ role: "user", parts: [{ text: request.user }] }],
+        generationConfig: { temperature: request.temperature ?? 0.2, maxOutputTokens: request.maxTokens },
+      },
+      {
+        headers: await googleHeaders(this.opts.endpoint),
+        ...(this.opts.fetchImpl ? { fetchImpl: this.opts.fetchImpl } : {}),
+        ...(this.opts.timeoutMs ? { timeoutMs: this.opts.timeoutMs } : {}),
+      },
+    );
+    const text = (payload.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? "").join("");
+    return {
+      text,
+      inputTokens: payload.usageMetadata?.promptTokenCount ?? estimateTokens(request.system + request.user),
+      outputTokens: payload.usageMetadata?.candidatesTokenCount ?? estimateTokens(text),
+    };
+  }
+}
+
+export function createLlmClient(config: LojoConfig, secrets: ProviderSecrets = {}, fetchImpl?: FetchLike): LlmClient {
+  const withFetch = fetchImpl ? { fetchImpl } : {};
   switch (config.llmProvider) {
     case "mock":
       return new MockLlm();
     case "grok":
-      if (!secrets.grokApiKey) {
-        throw new Error("Grok is selected but no API key was provided");
-      }
-      return new GrokLlm({ apiKey: secrets.grokApiKey, baseUrl: config.grokBaseUrl, model: config.grokModel });
-    case "ollama":
-      return new OllamaLlm({
-        baseUrl: config.ollamaBaseUrl,
-        model: config.ollamaModel,
-        embedModel: config.ollamaEmbedModel,
+      if (!secrets.grokApiKey) throw new Error("Grok is selected but no API key was provided");
+      return new GrokLlm({ apiKey: secrets.grokApiKey, baseUrl: config.grokBaseUrl, model: config.grokModel, ...withFetch });
+    case "openai":
+      return new OpenAiCompatibleLlm({
+        baseUrl: config.openaiBaseUrl,
+        model: config.openaiModel,
+        ...(secrets.openaiApiKey ? { apiKey: secrets.openaiApiKey } : {}),
+        ...withFetch,
       });
+    case "ollama":
+      return new OllamaLlm({ baseUrl: config.ollamaBaseUrl, model: config.ollamaModel, ...withFetch });
     case "bedrock":
       return new BedrockLlm({ region: config.bedrockRegion, modelId: config.bedrockModelId });
+    case "gemini":
+    case "vertex":
+      return new GeminiLlm({ model: config.geminiModel, endpoint: googleEndpointFor(config.llmProvider, config, secrets, fetchImpl), ...withFetch });
     default:
       return assertNever(config.llmProvider, "llm provider");
   }

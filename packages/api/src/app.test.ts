@@ -108,3 +108,15 @@ test("ses payload is always raw with sanitized headers and threading", () => {
   assert.match(raw, /\r\nIn-Reply-To: <lease-1@example.com>\r\n/);
   assert.match(raw, /^From: "Jon Hebert" <lojo@cyberphysical.us>\r\n/);
 });
+
+test("vector backfill needs write and body, and reports what it did", async () => {
+  const api = await testApp();
+  await api.ingest(fixture("personal.eml"));
+  assert.equal((await api.call("/v1/vectors/backfill", { token: "write-token", method: "POST" })).status, 403);
+  assert.equal((await api.call("/v1/vectors/backfill", { token: "body-token", method: "POST" })).status, 403);
+  const res = await api.call("/v1/vectors/backfill", { token: "admin-token", body: { limit: 5 } });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.json, { embedded: 0, unreadable: 0, failed: 0, remaining: 0 });
+  const settings = await api.call("/v1/settings", { token: "read-token" });
+  assert.equal(settings.json.embedProvider, "none");
+});

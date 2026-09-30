@@ -11,6 +11,8 @@ Nothing in this repo deploys itself. Terraform plans; it does not apply. There a
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Shape of the system and why it is Terraform |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model, including what is not end-to-end |
 | [docs/COSTS.md](docs/COSTS.md) | Monthly estimate (about $2 on Ollama, a few dollars more on Grok) |
+| [docs/COSTS_COMPARE.md](docs/COSTS_COMPARE.md) | This design on AWS vs. an equivalent Google Cloud build, and AI provider costs, for low, typical, and heavy use, with sources |
+| [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | Connecting Cursor, Grok, and local models (Ollama); choosing the AI and embedding provider; semantic search |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | Exact steps Jon runs: parameters, apply, first test email, DLQ redrive, rollback |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | First-deploy live test: a test message to a test address through SES, the encrypted bucket, and the processor, before real mail is switched on |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | Leaving Tuta (`lojo@tuta.io`) without IMAP, locally or straight into AWS |
@@ -50,9 +52,11 @@ infra/terraform/tests  Offline `terraform test` with mocked providers
 packages/core       MIME, envelope crypto, store, AI pipeline, OpenPGP helpers
 packages/pipeline   Inbound processor and the AWS adapters (DynamoDB, S3, KMS)
 packages/api        HTTP API
-packages/mcp        MCP tools
+packages/mcp        MCP tools: stdio server and the remote /mcp handler
+packages/local      lojo-local CLI and tool-calling adapter for local models
 packages/web        PWA
 packages/importer   eml / mbox / vCard / CSV import
+integrations/       Drop-in client config (Cursor mcp.json)
 fixtures/           Sample, malicious, and DNS fixtures used by the tests
 ```
 

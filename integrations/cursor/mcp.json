@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "lojo-mail": {
+      "command": "/ABSOLUTE/PATH/TO/lojo-mail/node_modules/.bin/tsx",
+      "args": ["/ABSOLUTE/PATH/TO/lojo-mail/packages/mcp/src/server.ts"],
+      "env": {
+        "LOJO_API_URL": "${env:LOJO_API_URL}",
+        "LOJO_API_TOKEN": "${env:LOJO_CURSOR_TOKEN}",
+        "LOJO_API_SCOPES": "read"
+      }
+    }
+  }
+}

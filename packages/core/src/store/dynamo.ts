@@ -93,6 +93,15 @@ export class DynamoMailStore implements MailStore {
     return updated as unknown as StoredMessage;
   }
 
+  async listVectors(vecModel: string): Promise<Array<{ id: string; vec: string }>> {
+    const items = await this.db.query(this.tables.messages, { index: "vectors", keyName: "vecModel", keyValue: vecModel });
+    const rows: Array<{ id: string; vec: string }> = [];
+    for (const item of items) {
+      if (typeof item.id === "string" && typeof item.vec === "string") rows.push({ id: item.id, vec: item.vec });
+    }
+    return rows;
+  }
+
   async putThread(thread: Thread): Promise<void> {
     await this.db.put(this.tables.threads, asItem({ ...thread, kind: "thread" }));
   }

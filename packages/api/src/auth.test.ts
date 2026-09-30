@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import test from "node:test";
-import { hasScope, tokenBookFromEnv, TokenBook } from "./auth.ts";
+import { agentTokensOrNone, hasScope, parseAgentTokens, tokenBookFromEnv, TokenBook } from "./auth.ts";
 import { MemoryStore } from "@lojo/core";
 import {
   DEV_PASSPHRASE,
@@ -131,4 +131,41 @@ test("an attacker hammering sign-in gets 429 for its own address; Jon still sign
   assert.equal(signedIn.status, 200, "no global lockout");
   clock += LOGIN_WINDOW_MS;
   assert.equal((await t.call("/v1/session/login", { body: { passphrase: TEST_PASSPHRASE }, headers: attacker })).status, 200);
+});
+
+test("agent tokens: one per client, never send or admin, long enough in production", () => {
+  const good = "a".repeat(40);
+  const parsed = parseAgentTokens(JSON.stringify([{ label: "grok", token: good, scopes: ["read"] }, { label: "cursor", token: `${good}b`, scopes: ["read", "write", "body"] }]), true);
+  assert.deepEqual(
+    parsed.map((agent) => [agent.label, agent.scopes]),
+    [
+      ["agent:grok", ["read"]],
+      ["agent:cursor", ["read", "write", "body"]],
+    ],
+  );
+  assert.throws(() => parseAgentTokens(JSON.stringify([{ label: "grok", token: good, scopes: ["read", "send"] }]), true), /send is not allowed/);
+  assert.throws(() => parseAgentTokens(JSON.stringify([{ label: "grok", token: good, scopes: ["admin"] }]), true), /admin is not allowed/);
+  assert.throws(() => parseAgentTokens(JSON.stringify([{ label: "grok", token: "short", scopes: ["read"] }]), true), /at least 32/);
+  assert.throws(() => parseAgentTokens(JSON.stringify([{ label: "a", token: good, scopes: ["read"] }, { label: "a", token: `${good}x`, scopes: ["read"] }]), true), /duplicate/);
+  assert.throws(() => parseAgentTokens(JSON.stringify([{ label: "Bad Label", token: good, scopes: ["read"] }]), true), /label/);
+  assert.throws(() => parseAgentTokens("{}", true), /JSON array/);
+  assert.equal(parseAgentTokens(JSON.stringify([{ label: "local", token: "dev-agent", scopes: ["read"] }]), false).length, 1);
+
+  const book = tokenBookFromEnv({ LOJO_API_TOKEN: "t".repeat(40), LOJO_AGENT_TOKENS: JSON.stringify([{ label: "grok", token: good, scopes: ["read"] }]) }, true);
+  assert.deepEqual(book.principal(`Bearer ${good}`), { kind: "token", label: "agent:grok", scopes: ["read"] });
+  assert.throws(
+    () => tokenBookFromEnv({ LOJO_AGENT_TOKENS: JSON.stringify([{ label: "x", token: `hs_${good}`, scopes: ["read"] }]) }, true),
+    /reserved prefix/,
+  );
+});
+
+test("a malformed agent-token list disables all agent tokens instead of taking the API down", () => {
+  const good = "a".repeat(40);
+  const warnings: string[] = [];
+  const bad = JSON.stringify([{ label: "grok", token: good, scopes: ["read"] }, { label: "cursor", token: good.replace("a", "b"), scopes: ["send"] }]);
+  assert.deepEqual(agentTokensOrNone(bad, true, (message) => warnings.push(message)), []);
+  assert.match(warnings[0] ?? "", /send is not allowed/);
+  assert.doesNotMatch(warnings[0] ?? "", /aaaa/, "the warning never carries a token");
+  assert.deepEqual(agentTokensOrNone(undefined, true, () => assert.fail("no warning when unset")), []);
+  assert.equal(agentTokensOrNone(JSON.stringify([{ label: "grok", token: good, scopes: ["read"] }]), true, () => undefined).length, 1);
 });

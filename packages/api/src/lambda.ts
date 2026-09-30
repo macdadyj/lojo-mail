@@ -1,12 +1,22 @@
 import { KMSClient } from "@aws-sdk/client-kms";
 import { S3Client } from "@aws-sdk/client-s3";
 import { GetParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
-import { createLlmClient, DynamoMailStore, loadConfig, Mailbox, type EcPublicJwk, type LlmClient } from "@lojo/core";
+import {
+  createEmbedder,
+  createLlmClient,
+  DynamoMailStore,
+  loadConfig,
+  loadProviderSecrets,
+  Mailbox,
+  type EcPublicJwk,
+  type Embedder,
+  type LlmClient,
+} from "@lojo/core";
 import { documentClient, dynamoLike, KmsKeyWrapper, S3BlobStore, tableNamesFromEnv, ttlCache } from "@lojo/pipeline/aws";
 import { getConnInfo, handle } from "hono/aws-lambda";
 import styleGuide from "../../../config/style-guide.md";
 import { createApp } from "./app.ts";
-import { TokenBook, parseScopes } from "./auth.ts";
+import { TokenBook, agentTokensOrNone, parseScopes } from "./auth.ts";
 import { LoginThrottle, Sessions } from "./session.ts";
 import { SesSender } from "./ses.ts";
 
@@ -43,17 +53,25 @@ async function buildApp() {
   });
   const sendToken = await parameter(env("LOJO_SEND_TOKEN_PARAM", "/lojo-mail/api-token-send"));
   if (sendToken) tokens.add(sendToken, { label: "send", scopes: parseScopes(process.env.LOJO_SEND_SCOPES, ["read", "write", "send"]) });
+  const agentTokens = await parameter(env("LOJO_AGENT_TOKENS_PARAM", "/lojo-mail/agent-tokens"));
+  const warnAgentTokens = (message: string) => console.error(JSON.stringify({ event: "agent_tokens_invalid", message }));
+  for (const agent of agentTokensOrNone(agentTokens, true, warnAgentTokens)) tokens.add(agent.token, { label: agent.label, scopes: agent.scopes });
 
   const secret = await parameter(env("LOJO_SESSION_SECRET_PARAM", "/lojo-mail/session-secret"));
   const passphraseHash = await parameter(env("LOJO_PASSPHRASE_HASH_PARAM", "/lojo-mail/human-passphrase-hash"));
   const sessions = secret && passphraseHash ? new Sessions({ secret: Buffer.from(secret, "utf8"), passphraseHash }) : null;
   if (!sessions) console.error("Human sign-in is disabled: session secret or passphrase hash parameter is missing");
 
+  const secrets = await loadProviderSecrets(config, process.env, parameter);
   let llm: LlmClient | null = null;
   try {
-    const keyParam = process.env.LOJO_GROK_KEY_PARAM;
-    const grokApiKey = process.env.LOJO_GROK_API_KEY ?? (keyParam ? await parameter(keyParam) : undefined);
-    llm = createLlmClient(config, { grokApiKey });
+    llm = createLlmClient(config, secrets);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+  }
+  let embedder: Embedder | null = null;
+  try {
+    embedder = createEmbedder(config, secrets);
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
   }
@@ -73,6 +91,7 @@ async function buildApp() {
     config,
     publicJwk,
     llm,
+    embedder,
     sender: SesSender.fromEnv(),
     styleGuide: process.env.LOJO_STYLE_GUIDE ?? styleGuide,
     ...(ownPgpPublicKey ? { ownPgpPublicKey } : {}),
@@ -85,11 +104,13 @@ async function buildApp() {
     // The login-failure alarm is a CloudWatch metric filter on this line.
     loginThrottle: new LoginThrottle(store, { onFailure: (source) => console.warn(JSON.stringify({ event: "login_failed", source })) }),
     clientAddress: (c) => getConnInfo(c).remote.address,
+    accessLog: (entry) => console.log(JSON.stringify({ event: "api_request", ...entry })),
     dev: false,
     info: {
       mailbox: config.mailbox,
       domain: config.domain,
       llmProvider: config.llmProvider,
+      embedProvider: config.embedProvider,
       dailyTokenBudget: config.dailyTokenBudget,
     },
   });

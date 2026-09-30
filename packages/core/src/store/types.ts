@@ -18,6 +18,8 @@ export interface MailStore {
   /** Oldest first. */
   listThreadMessages(threadId: string): Promise<StoredMessage[]>;
   updateMessage(id: string, patch: MessagePatch): Promise<StoredMessage>;
+  /** Every stored vector made by one embedder, from the sparse `vectors` index (id, date, vec only). */
+  listVectors(vecModel: string): Promise<Array<{ id: string; vec: string }>>;
 
   putThread(thread: Thread): Promise<void>;
   getThread(id: string): Promise<Thread | null>;
@@ -107,6 +109,8 @@ export const DEFAULT_TABLE_NAMES: TableNames = {
 export interface KeySchema {
   hashKey: string;
   rangeKey?: string;
+  /** Non-key attributes an INCLUDE index carries. Omitted means ALL. */
+  include?: string[];
 }
 
 export interface TableSchema extends KeySchema {
@@ -121,6 +125,7 @@ export const TABLE_SCHEMAS: Record<keyof TableNames, TableSchema> = {
       folder: { hashKey: "folder", rangeKey: "date" },
       thread: { hashKey: "threadId", rangeKey: "date" },
       rfc: { hashKey: "rfcMessageId", rangeKey: "date" },
+      vectors: { hashKey: "vecModel", rangeKey: "date", include: ["vec"] },
     },
   },
   threads: { hashKey: "id", indexes: { recent: { hashKey: "kind", rangeKey: "lastDate" } } },

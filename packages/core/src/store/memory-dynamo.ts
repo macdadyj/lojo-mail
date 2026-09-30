@@ -104,7 +104,11 @@ export class MemoryDynamo implements DynamoLike {
       });
     }
     if (opts.descending) hits.reverse();
-    return (opts.limit === undefined ? hits : hits.slice(0, opts.limit)).map((item) => clone(item));
+    const page = opts.limit === undefined ? hits : hits.slice(0, opts.limit);
+    const include = keys.include;
+    if (!include) return page.map((item) => clone(item));
+    const kept = new Set([schema.hashKey, schema.rangeKey, keys.hashKey, keys.rangeKey, ...include].filter((name): name is string => Boolean(name)));
+    return page.map((item) => Object.fromEntries(Object.entries(clone(item)).filter(([name]) => kept.has(name))));
   }
 
   async update(table: string, key: Record<string, string>, opts: UpdateOptions): Promise<Item | null> {
