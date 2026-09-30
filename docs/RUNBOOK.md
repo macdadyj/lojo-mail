@@ -324,7 +324,8 @@ Browsers send an `OPTIONS` preflight to the API. API Gateway hands it to the `$d
 
 ## 10. Day-two
 
-- Open the PWA over HTTPS, sign in with the passphrase, load the envelope private key in Settings, and confirm a real message opens.
+- On Santa, run `lojo-bridge key export-wrapped` and store the wrapped key and key passphrase as in [WEB_KEY.md](WEB_KEY.md#3-password-manager-layout). Then open the PWA over HTTPS, sign in with the passphrase, unlock with the wrapped key in Settings, check that the fingerprint matches, and confirm a real message opens.
+- Rotating the web sign-in passphrase and the recovery drill for the envelope key are in [WEB_KEY.md](WEB_KEY.md).
 - Drafts that an assistant submitted appear under Drafts → "Waiting for your approval". Open one, check it, including the Encryption setting, and press Approve and send. If the assistant edits it while you have it open, nothing is sent: the page shows the new version and you approve again.
 - Put a budget alarm on the `Project=lojo-mail` tag. See [COSTS.md](COSTS.md).
 - Follow [MIGRATION.md](MIGRATION.md) for Tuta.

@@ -6,10 +6,12 @@
   "exports": {
     ".": "./src/index.ts",
     "./crypto": "./src/crypto/envelope.ts",
+    "./wrap": "./src/crypto/wrap.ts",
     "./testing": "./src/testing.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.830.0",
+    "@noble/hashes": "^2.4.0",
     "mailparser": "^3.7.4",
     "openpgp": "^6.1.1",
     "zod": "^3.25.56"

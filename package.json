@@ -27,7 +27,8 @@
     "secrets:check": "node scripts/check-no-secrets.mjs",
     "bundles:check": "node scripts/check-bundles.mjs",
     "passphrase-hash": "tsx scripts/passphrase-hash.ts",
-    "rules": "tsx scripts/rules.ts"
+    "rules": "tsx scripts/rules.ts",
+    "key": "tsx packages/bridge/src/cli.ts key"
   },
   "devDependencies": {
     "@eslint/js": "^9.28.0",
