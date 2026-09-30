@@ -19,6 +19,7 @@ Nothing in this repo deploys itself. Terraform plans; it does not apply. There a
 | [docs/BOTS.md](docs/BOTS.md) | Bots managing your mail: Grok Bot, Grok Build, Cursor, grok.com, local Ollama; bot drafts approved by Send in Thunderbird |
 | [config/rules.example.json](config/rules.example.json) | Mail rules: sort, label, archive, trash (restorable), and replies (drafts by default; guarded auto-send). See SECURITY.md, mail rules |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | Leaving Tuta (`lojo@tuta.io`) without IMAP, locally or straight into AWS |
+| [ios/README.md](ios/README.md) | LOJO Mail for iPhone: native SwiftUI client, decrypts on the phone, built on Linux with xtool and a free Apple ID |
 | [qa/REVIEW_REPORT.md](qa/REVIEW_REPORT.md) | Independent pre-deploy review, with evidence and screenshots under `qa/` |
 
 ## Local demo
@@ -58,6 +59,7 @@ packages/api        HTTP API
 packages/mcp        MCP tools: stdio server and the remote /mcp handler
 packages/local      lojo-local CLI and tool-calling adapter for local models
 packages/web        PWA
+ios                 LOJO Mail iPhone app (SwiftUI, xtool) and its Linux-hosted core tests
 packages/importer   eml / mbox / vCard / CSV import
 packages/bridge     Local IMAP + SMTP bridge for Thunderbird (127.0.0.1 only)
 packages/core/src/rules  Mail rules engine and auto-send guards
