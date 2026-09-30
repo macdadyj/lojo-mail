@@ -40,6 +40,10 @@ Thunderbird is a full client for `lojo@cyberphysical.us`: you read, sort, reply,
 
    Never commit it and never put it inside the repository; the installer refuses paths inside the checkout. `pass` works here too (`pass insert -m lojo/envelope-jwk`, then `--private-key-command '["pass","show","lojo/envelope-jwk"]'`).
 
+   If the password manager holds only the wrapped key, rebuild the file with `lojo-bridge key import-wrapped --in wrapped.txt --out ~/.config/lojo-mail/envelope.private.jwk` (from a checkout: `npm run key -- import-wrapped …`).
+
+   Once the bridge has the key, `lojo-bridge key export-wrapped` makes the wrapped key and key passphrase that unlock the web app on other devices, and `lojo-bridge key verify-wrapped --in FILE` checks a backup. See [WEB_KEY.md](WEB_KEY.md).
+
 ## 2. Install
 
 ```bash

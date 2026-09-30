@@ -196,7 +196,7 @@ Receiving does not need SES production access.
   ```
 
 - [ ] **Nothing failed:** the dead-letter queue still reports `0`, and `lojo-mail-processor-errors` is not in `ALARM`. Repeat the step 2 commands.
-- [ ] **Jon can read it:** open the web app over HTTPS ([RUNBOOK.md](RUNBOOK.md#9-the-web-app)), sign in, load the envelope private key in Settings, and open the message. The text matches what you sent. If you attached a large file, download it.
+- [ ] **Jon can read it:** open the web app over HTTPS ([RUNBOOK.md](RUNBOOK.md#9-the-web-app)), sign in, unlock with the wrapped envelope key in Settings ([WEB_KEY.md](WEB_KEY.md)), and open the message. The text matches what you sent. If you attached a large file, download it.
 - [ ] **Real mail is still untouched:** send one message to `lojo@cyberphysical.us`. It bounces, or is not delivered, just as before the apply. Nothing new appears under `raw/` or in the inbox.
 
 If any box fails, stay in the test stage. [RUNBOOK.md](RUNBOOK.md#7-failed-messages-and-redrive) section 7 covers redrive, and section 8 covers turning receiving off.
