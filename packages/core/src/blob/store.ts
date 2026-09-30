@@ -22,6 +22,9 @@ export function aiContextKey(messageId: string): string {
   return `ai-context/${messageId}.bin`;
 }
 
+/** Jon's mail rules, KMS-sealed under `rulesContext()`. */
+export const RULES_KEY = "rules/current.bin";
+
 export class MemoryBlobStore implements BlobStore {
   readonly objects = new Map<string, Uint8Array>();
 

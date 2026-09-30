@@ -8,6 +8,7 @@ import { generateIdentity } from "./crypto/envelope.ts";
 import { LocalKeyWrapper } from "./crypto/server-seal.ts";
 import { ingestRaw, type IngestOptions, type IngestResult } from "./ingest.ts";
 import { Mailbox, type MailboxDeps, type ReviewedDraft } from "./mailbox.ts";
+import { rulesRuntime } from "./rules/engine.ts";
 import { MemorySender } from "./send.ts";
 import { MemoryStore } from "./store/memory.ts";
 import type { LojoConfig } from "./types.ts";
@@ -33,6 +34,8 @@ export interface WorldOptions {
   config?: Partial<LojoConfig>;
   now?: () => Date;
   deps?: Pick<MailboxDeps, "ownPgpPublicKey" | "pgpSigningKey">;
+  /** Wires `autoSender` into the rules runtime, as LOJO_AUTO_SEND=on does in the processor. */
+  autoSend?: boolean;
 }
 
 /** An in-memory mailbox wired the way the API wires it. No AWS, no network. */
@@ -48,6 +51,7 @@ export async function memoryWorld(opts: WorldOptions = {}) {
   const llm = opts.llm === undefined ? new MockLlm() : opts.llm;
   const embedder = opts.embedder === undefined ? new MockEmbedder() : opts.embedder;
   const sender = new MemorySender();
+  const autoSender = new MemorySender();
   const mailbox = new Mailbox({
     store,
     blobs,
@@ -58,6 +62,7 @@ export async function memoryWorld(opts: WorldOptions = {}) {
     llm,
     embedder,
     sender,
+    autoSendEnabled: opts.autoSend ?? false,
     styleGuide: TEST_STYLE,
     ...(opts.now ? { now: opts.now } : {}),
     ...opts.deps,
@@ -65,10 +70,21 @@ export async function memoryWorld(opts: WorldOptions = {}) {
   const ingest = (raw: Buffer | string, options: IngestOptions = {}, model: MockLlm | null = llm): Promise<IngestResult> =>
     ingestRaw(
       raw,
-      { store, blobs, keys, publicJwk, llm: model, embedder, config, styleGuide: TEST_STYLE, ...(opts.now ? { now: opts.now() } : {}) },
+      {
+        store,
+        blobs,
+        keys,
+        publicJwk,
+        llm: model,
+        embedder,
+        config,
+        styleGuide: TEST_STYLE,
+        rules: rulesRuntime(blobs, keys, opts.autoSend ? autoSender : null),
+        ...(opts.now ? { now: opts.now() } : {}),
+      },
       options,
     );
-  return { publicJwk, privateJwk, store, blobs, keys, config, llm, embedder, sender, mailbox, ingest };
+  return { publicJwk, privateJwk, store, blobs, keys, config, llm, embedder, sender, autoSender, mailbox, ingest };
 }
 
 export type MemoryWorld = Awaited<ReturnType<typeof memoryWorld>>;

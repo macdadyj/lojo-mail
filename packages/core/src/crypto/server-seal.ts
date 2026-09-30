@@ -26,6 +26,11 @@ export function aiContextContext(messageId: string): EncryptionContext {
   return { purpose: "ai-context", messageId };
 }
 
+/** Only the API role may generate data keys for this purpose; the processor may only decrypt. */
+export function rulesContext(): EncryptionContext {
+  return { purpose: "rules" };
+}
+
 export function canonicalContext(context: EncryptionContext): string {
   const sorted = Object.keys(context)
     .sort()

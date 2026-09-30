@@ -128,6 +128,10 @@ export interface StoredMessage {
   inReplyTo?: string;
   references: string[];
   bulk: boolean;
+  /** The List-Id header, for rules. */
+  listId?: string;
+  /** Header-derived reasons never to auto-reply (rules/autosend.ts). Codes only. */
+  replyBlockers?: string[];
   pgpEncrypted: boolean;
   verdicts?: Verdicts;
   bodyKey: string;

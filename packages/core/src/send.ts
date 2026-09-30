@@ -11,6 +11,8 @@ export interface OutboundMessage {
   references?: string[];
   /** Set when the body was OpenPGP-encrypted before handoff to SES. */
   armored?: string;
+  /** RFC 3834 `Auto-Submitted: auto-replied`, set on everything a rule sends. */
+  autoReplied?: boolean;
 }
 
 export interface MailSender {
