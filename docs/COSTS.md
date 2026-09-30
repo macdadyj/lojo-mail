@@ -4,6 +4,8 @@ Target: a few dollars a month at personal volume. No always-on instance, no dedi
 
 Prices below were checked against the public SES price page and the SES pricing-plans docs as of September 2026. AWS changes prices. Re-check before believing a line item to the cent.
 
+This page is the small-mailbox estimate. [COSTS_COMPARE.md](COSTS_COMPARE.md) prices a bigger one (about 100 inbound messages a day, 5 GB stored) on this AWS design and on an equivalent Google Cloud build, plus every AI provider option, including embeddings for semantic search.
+
 ## Assumptions
 
 - Region `us-east-1`. A read-only audit found SES for this domain already there. Prices in that region match the figures below at this volume.

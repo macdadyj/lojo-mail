@@ -58,6 +58,8 @@ The apex MX already points at SES us-east-1, and no receipt rule set is active t
 - [ ] `terraform.tfvars` has `receiving_stage = "test"`, or leaves it out.
 - [ ] `terraform plan` shows the receipt rule `store-raw` with `recipients = ["lojo-test@cyberphysical.us"]` and nothing else.
 - [ ] `aws ses describe-active-receipt-rule-set --region us-east-1` still returns nothing.
+- [ ] If the stack was applied before (the earlier test-stage deploy), the plan updates `aws_dynamodb_table.messages` **in place** to add the `vectors` global secondary index, and does not replace the table. DynamoDB builds the index online; the apply waits until it is `ACTIVE`, which takes seconds on a small table. `dynamodb:UpdateTable` is already in the apply policy. Any `must be replaced` on a table means stop.
+- [ ] `embed_provider` is `"none"` (the default) for this first deploy, so nothing new is sent to a provider. Semantic search and assistants come after real mail works; see step 7.
 
 Then `terraform apply`.
 
@@ -221,6 +223,57 @@ terraform output receiving   # stage "live", recipients lojo@ and dmarc@
 Then send one more message from outside, this time to `lojo@cyberphysical.us`. Repeat the step 4 checks for indexed, raw gone, and sealed. After that, mail to the real address is live. Mail to `lojo-test@` is no longer accepted.
 
 To go back, set `receiving_stage = "test"` and apply. Real mail then stops being accepted again, and nothing already stored is touched. To stop all receiving, follow RUNBOOK section 8.
+
+## 7. Optional: assistants and semantic search
+
+None of this is needed for mail to work. Do it after step 6, one piece at a time. [INTEGRATIONS.md](INTEGRATIONS.md) has the details.
+
+**Agent tokens for Cursor, Grok, and local models.** Create `/lojo-mail/agent-tokens` ([INTEGRATIONS.md](INTEGRATIONS.md#tokens-one-per-client)), then wait 5 minutes for the API to reload it, or force a cold start:
+
+```bash
+aws lambda update-function-configuration --function-name lojo-mail-api --description "agent tokens $(date +%s)"
+API=$(terraform output -raw api_endpoint)
+curl -s "$API/v1/session" -H "Authorization: Bearer $LOJO_CURSOR_TOKEN"
+# {"kind":"token","label":"agent:cursor","scopes":["read"]}
+```
+
+If every agent token gets `401`, the list was refused as a whole. The log says which entry is wrong (a `send` or `admin` scope, a short token, a duplicate label): `aws logs tail /aws/lambda/lojo-mail-api --since 10m --filter-pattern agent_tokens_invalid`. The web app is unaffected.
+
+- [ ] **Remote MCP answers, with the token's scopes only:**
+
+  ```bash
+  curl -s "$API/mcp" -H "Authorization: Bearer $LOJO_GROK_TOKEN" -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq '[.result.tools[].name]'
+  # a read token: ["search_mail","read_thread","list_inbox","export_mailbox"]; never a send tool
+  ```
+
+- [ ] **It refuses what it should:** the same call without the header gets `401`; with a web session token (`hs_…`) it gets `403`; `curl -X GET "$API/mcp"` gets `405`.
+- [ ] **It is traced:** `aws logs tail /aws/lambda/lojo-mail-api --since 10m --filter-pattern api_request` shows `agent:grok` lines.
+
+**Semantic search.** Pick a provider (Bedrock Titan stays inside the account and costs cents a month; see [COSTS_COMPARE.md](COSTS_COMPARE.md)), enable model access for `amazon.titan-embed-text-v2:0` in the Bedrock console, then:
+
+```bash
+# terraform.tfvars
+embed_provider = "bedrock"
+```
+
+```bash
+terraform plan    # Lambda environment (LOJO_EMBED_PROVIDER) and the roles' Bedrock statement change; nothing else
+terraform apply
+```
+
+- [ ] Send one message to the live address. Its item gets `vecModel = "bedrock/amazon.titan-embed-text-v2:0@256"`, and the audit table has an `ai.embed` row with outcome `ok`:
+
+  ```bash
+  aws dynamodb query --table-name "$MESSAGES" --index-name vectors \
+    --key-condition-expression "vecModel = :m" --expression-attribute-values '{":m":{"S":"bedrock/amazon.titan-embed-text-v2:0@256"}}' \
+    --select COUNT
+  ```
+
+- [ ] Backfill recent mail with a token that has `write` and `body` (`npm run local -- backfill --limit 50`, repeated until `remaining` is 0), then search in the web app with Search → Semantic.
+- [ ] An `ai.embed` row with outcome `error` means the role cannot call the model: check model access in the Bedrock console and the `bedrock:InvokeModel` statement on `lojo-mail-processor`'s role.
+
+To turn semantic search off again, set `embed_provider = "none"` and apply. Stored vectors stay until they are cleared; see [SECURITY.md](SECURITY.md#residual-risks).
 
 ## If mail sits in raw/
 

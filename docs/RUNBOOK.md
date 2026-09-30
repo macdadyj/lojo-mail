@@ -106,8 +106,12 @@ aws ssm put-parameter --region us-east-1 --name /lojo-mail/pgp-signing-passphras
 | `human-passphrase-hash` | API | yes, for web sign-in |
 | `pgp-public-key`, `pgp-signing-key`, `pgp-signing-passphrase` | API | no |
 | `grok-api-key` | processor, API | only with `llm_provider = "grok"` |
+| `openai-api-key` | processor, API | only with `llm_provider` or `embed_provider` = `"openai"`, and only if that endpoint needs a key |
+| `gemini-api-key` | processor, API | only with `"gemini"`, or `"vertex"` in express mode |
+| `vertex-sa-json` | processor, API | only with `"vertex"` and a service account (the key file's JSON) |
+| `agent-tokens` | API | no; one token per assistant, see [INTEGRATIONS.md](INTEGRATIONS.md#tokens-one-per-client) |
 
-Store the SecureString values in the password manager. Skip the Grok parameter if you set `llm_provider = "bedrock"` or `"ollama"`. The lab Ollama host is on the tailnet. This stack does not connect the Lambda to it.
+Store the SecureString values in the password manager. Skip the Grok parameter if you set `llm_provider = "bedrock"` or `"ollama"`. Create a provider key parameter only for the provider you select; [INTEGRATIONS.md](INTEGRATIONS.md#server-side-ai-providers) lists them. The lab Ollama host is on the tailnet. This stack does not connect the Lambda to it.
 
 ## 2. Build the Lambdas and apply
 
