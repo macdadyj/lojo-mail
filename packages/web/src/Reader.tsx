@@ -128,7 +128,7 @@ export function Reader({ threadId, onChanged }: { threadId: string; onChanged: (
           {message.pgpEncrypted ? <div className="chip">OpenPGP</div> : null}
           <pre>
             {message.locked
-              ? "Locked. Load the envelope private key in Settings to read this message in this browser."
+              ? "Locked. Unlock the envelope key in Settings, or with Unlock in the menu, to read this message in this browser."
               : message.text}
           </pre>
           {message.attachments.length > 0 ? (
