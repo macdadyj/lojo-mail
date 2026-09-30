@@ -75,7 +75,7 @@ struct RootView: View {
         case .review, .draft: tab = .review
         case .rules: tab = .rules
         case .settings, .key: tab = .settings
-        case .inbox, .thread, .compose, .search, .folder, .signin, nil: tab = .mail
+        case .inbox, .thread, .attachment, .compose, .sendconfirm, .search, .folder, .signin, nil: tab = .mail
         }
     }
 

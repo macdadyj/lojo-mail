@@ -85,6 +85,9 @@ final class ComposeModel {
     }
 
     private func show(_ view: DraftView) {
+        var view = view
+        // `/submit` and `/discard` answer without the body text; the editor still holds it.
+        if view.text == nil { view.text = fields.text }
         let next = DraftFields(view)
         draft = view.draft
         fields = next

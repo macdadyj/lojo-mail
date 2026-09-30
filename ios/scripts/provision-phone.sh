@@ -32,4 +32,4 @@ if [[ "${1:-}" != "--session" ]]; then
   push "$KEYFILE" "provision-envelope.private.jwk"
 fi
 pymobiledevice3 developer core-device launch-application --userspace --kill-existing "$BUNDLE" '' >/dev/null
-echo "provisioned $BUNDLE (session${1:+ only}); the app imported and deleted the files on launch"
+echo "provisioned $BUNDLE ($([[ "${1:-}" == "--session" ]] && echo "session only" || echo "session + envelope key")); the app imported and deleted the files on launch"

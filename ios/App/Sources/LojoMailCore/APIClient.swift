@@ -150,25 +150,27 @@ public struct APIClient: Sendable {
         return page.messages
     }
 
+    // The mutation routes answer with the stored record, not the `Message` view (no `locked`, internal keys),
+    // so callers reload through `folder`/`thread` instead of decoding it.
     public func setUnread(_ id: String, _ unread: Bool) async throws {
-        let _: Message = try await send("POST", "/v1/messages/\(escaped(id))/flags", json: ["unread": unread])
+        try await sendDiscardingBody("POST", "/v1/messages/\(escaped(id))/flags", json: ["unread": unread])
     }
 
     public func setLabels(_ id: String, _ labels: [String]) async throws {
-        let _: Message = try await send("POST", "/v1/messages/\(escaped(id))/labels", json: ["labels": labels])
+        try await sendDiscardingBody("POST", "/v1/messages/\(escaped(id))/labels", json: ["labels": labels])
     }
 
     public func archive(_ id: String) async throws {
-        let _: Message = try await send("POST", "/v1/messages/\(escaped(id))/archive")
+        try await sendDiscardingBody("POST", "/v1/messages/\(escaped(id))/archive")
     }
 
     /// `trash` is a soft delete: it stamps `trashedAt` and `keepUntil`, and `restore` undoes it.
     public func move(_ id: String, to folder: Folder) async throws {
-        let _: Message = try await send("POST", "/v1/messages/\(escaped(id))/move", json: ["folder": folder.rawValue])
+        try await sendDiscardingBody("POST", "/v1/messages/\(escaped(id))/move", json: ["folder": folder.rawValue])
     }
 
     public func restore(_ id: String) async throws {
-        let _: Message = try await send("POST", "/v1/messages/\(escaped(id))/restore")
+        try await sendDiscardingBody("POST", "/v1/messages/\(escaped(id))/restore")
     }
 
     // MARK: Drafts and approval
@@ -276,6 +278,10 @@ public struct APIClient: Sendable {
     func send<T: Decodable>(_ method: String, _ path: String, query: [URLQueryItem] = [], json: [String: Any]? = nil, authorized: Bool = true) async throws -> T {
         let (data, _) = try await perform(request(method, path, query: query, json: json, authorized: authorized))
         return try decode(T.self, data)
+    }
+
+    func sendDiscardingBody(_ method: String, _ path: String, json: [String: Any]? = nil) async throws {
+        _ = try await perform(request(method, path, json: json))
     }
 
     private func decode<T: Decodable>(_ type: T.Type, _ data: Data) throws -> T {

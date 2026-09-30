@@ -236,6 +236,7 @@ struct RulesView: View {
                 } label: {
                     Label("Stop all autonomous sending", systemImage: "hand.raised.fill")
                         .font(.headline)
+                        .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
                 }

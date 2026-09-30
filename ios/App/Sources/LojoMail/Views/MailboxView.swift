@@ -264,11 +264,11 @@ struct MailboxView: View {
         let launch = model.launch
         if let target = launch.folder { folder = target }
         switch launch.screen {
-        case .thread:
+        case .thread, .attachment:
             if model.state(folder).messages.isEmpty { await model.refresh(folder) }
             let id = launch.thread ?? model.state(folder).conversations.first(where: { $0.hasAttachments })?.id ?? model.state(folder).conversations.first?.id
             if let id { path.append(ThreadRoute(threadId: id, folder: folder)) }
-        case .compose:
+        case .compose, .sendconfirm:
             compose = .new(to: launch.composeTo)
         case .search:
             if let q = launch.search {

@@ -33,10 +33,11 @@ enum Provisioning {
 }
 
 /// QA hooks for on-device screenshots, set with `pymobiledevice3 ... launch-application --env KEY=VALUE`
-/// (see `ios/scripts/phone-shot.sh`). They only choose what is on screen; none of them can send or change mail.
+/// (see `ios/scripts/phone-shot.sh`). They only choose what is on screen; none of them can send or change mail
+/// (`sendconfirm` shows the confirmation, which still needs a tap).
 struct LaunchOptions {
     enum Screen: String {
-        case inbox, thread, compose, review, draft, rules, settings, search, signin, key, folder
+        case inbox, thread, attachment, compose, sendconfirm, review, draft, rules, settings, search, signin, key, folder
     }
 
     var screen: Screen?

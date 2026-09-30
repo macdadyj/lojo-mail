@@ -28,6 +28,10 @@ struct ComposeView: View {
         }
         .onAppear {
             if model == nil { model = ComposeModel(model: app, request: request) }
+            if app.launch.screen == .sendconfirm, let model, !model.fields.toList.isEmpty {
+                if model.fields.subject.isEmpty { model.fields.subject = "LOJO Mail iOS test" }
+                confirmSend = true
+            }
         }
     }
 
@@ -138,7 +142,7 @@ struct ComposeView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
-                    .disabled(model.busy || model.fields.toList.isEmpty || !model.conflictArmed || !model.blockedByTestMode.isEmpty)
+                    .disabled(model.busy || model.fields.toList.isEmpty || !model.conflictArmed || !model.blockedByTestMode.isEmpty || app.rules?.rules.sendKillSwitch == true)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                 } footer: {

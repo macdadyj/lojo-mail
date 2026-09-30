@@ -236,6 +236,10 @@ struct ThreadView: View {
             messages = try await model.loadThread(threadId)
             error = nil
             if let unread = messages.first(where: \.unread) { expanded.insert(unread.id) }
+            if model.launch.screen == .attachment, preview == nil,
+               let message = messages.last(where: { !$0.attachments.isEmpty }), let attachment = message.attachments.first {
+                await open(attachment, of: message)
+            }
         } catch {
             self.error = error.localizedDescription
         }
