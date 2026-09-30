@@ -7,7 +7,7 @@ import { Search } from "./Search.tsx";
 import { Settings } from "./Settings.tsx";
 import { person, statusLabel, when, type DraftView, type Message } from "./types.ts";
 
-type Tab = "inbox" | "triage" | "drafts" | "search" | "settings" | "compose";
+type Tab = "inbox" | "triage" | "drafts" | "trash" | "search" | "settings" | "compose";
 
 function parseHash(): { tab: Tab; id?: string } {
   const hash = window.location.hash.replace(/^#\/?/, "");
@@ -16,6 +16,7 @@ function parseHash(): { tab: Tab; id?: string } {
   switch (tab) {
     case "triage":
     case "drafts":
+    case "trash":
     case "search":
     case "settings":
     case "compose":
@@ -65,7 +66,7 @@ function Mail() {
         setDrafts(body.drafts);
         return;
       }
-      const path = route.tab === "triage" ? "/v1/triage" : "/v1/inbox";
+      const path = route.tab === "triage" ? "/v1/triage" : route.tab === "trash" ? "/v1/folders/trash/messages?limit=200" : "/v1/inbox";
       const body = await api<{ messages: Message[] }>(path);
       setMessages(body.messages);
     } catch (err) {
@@ -89,6 +90,7 @@ function Mail() {
         <a className={route.tab === "inbox" ? "active" : ""} href="#/inbox">Inbox</a>
         <a className={route.tab === "triage" ? "active" : ""} href="#/triage">Triage</a>
         <a className={route.tab === "drafts" ? "active" : ""} href="#/drafts">Drafts</a>
+        <a className={route.tab === "trash" ? "active" : ""} href="#/trash">Trash</a>
         <a className={route.tab === "search" ? "active" : ""} href="#/search">Search</a>
         <a className={route.tab === "settings" ? "active" : ""} href="#/settings">Settings</a>
         <a className={route.tab === "compose" ? "active" : ""} href="#/compose">Write</a>
@@ -96,7 +98,7 @@ function Mail() {
       </nav>
       <section className="list">
         <header>
-          <h1>{route.tab === "triage" || route.tab === "drafts" ? title(route.tab) : "Inbox"}</h1>
+          <h1>{route.tab === "triage" || route.tab === "drafts" || route.tab === "trash" ? title(route.tab) : "Inbox"}</h1>
           <span className="muted">{route.tab === "drafts" ? waiting.length + open.length : messages.length}</span>
         </header>
         {error ? <p className="error">{error}</p> : null}
@@ -111,6 +113,13 @@ function Mail() {
               <DraftRow key={row.draft.id} row={row} />
             ))}
             {waiting.length + open.length === 0 ? <p className="empty">No drafts yet.</p> : null}
+          </div>
+        ) : route.tab === "trash" ? (
+          <div className="rows">
+            {messages.length === 0 ? <p className="empty">Trash is empty.</p> : null}
+            {messages.map((message) => (
+              <TrashRow key={message.id} message={message} onRestored={() => void load()} />
+            ))}
           </div>
         ) : (
           <div className="rows">
@@ -156,6 +165,33 @@ function Mail() {
   );
 }
 
+function TrashRow({ message, onRestored }: { message: Message; onRestored: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const by = message.trashedBy?.startsWith("rule:") ? `rule ${message.trashedBy.slice(5)}` : "you";
+  return (
+    <div className="row">
+      <strong>{person(message.from)}</strong>
+      <div className="subject">{message.subject}</div>
+      <div className="meta">
+        <span className="muted">Trashed by {by}{message.keepUntil ? `, kept until ${when(message.keepUntil)}` : ""}</span>
+        <button
+          className="ghost"
+          type="button"
+          onClick={() => {
+            setError(null);
+            api(`/v1/messages/${message.id}/restore`, { method: "POST" })
+              .then(onRestored)
+              .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not restore"));
+          }}
+        >
+          Restore
+        </button>
+      </div>
+      {error ? <p className="error">{error}</p> : null}
+    </div>
+  );
+}
+
 function DraftRow({ row }: { row: DraftView }) {
   const { draft } = row;
   return (
@@ -182,6 +218,8 @@ function title(tab: Tab): string {
       return "Triage";
     case "drafts":
       return "Drafts";
+    case "trash":
+      return "Trash";
     case "search":
       return "Search";
     case "settings":

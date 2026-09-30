@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, apiUrl, apiUrlOverride, builtApiUrl, setApiUrlOverride, signOut } from "./api.ts";
+import { RulesPanel } from "./Rules.tsx";
 import type { Settings as SettingsInfo } from "./types.ts";
 import { hasPrivateKey, isKeyPersisted, parsePrivateJwk, rememberKey } from "./unlock.ts";
 
@@ -97,6 +98,8 @@ export function Settings() {
           Remove key
         </button>
       </div>
+      <h3>Mail rules</h3>
+      <RulesPanel />
       <h3>API</h3>
       <ApiUrlField />
       <div className="actions flush">
