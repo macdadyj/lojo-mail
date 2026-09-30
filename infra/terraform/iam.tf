@@ -64,6 +64,18 @@ data "aws_iam_policy_document" "processor" {
   }
 
   statement {
+    sid       = "ListRawForSweep"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.mail.arn]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["raw/", "raw/*"]
+    }
+  }
+
+  statement {
     sid     = "WriteSealedObjects"
     actions = ["s3:PutObject"]
     resources = [

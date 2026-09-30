@@ -137,6 +137,11 @@ override_resource {
 }
 
 override_resource {
+  target = aws_cloudwatch_event_rule.raw_sweep
+  values = { arn = "arn:aws:events:us-east-1:111122223333:rule/lojo-mail-raw-sweep" }
+}
+
+override_resource {
   target = aws_dynamodb_table.budget
   values = { arn = "arn:aws:dynamodb:us-east-1:111122223333:table/lojo-mail-budget" }
 }
@@ -594,4 +599,69 @@ run "web_blob_origin_is_the_exact_presigned_url_origin" {
     condition     = output.web_blob_origin == "https://lojo-mail-test.s3.us-east-1.amazonaws.com"
     error_message = "web_blob_origin must be the one bucket origin presigned URLs use, for the web CSP"
   }
+}
+
+run "raw_objects_reach_the_processor_by_notification_and_by_sweep" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      length(aws_s3_bucket_notification.raw.lambda_function) == 1,
+      aws_s3_bucket_notification.raw.lambda_function[0].filter_prefix == "raw/",
+      contains(aws_s3_bucket_notification.raw.lambda_function[0].events, "s3:ObjectCreated:*"),
+    ])
+    error_message = "every ObjectCreated under raw/ must notify the processor"
+  }
+
+  assert {
+    condition = alltrue([
+      aws_lambda_permission.s3_invoke.principal == "s3.amazonaws.com",
+      aws_lambda_permission.s3_invoke.source_account == "111122223333",
+      aws_lambda_permission.s3_invoke.action == "lambda:InvokeFunction",
+    ])
+    error_message = "S3 may invoke the processor only from this account and bucket"
+  }
+
+  assert {
+    condition     = aws_cloudwatch_event_rule.raw_sweep.schedule_expression == "rate(15 minutes)"
+    error_message = "the raw/ sweep should run every 15 minutes by default"
+  }
+
+  assert {
+    condition     = jsondecode(aws_cloudwatch_event_target.raw_sweep.input).lojo == "sweep-raw"
+    error_message = "the sweep target input must match SWEEP_EVENT in packages/pipeline/src/raw.ts"
+  }
+
+  assert {
+    condition     = aws_lambda_permission.raw_sweep.principal == "events.amazonaws.com" && aws_lambda_permission.raw_sweep.source_account == "111122223333"
+    error_message = "only this account's sweep rule may invoke the processor"
+  }
+
+  assert {
+    condition     = aws_cloudwatch_log_metric_filter.raw_swept.pattern == "\"raw_swept\"" && aws_cloudwatch_metric_alarm.raw_swept.threshold == 0
+    error_message = "any swept message must raise the raw-swept alarm"
+  }
+}
+
+run "sweep_every_minute_uses_singular_rate" {
+  command = plan
+
+  variables {
+    raw_sweep_minutes = 1
+  }
+
+  assert {
+    condition     = aws_cloudwatch_event_rule.raw_sweep.schedule_expression == "rate(1 minute)"
+    error_message = "EventBridge needs rate(1 minute), not rate(1 minutes)"
+  }
+}
+
+run "zero_reserved_concurrency_is_refused" {
+  command = plan
+
+  variables {
+    processor_reserved_concurrency = 0
+  }
+
+  expect_failures = [var.processor_reserved_concurrency]
 }

@@ -5,6 +5,7 @@ import { createLlmClient, DynamoMailStore, ingestRaw, loadConfig, type EcPublicJ
 import styleGuide from "../../../config/style-guide.md";
 import { documentClient, dynamoLike, tableNamesFromEnv } from "./dynamo-doc.ts";
 import { KmsKeyWrapper } from "./kms.ts";
+import { isSweepEvent, processRawKey, sweepRaw, type RawDeps, type SweepEvent } from "./raw.ts";
 import { S3BlobStore } from "./s3-blobs.ts";
 import { ttlCache } from "./ttl-cache.ts";
 
@@ -16,8 +17,6 @@ export interface S3Notification {
     };
   }>;
 }
-
-const SETUP_NOTIFICATION = "AMAZON_SES_SETUP_NOTIFICATION";
 
 const s3 = new S3Client({});
 const ssm = new SSMClient({});
@@ -74,28 +73,44 @@ export function objectKeyOf(record: { s3: { object: { key: string } } }): string
   return decodeURIComponent(record.s3.object.key.replace(/\+/g, " "));
 }
 
-/** Errors propagate so Lambda retries the event and then parks it in the DLQ. */
-export async function handler(event: S3Notification): Promise<{ processed: number; skipped: number }> {
+const SWEEP_MIN_AGE_MS = 5 * 60 * 1000;
+const SWEEP_MAX_OBJECTS = 25;
+
+/**
+ * S3 notifications carry Records. The scheduled sweep sends SWEEP_EVENT. Errors propagate
+ * so Lambda retries the event and then parks it in the DLQ.
+ */
+export async function handler(event: S3Notification | SweepEvent): Promise<{ processed: number; skipped: number }> {
   const loaded = await deps.get();
   const deleteRaw = (process.env.LOJO_DELETE_RAW ?? "1") !== "0";
+  const rawDeps = (bucket: string): RawDeps => ({
+    deleteRaw,
+    ingest: async (bytes, deliveryId) => {
+      const blobs = new S3BlobStore(s3, loaded.bucket ?? bucket);
+      await ingestRaw(bytes, { ...loaded, blobs }, { origin: "inbound", deliveryId });
+    },
+  });
+
+  if (isSweepEvent(event)) {
+    const bucket = loaded.bucket;
+    if (!bucket) throw new Error("LOJO_BUCKET is required for the raw/ sweep");
+    const result = await sweepRaw(new S3BlobStore(s3, bucket), rawDeps(bucket), {
+      now: new Date(),
+      minAgeMs: SWEEP_MIN_AGE_MS,
+      maxObjects: SWEEP_MAX_OBJECTS,
+      log: (line) => console.warn(JSON.stringify(line)),
+    });
+    if (result.failed > 0) throw new Error(`raw/ sweep: ${result.failed} object(s) failed to ingest`);
+    return { processed: result.swept, skipped: result.deferred };
+  }
+
   let processed = 0;
   let skipped = 0;
   for (const record of event.Records ?? []) {
-    const objectKey = objectKeyOf(record);
-    if (!objectKey.startsWith("raw/") || objectKey.endsWith(SETUP_NOTIFICATION)) {
-      skipped += 1;
-      continue;
-    }
-    const raws = new S3BlobStore(s3, record.s3.bucket.name);
-    const bytes = await raws.get(objectKey);
-    if (!bytes) {
-      skipped += 1;
-      continue;
-    }
-    const blobs = new S3BlobStore(s3, loaded.bucket ?? record.s3.bucket.name);
-    await ingestRaw(Buffer.from(bytes), { ...loaded, blobs }, { origin: "inbound", deliveryId: objectKey });
-    if (deleteRaw) await raws.delete(objectKey);
-    processed += 1;
+    const bucket = record.s3.bucket.name;
+    const outcome = await processRawKey(new S3BlobStore(s3, bucket), objectKeyOf(record), rawDeps(bucket));
+    if (outcome === "processed") processed += 1;
+    else skipped += 1;
   }
   return { processed, skipped };
 }

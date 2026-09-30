@@ -142,23 +142,83 @@ resource "aws_lambda_function" "api" {
 }
 
 resource "aws_lambda_permission" "s3_invoke" {
-  statement_id  = "AllowS3Invoke"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.processor.function_name
-  principal     = "s3.amazonaws.com"
-  source_arn    = aws_s3_bucket.mail.arn
+  statement_id   = "AllowS3Invoke"
+  action         = "lambda:InvokeFunction"
+  function_name  = aws_lambda_function.processor.function_name
+  principal      = "s3.amazonaws.com"
+  source_arn     = aws_s3_bucket.mail.arn
+  source_account = local.account_id
 }
 
+# This resource owns the bucket's entire notification configuration. Anything else
+# that writes it (the console, another stack) replaces it; the next plan shows the
+# drift, and the raw/ sweep below keeps mail moving meanwhile.
 resource "aws_s3_bucket_notification" "raw" {
   bucket = aws_s3_bucket.mail.id
 
   lambda_function {
+    id                  = "raw-to-processor"
     lambda_function_arn = aws_lambda_function.processor.arn
     events              = ["s3:ObjectCreated:*"]
     filter_prefix       = "raw/"
   }
 
-  depends_on = [aws_lambda_permission.s3_invoke]
+  depends_on = [
+    aws_lambda_permission.s3_invoke,
+    aws_lambda_function_event_invoke_config.processor,
+  ]
+}
+
+# Safety net: mail must never be stranded in raw/ if the notification is missing or
+# broken. The processor lists raw/ and ingests anything older than 5 minutes.
+resource "aws_cloudwatch_event_rule" "raw_sweep" {
+  name                = "${var.project}-raw-sweep"
+  description         = "Ingest anything left under raw/ that the S3 notification did not handle."
+  schedule_expression = var.raw_sweep_minutes == 1 ? "rate(1 minute)" : "rate(${var.raw_sweep_minutes} minutes)"
+}
+
+resource "aws_cloudwatch_event_target" "raw_sweep" {
+  rule  = aws_cloudwatch_event_rule.raw_sweep.name
+  arn   = aws_lambda_function.processor.arn
+  input = jsonencode({ lojo = "sweep-raw" })
+}
+
+resource "aws_lambda_permission" "raw_sweep" {
+  statement_id   = "AllowRawSweep"
+  action         = "lambda:InvokeFunction"
+  function_name  = aws_lambda_function.processor.function_name
+  principal      = "events.amazonaws.com"
+  source_arn     = aws_cloudwatch_event_rule.raw_sweep.arn
+  source_account = local.account_id
+}
+
+resource "aws_cloudwatch_log_metric_filter" "raw_swept" {
+  name           = "${var.project}-raw-swept"
+  log_group_name = aws_cloudwatch_log_group.processor.name
+  pattern        = "\"raw_swept\""
+
+  metric_transformation {
+    name          = "RawSwept"
+    namespace     = var.project
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "raw_swept" {
+  alarm_name          = "${var.project}-raw-swept"
+  alarm_description   = "The raw/ sweep picked up mail the S3 notification missed. Mail is flowing, but the primary trigger is broken. See docs/DEPLOY.md, If mail sits in raw/."
+  namespace           = var.project
+  metric_name         = "RawSwept"
+  statistic           = "Sum"
+  period              = 3600
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = var.alarm_actions
+
+  depends_on = [aws_cloudwatch_log_metric_filter.raw_swept]
 }
 
 resource "aws_lambda_permission" "apigw" {

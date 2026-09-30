@@ -204,8 +204,24 @@ variable "login_failure_alarm_threshold" {
 
 variable "processor_reserved_concurrency" {
   type        = number
-  description = "Reserved concurrency for the processor. -1 leaves it unreserved. New accounts often have a total limit of 10, and reserving from that can fail apply."
+  description = "Reserved concurrency for the processor. -1 leaves it unreserved. New accounts often have a total limit of 10, and reserving from that can fail apply. 0 is refused: it throttles every S3 event, silently, until the events expire."
   default     = -1
+
+  validation {
+    condition     = var.processor_reserved_concurrency == -1 || var.processor_reserved_concurrency >= 1
+    error_message = "processor_reserved_concurrency must be -1 (unreserved) or at least 1."
+  }
+}
+
+variable "raw_sweep_minutes" {
+  type        = number
+  description = "How often the processor sweeps raw/ for mail the S3 notification missed. Objects younger than 5 minutes are left alone."
+  default     = 15
+
+  validation {
+    condition     = var.raw_sweep_minutes >= 1 && var.raw_sweep_minutes <= 1440 && floor(var.raw_sweep_minutes) == var.raw_sweep_minutes
+    error_message = "raw_sweep_minutes must be a whole number from 1 to 1440."
+  }
 }
 
 variable "api_throttle_rate" {
