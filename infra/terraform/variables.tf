@@ -352,6 +352,39 @@ variable "bridge_trash_enabled" {
   default     = true
 }
 
+variable "bridge_send_enabled" {
+  type        = bool
+  description = "Gives the Thunderbird bridge token the client-send scope (LOJO_BRIDGE_SEND=on): Send in Thunderbird goes straight out through SES with no web approval, still subject to the From list, rate limits and the global send kill switch. Agent tokens and the MCP never get it. Off puts Thunderbird sends in the web approval queue."
+  default     = true
+}
+
+variable "send_from_addresses" {
+  type        = list(string)
+  description = "Extra From addresses Jon may send as from Thunderbird, besides the mailbox. Each must be an SES-verified identity (the address or its domain) in this account and region. Extends the API role's ses:FromAddress condition."
+  default     = []
+
+  validation {
+    condition     = alltrue([for address in var.send_from_addresses : can(regex("^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$", address))])
+    error_message = "send_from_addresses must be lower-case email addresses."
+  }
+}
+
+variable "client_send_limits" {
+  type = object({
+    max_recipients     = optional(number, 50)
+    per_day            = optional(number, 200)
+    recipients_per_day = optional(number, 500)
+    per_10_minutes     = optional(number, 30)
+  })
+  description = "Rate limits for sends from Thunderbird: recipients per message, messages per UTC day, recipients per UTC day, and messages per 10 minutes."
+  default     = {}
+
+  validation {
+    condition     = var.client_send_limits.max_recipients >= 1 && var.client_send_limits.max_recipients <= 50 && var.client_send_limits.per_day >= 1 && var.client_send_limits.recipients_per_day >= 1 && var.client_send_limits.per_10_minutes >= 1
+    error_message = "client_send_limits must be positive, and max_recipients at most 50 (the SES limit per call)."
+  }
+}
+
 variable "trash_purge_mode" {
   type        = string
   description = "What the daily trash purge does with mail past its retention window: report (audit what is due, delete nothing), purge (hard delete; grants the purge role DeleteItem on messages and DeleteObject on objects/ and ai-context/), or off."

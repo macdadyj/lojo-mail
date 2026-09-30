@@ -36,6 +36,8 @@ variables {
   dmarc_policy                    = "quarantine"
   auto_send_enabled               = false
   bridge_trash_enabled            = true
+  bridge_send_enabled             = true
+  send_from_addresses             = []
   trash_purge_mode                = "report"
   web_hosting_enabled             = false
   web_app_label                   = "app"
@@ -934,6 +936,90 @@ run "bridge_trash_flag_off" {
     condition     = aws_lambda_function.api.environment[0].variables.LOJO_BRIDGE_TRASH == "off"
     error_message = "bridge_trash_enabled = false keeps the bridge out of Trash"
   }
+}
+
+run "thunderbird_sends_directly_by_default_as_the_mailbox_only" {
+  command = plan
+
+  assert {
+    condition     = aws_lambda_function.api.environment[0].variables.LOJO_BRIDGE_SEND == "on"
+    error_message = "Jon's requirement: Send in Thunderbird goes out with no web approval"
+  }
+
+  assert {
+    condition     = aws_lambda_function.api.environment[0].variables.LOJO_SEND_FROM == ""
+    error_message = "no extra From addresses unless listed"
+  }
+
+  assert {
+    condition     = aws_lambda_function.api.environment[0].variables.LOJO_SEND_PER_DAY == "200" && aws_lambda_function.api.environment[0].variables.LOJO_SEND_MAX_RECIPIENTS == "50"
+    error_message = "client send limits default to 200 messages a day and 50 recipients a message"
+  }
+
+  assert {
+    condition = length([
+      for s in data.aws_iam_policy_document.api.statement : s
+      if s.sid == "SendAsMailbox" && anytrue([for c in s.condition : c.variable == "ses:FromAddress" && c.values == tolist(["lojo@cyberphysical.us"])])
+    ]) == 1
+    error_message = "the API sends as the mailbox only by default"
+  }
+
+  assert {
+    condition     = length(setintersection(toset(flatten([for s in data.aws_iam_policy_document.processor.statement : s.actions])), toset(["ses:SendEmail", "ses:SendRawEmail"]))) == 0
+    error_message = "client send lives in the API; the processor gains no SES permission"
+  }
+
+  assert {
+    condition     = toset(aws_sesv2_configuration_set.outbound.suppression_options[0].suppressed_reasons) == toset(["BOUNCE", "COMPLAINT"])
+    error_message = "the configuration set suppresses bounced and complaining addresses"
+  }
+}
+
+run "bridge_send_flag_off_queues_for_approval" {
+  command = plan
+
+  variables {
+    bridge_send_enabled = false
+  }
+
+  assert {
+    condition     = aws_lambda_function.api.environment[0].variables.LOJO_BRIDGE_SEND == "off"
+    error_message = "bridge_send_enabled = false keeps Thunderbird sends in the approval queue"
+  }
+}
+
+run "extra_send_from_addresses_extend_the_from_condition" {
+  command = plan
+
+  variables {
+    send_from_addresses = ["jon@lojo.engineering"]
+  }
+
+  assert {
+    condition     = aws_lambda_function.api.environment[0].variables.LOJO_SEND_FROM == "jon@lojo.engineering"
+    error_message = "the API learns the extra From address"
+  }
+
+  assert {
+    condition = length([
+      for s in data.aws_iam_policy_document.api.statement : s
+      if s.sid == "SendAsMailbox" &&
+      anytrue([for c in s.condition : c.variable == "ses:FromAddress" && c.values == tolist(["lojo@cyberphysical.us", "jon@lojo.engineering"])]) &&
+      contains(s.resources, "arn:aws:ses:us-east-1:111122223333:identity/jon@lojo.engineering") &&
+      contains(s.resources, "arn:aws:ses:us-east-1:111122223333:identity/lojo.engineering")
+    ]) == 1
+    error_message = "the API may send as exactly the mailbox and the listed addresses, through their identities"
+  }
+}
+
+run "send_from_addresses_must_be_addresses" {
+  command = plan
+
+  variables {
+    send_from_addresses = ["Not An Address"]
+  }
+
+  expect_failures = [var.send_from_addresses]
 }
 
 run "trash_purge_reports_by_default_and_cannot_delete" {
