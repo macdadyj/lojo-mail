@@ -64,8 +64,8 @@ final class EnvelopeTests: XCTestCase {
         XCTAssertThrowsError(try Envelope.PrivateKey(pasted: "not json"))
     }
 
-    func testFingerprintIsStable() throws {
-        XCTAssertEqual(try key("key.jwk").fingerprint, try key("key.jwk").fingerprint)
+    func testFingerprintMatchesServer() throws {
+        XCTAssertEqual(try key("key.jwk").fingerprint, try String(contentsOf: vectors().appendingPathComponent("key-fingerprint.txt"), encoding: .utf8))
         XCTAssertNotEqual(try key("key.jwk").fingerprint, try key("other-key.jwk").fingerprint)
     }
 }

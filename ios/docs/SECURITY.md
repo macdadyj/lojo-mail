@@ -10,8 +10,9 @@ The web app's threat model (`docs/SECURITY.md`) still applies. This covers what 
 | Session token (`hs_…`, 12 h) | Keychain | `AfterFirstUnlockThisDeviceOnly` so background refresh can list mail |
 | Web passphrase (only with "Keep me signed in") | Keychain | `AfterFirstUnlockThisDeviceOnly` |
 
-- The key is validated on import (curve, `d` matches `x`/`y`) and identified in Settings by a fingerprint (first 6
-  bytes of SHA-256 of the public key), never shown in full. Pasting clears the clipboard afterwards.
+- The key is validated on import (curve, `d` matches `x`/`y`) and identified in Settings by the same fingerprint the
+  server publishes in `/v1/settings` (`envelopeKeyFingerprint`, #9). A key for a different mailbox is refused on
+  import, and a stored one that doesn't match shows a red banner. Pasting clears the clipboard afterwards.
 - Because the key is `WhenUnlocked`, background refresh can't decrypt; notifications use list metadata only
   (sender and subject, which the server already stores in the clear for listing).
 - The app never logs: there is no `print`, `os_log` or `Logger` in the sources. `URLSession` is ephemeral (no cookie

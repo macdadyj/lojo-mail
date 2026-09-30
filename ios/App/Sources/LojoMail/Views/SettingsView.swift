@@ -32,7 +32,13 @@ struct SettingsView: View {
                 Section {
                     if let key = model.key {
                         LabeledContent("Envelope key") {
-                            Label("Loaded", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                            if model.keyMismatch {
+                                Label("Wrong mailbox", systemImage: "exclamationmark.lock.fill").foregroundStyle(.red)
+                            } else if model.serverSettings?.envelopeKeyFingerprint != nil {
+                                Label("Matches server", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                            } else {
+                                Label("Loaded", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                            }
                         }
                         LabeledContent("Fingerprint", value: key.fingerprint).font(.footnote.monospaced())
                         Button("Replace key…") { showKeySetup = true }

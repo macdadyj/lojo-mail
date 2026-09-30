@@ -53,6 +53,12 @@ approval flow above, which is the one path that binds a send to content a human 
 - `trashedBy` can be `human`, `bridge` or `agent:<label>`; a trashed thread says "Trashed by you / from Thunderbird /
   by agent X".
 - `rate_limited` maps to HTTP 429, shown as "try again in N s".
+- Bot drafts: the bridge tags drafts whose `origin` is `agent`, `ai` or `rule` with the IMAP keyword `bot-draft`. The
+  API itself exposes `draft.origin`, and the app uses the same split (`DraftAuthor.isBot`) for the "Written by AI
+  and assistants" section and the author notice.
+
+From #9 (web app on any device): `/v1/settings` publishes `envelopeKeyFingerprint`; the app computes the same
+fingerprint locally to refuse a key that belongs to another mailbox.
 
 ## API behaviour the app works around
 

@@ -21,6 +21,9 @@ final class LiveTests: XCTestCase {
         let (api, key) = try live()
         let settings = try await api.settings()
         XCTAssertEqual(settings.principal, "human")
+        if let published = settings.envelopeKeyFingerprint {
+            XCTAssertEqual(key.fingerprint, published, "the local key is the one this mailbox seals to")
+        }
         let messages = try await api.folder(.inbox, limit: 50)
         XCTAssertFalse(messages.isEmpty)
         var attachments = 0

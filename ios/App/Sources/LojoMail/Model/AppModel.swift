@@ -162,8 +162,19 @@ final class AppModel {
         bodies = bodies.filter { if case .opened = $0.value { return true } else { return false } }
     }
 
+    struct WrongKey: LocalizedError {
+        var errorDescription: String? { "That key isn't the one this mailbox seals mail to. Check you picked envelope.private.jwk for lojo@cyberphysical.us." }
+    }
+
+    /// The server publishes which key mail is sealed to; `false` until both sides are known.
+    var keyMismatch: Bool {
+        guard let key, let published = serverSettings?.envelopeKeyFingerprint else { return false }
+        return key.fingerprint != published
+    }
+
     func importKey(_ text: String) throws {
         let key = try Envelope.PrivateKey(pasted: text)
+        if let published = serverSettings?.envelopeKeyFingerprint, key.fingerprint != published { throw WrongKey() }
         store(key: key)
     }
 

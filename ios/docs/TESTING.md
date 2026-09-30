@@ -5,11 +5,11 @@
 `CoreTests` builds `LojoMailCore` with swift-crypto on Santa Computa. 21 tests:
 
 - **Offline (16)**: envelopes sealed by `packages/core/src/envelope.ts` open in Swift (body, 70 KB attachment); wrong
-  AAD, wrong key and tampering are refused; JWK validation and fingerprint; model decoding (messages, drafts, rules
+  AAD, wrong key and tampering are refused; JWK validation; fingerprint equals `keyFingerprint` from `packages/core`; model decoding (messages, drafts, rules
   including `sendKillSwitch`, session expiry); thread grouping; draft author notices; changed-field comparison
   (mirrors `packages/web/src/review.ts`); reply/forward helpers; HTML fallback; base URL validation; request paths.
-- **`--live` (2, read-only)**: signs in with `~/.config/lojo-mail/web-passphrase`, decrypts every Inbox body and
-  attachment with the real envelope key, and decodes drafts, rules, search and every folder.
+- **`--live` (2, read-only)**: signs in with `~/.config/lojo-mail/web-passphrase`, checks the local key's fingerprint
+  equals the server's `envelopeKeyFingerprint`, decrypts every Inbox body and attachment with the real envelope key, and decodes drafts, rules, search and every folder.
 - **`--live-write` (3)**: through the same `APIClient` the app uses, on mail from `lojo-test@cyberphysical.us` only:
   - unread, star, archive and move back, trash (checks `trashedBy`, `keepUntil`, listed in Trash) and restore, then
     search finds it;

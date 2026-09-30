@@ -140,10 +140,15 @@ public enum Envelope {
             try JSONEncoder().encode(jwk)
         }
 
-        /// A short, stable fingerprint of the public half, so Jon can tell which key is loaded without seeing it.
+        /// Same as `keyFingerprint` in `packages/core/src/crypto/envelope.ts`, which `/v1/settings` publishes as
+        /// `envelopeKeyFingerprint`: SHA-256 of `P-256:<x>:<y>`, first 10 bytes, hex in groups of four.
         public var fingerprint: String {
-            let digest = SHA256.hash(data: key.publicKey.x963Representation)
-            return digest.prefix(6).map { String(format: "%02X", $0) }.joined(separator: ":")
+            let digest = SHA256.hash(data: Data("P-256:\(jwk.x):\(jwk.y)".utf8))
+            let hex = digest.prefix(10).map { String(format: "%02x", $0) }.joined()
+            return stride(from: 0, to: hex.count, by: 4).map { offset in
+                let start = hex.index(hex.startIndex, offsetBy: offset)
+                return String(hex[start..<hex.index(start, offsetBy: 4)])
+            }.joined(separator: "-")
         }
     }
 }

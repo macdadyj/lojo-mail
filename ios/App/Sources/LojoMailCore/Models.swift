@@ -269,6 +269,8 @@ public struct ServerSettings: Codable, Sendable, Hashable {
     public var dailyTokenBudget: Int
     public var budgetUsed: Int
     public var unlocked: Bool
+    /// Which key mail is sealed to (servers before #9 omit it).
+    public var envelopeKeyFingerprint: String?
     public var dev: Bool
     public var principal: String
 }

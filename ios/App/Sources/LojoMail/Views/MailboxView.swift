@@ -74,7 +74,14 @@ struct MailboxView: View {
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
-            if model.key == nil {
+            if model.keyMismatch {
+                Button { showKeySetup = true } label: {
+                    Banner(text: "The key on this iPhone doesn't match this mailbox, so mail won't open. Tap to replace it.", systemImage: "exclamationmark.lock.fill", tint: .red)
+                }
+                .buttonStyle(.plain)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            } else if model.key == nil {
                 Button { showKeySetup = true } label: {
                     Banner(text: "Bodies are sealed. Tap to load your envelope key.", systemImage: "key.fill", tint: Theme.accent)
                 }
