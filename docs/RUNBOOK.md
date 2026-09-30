@@ -173,7 +173,7 @@ Suggested additions. `terraform output dns_plan` prints them. Terraform does not
 
 - Edit the existing `_dmarc` TXT in place to `v=DMARC1; p=quarantine; pct=100; fo=1; rua=mailto:dmarc@cyberphysical.us`. One record. The receipt rule already accepts `dmarc@` so the reports have somewhere to land.
 - Add `_smtp._tls` TXT `v=TLSRPTv1; rua=mailto:dmarc@cyberphysical.us`.
-- Serve `docs/mta-sts.txt` at `https://mta-sts.cyberphysical.us/.well-known/mta-sts.txt`, then add the `_mta-sts` TXT. The file is `mode: testing` and names the us-east-1 inbound MX. The TXT alone does nothing.
+- (Done by `web_hosting_enabled`, see section 9.) Serve `docs/mta-sts.txt` at `https://mta-sts.cyberphysical.us/.well-known/mta-sts.txt`, then add the `_mta-sts` TXT. The file is `mode: testing` and names the us-east-1 inbound MX. The TXT alone does nothing.
 - Host the OpenPGP public key at the WKD advanced URL (`npm run wkd-hash`). No DNS record until that HTTPS host exists. Publish only the public key.
 - Apex MX TTL is 1800 and the target is already correct. Lower it to 300 only before a future move off us-east-1.
 
@@ -290,6 +290,30 @@ The policy is in a `<meta>` tag, and browsers ignore `frame-ancestors` there. Th
 - `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`.
 
 Netlify and Cloudflare Pages read `_headers` as it is. On CloudFront, copy the same values into a response headers policy. After deploy, check with `curl -sI https://<web origin>/ | grep -i -E 'content-security|x-frame'`. As a backstop, the app refuses to start inside a frame.
+
+### Hosting it on CloudFront (optional Terraform, `web_hosting_enabled`)
+
+`infra/terraform/web_hosting.tf` builds the cheap version of "an HTTPS origin you already have". It is off by default. Turn it on in `terraform.tfvars`:
+
+```hcl
+zone_id             = "Z00717522DVA6Y0FKVFVM"
+web_hosting_enabled = true
+web_origins         = ["http://127.0.0.1:5173", "http://localhost:5173", "https://app.cyberphysical.us"]
+```
+
+Order matters, because the response headers policy is read from `packages/web/dist/_headers`:
+
+1. `VITE_LOJO_API_URL=<api_endpoint> VITE_LOJO_BLOB_ORIGIN=<web_blob_origin> npm run build:web`
+2. `terraform apply` (creates the resources below)
+3. `scripts/deploy-web.sh` (rebuilds, uploads `dist/` to `s3://<web bucket>/app/`, invalidates the shell files)
+
+What it creates, all in us-east-1: a private S3 bucket (public access blocked, SSE-S3, TLS-only, reads only by the two distributions through origin access control); one ACM certificate for `app.` and `mta-sts.` (DNS validation); two CloudFront distributions (PriceClass_100, TLS 1.2+, HTTP/2 and 3, IPv6), one per host, so the app host never serves the policy and the policy host never serves the app; a response headers policy with the `_headers` values (CSP with `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy: no-referrer`) plus HSTS; and Route 53 records. Terraform sets `allow_overwrite = false` on every record it writes, so it cannot edit an existing one.
+
+Records it writes: `app.` and `mta-sts.` alias A and AAAA to CloudFront, the two ACM validation CNAMEs, `_smtp._tls` TXT (`web_hosting_publish_tls_rpt`), and `_mta-sts` TXT only when `web_hosting_publish_mta_sts_txt = true`. Set that flag after `curl https://mta-sts.<domain>/.well-known/mta-sts.txt` returns the policy. Bump `mta_sts_id` whenever `docs/mta-sts.txt` changes. The `_dmarc` TXT is not Terraform's: it already exists, so it was edited in place by hand (`rua=mailto:dmarc@cyberphysical.us`).
+
+Cost: no per-distribution or per-certificate charge. The bucket is under 1 MB. At personal traffic (a few thousand requests a month) CloudFront stays inside its always-free tier (1 TB out, 10M requests), Route 53 lookups for the alias records are free, and the S3 bill is a fraction of a cent. The only fixed cost is what the hosted zone already costs. Expect about $0.00 to $0.05 a month.
+
+Browsers send an `OPTIONS` preflight to the API. API Gateway hands it to the `$default` Lambda route, so the app answers `OPTIONS` with 204 and the gateway's CORS configuration adds the `access-control-*` headers.
 
 ## 10. Day-two
 

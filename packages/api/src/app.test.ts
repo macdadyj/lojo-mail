@@ -120,3 +120,10 @@ test("vector backfill needs write and body, and reports what it did", async () =
   const settings = await api.call("/v1/settings", { token: "read-token" });
   assert.equal(settings.json.embedProvider, "none");
 });
+
+test("a CORS preflight is answered without a token, so API Gateway's CORS headers can reach the browser", async () => {
+  const t = await testApp();
+  const res = await t.app.request("/v1/session/login", { method: "OPTIONS", headers: { origin: "https://app.example", "access-control-request-method": "POST" } });
+  assert.equal(res.status, 204);
+  assert.equal(await res.text(), "");
+});

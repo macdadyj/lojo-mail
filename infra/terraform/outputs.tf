@@ -70,3 +70,15 @@ output "tables" {
     budget   = aws_dynamodb_table.budget.name
   }
 }
+
+output "web_hosting" {
+  description = "Null unless web_hosting_enabled. bucket and app_prefix are where scripts/deploy-web.sh uploads."
+  value = var.web_hosting_enabled ? {
+    app_url                 = "https://${local.web_app_host}"
+    mta_sts_policy_url      = "https://${local.web_mta_sts_host}/.well-known/mta-sts.txt"
+    bucket                  = aws_s3_bucket.web[0].bucket
+    app_prefix              = "app/"
+    app_distribution_id     = aws_cloudfront_distribution.app[0].id
+    mta_sts_distribution_id = aws_cloudfront_distribution.mta_sts[0].id
+  } : null
+}

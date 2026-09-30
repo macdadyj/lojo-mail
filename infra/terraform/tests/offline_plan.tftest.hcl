@@ -922,3 +922,23 @@ run "trash_purge_mode_is_validated" {
 
   expect_failures = [var.trash_purge_mode]
 }
+
+run "web_hosting_is_off_by_default" {
+  command = plan
+
+  assert {
+    condition     = output.web_hosting == null
+    error_message = "web hosting must be opt-in"
+  }
+}
+
+run "web_hosting_without_zone_is_refused" {
+  command = plan
+
+  variables {
+    web_hosting_enabled = true
+    zone_id             = ""
+  }
+
+  expect_failures = [var.web_hosting_enabled]
+}
