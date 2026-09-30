@@ -316,6 +316,8 @@ public struct Rule: Codable, Sendable, Hashable, Identifiable {
 public struct RulesDocument: Codable, Sendable, Hashable {
     public var paused: Bool
     public var killSwitch: Bool
+    /// Stops every send: approved human sends, bridge sends and auto-send. Older servers omit it.
+    public var sendKillSwitch: Bool?
     public var trashRetentionDays: Int?
     public var maxAutoSendPerDay: Int?
     public var rules: [Rule]

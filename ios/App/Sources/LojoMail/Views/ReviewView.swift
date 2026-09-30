@@ -115,6 +115,7 @@ struct RulesView: View {
     @Environment(AppModel.self) private var model
     @State private var confirmRelease = false
     @State private var confirmResume = false
+    @State private var confirmSendRelease = false
     @State private var working = false
 
     private var doc: RulesDocument? { model.rules?.rules }
@@ -128,6 +129,9 @@ struct RulesView: View {
                     Section { killSwitchCard(doc) }
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
+                    Section { sendKillSwitchRow(doc) } footer: {
+                        Text("Blocks every send, including mail you approve here and Thunderbird. Anyone with a token can engage it; only your signed-in session can release it.")
+                    }
                     Section {
                         Toggle(isOn: Binding(get: { !doc.paused }, set: { on in
                             if on { confirmResume = true } else { Task { await model.setPaused(true) } }
@@ -185,6 +189,11 @@ struct RulesView: View {
                     ? "Auto-send rules you wrote (\(armedRules.count) enabled) may send replies on their own again, within their allowlists and limits."
                     : "The server has auto-send turned off, so rules still only write drafts.")
             }
+            .confirmationDialog("Allow sending again?", isPresented: $confirmSendRelease, titleVisibility: .visible) {
+                Button("Allow sending", role: .destructive) { Task { await model.setSendKillSwitch(false) } }
+            } message: {
+                Text("Approved drafts and Thunderbird can send mail again. The autonomous kill switch above is separate.")
+            }
             .confirmationDialog("Resume all rules?", isPresented: $confirmResume, titleVisibility: .visible) {
                 Button("Resume rules") { Task { await model.setPaused(false) } }
             }
@@ -239,6 +248,27 @@ struct RulesView: View {
         .padding(16)
         .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .accessibilityElement(children: .contain)
+    }
+
+    private func sendKillSwitchRow(_ doc: RulesDocument) -> some View {
+        let stopped = doc.sendKillSwitch ?? false
+        return Toggle(isOn: Binding(get: { stopped }, set: { on in
+            if on {
+                Haptics.warning()
+                Task { await model.setSendKillSwitch(true) }
+            } else {
+                confirmSendRelease = true
+            }
+        })) {
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Stop all sending", systemImage: "xmark.octagon.fill")
+                    .foregroundStyle(stopped ? .red : .primary)
+                Text(stopped ? "Nothing leaves the mailbox." : "Approved mail can be sent.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .tint(.red)
     }
 
     private func ruleRow(_ rule: Rule) -> some View {

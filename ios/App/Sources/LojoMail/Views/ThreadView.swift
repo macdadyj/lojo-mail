@@ -23,6 +23,15 @@ struct ThreadView: View {
     private var starred: Bool { messages.contains(where: \.starred) }
     private var inTrash: Bool { messages.contains { $0.folder == Folder.trash.rawValue } }
 
+    private var trashedByText: String {
+        switch messages.compactMap(\.trashedBy).first {
+        case "human": "Trashed by you"
+        case "bridge": "Trashed from Thunderbird"
+        case let actor? where actor.hasPrefix("agent:"): "Trashed by agent \(actor.dropFirst(6))"
+        default: "In Trash"
+        }
+    }
+
     var body: some View {
         Group {
             if loading && messages.isEmpty {
@@ -59,7 +68,7 @@ struct ThreadView: View {
                     .textSelection(.enabled)
                     .accessibilityAddTraits(.isHeader)
                 if inTrash, let keep = messages.compactMap(\.keepUntil).compactMap(ISODate.parse).min() {
-                    Banner(text: "In Trash · kept until \(keep.formatted(date: .abbreviated, time: .omitted))", systemImage: "trash", tint: .secondary)
+                    Banner(text: "\(trashedByText) · kept until \(keep.formatted(date: .abbreviated, time: .omitted))", systemImage: "trash", tint: .secondary)
                 }
                 if let phish = messages.first(where: \.looksPhishy) { phishingCard(phish) }
                 summaryCard

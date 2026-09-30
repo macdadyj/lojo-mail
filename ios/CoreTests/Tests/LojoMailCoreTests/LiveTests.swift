@@ -48,7 +48,7 @@ final class LiveTests: XCTestCase {
         let (api, _) = try live()
         _ = try await api.drafts()
         let rules = try await api.rules()
-        print("live: rules=\(rules.rules.rules.count) killSwitch=\(rules.rules.killSwitch) autoSendEnabled=\(rules.autoSendEnabled)")
+        print("live: rules=\(rules.rules.rules.count) killSwitch=\(rules.rules.killSwitch) sendKillSwitch=\(rules.rules.sendKillSwitch.map(String.init) ?? "absent") autoSendEnabled=\(rules.autoSendEnabled)")
         _ = try await api.search("test")
         for folder in Folder.allCases { _ = try await api.folder(folder, limit: 5) }
     }

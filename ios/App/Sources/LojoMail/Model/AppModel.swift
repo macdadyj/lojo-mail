@@ -538,6 +538,16 @@ final class AppModel {
         }
     }
 
+    func setSendKillSwitch(_ on: Bool) async {
+        do {
+            let doc = try await call { try await $0.setRuleSwitches(sendKillSwitch: on) }
+            rules?.rules = doc
+            toast = Toast(text: on ? "All sending stopped" : "Sending allowed again", systemImage: on ? "xmark.octagon.fill" : "checkmark.circle.fill")
+        } catch {
+            report(error)
+        }
+    }
+
     func setPaused(_ paused: Bool) async {
         do {
             let doc = try await call { try await $0.setRuleSwitches(paused: paused) }

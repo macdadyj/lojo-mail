@@ -231,11 +231,12 @@ public struct APIClient: Sendable {
         try await send("GET", "/v1/rules")
     }
 
-    public func setRuleSwitches(paused: Bool? = nil, killSwitch: Bool? = nil) async throws -> RulesDocument {
+    public func setRuleSwitches(paused: Bool? = nil, killSwitch: Bool? = nil, sendKillSwitch: Bool? = nil) async throws -> RulesDocument {
         struct Reply: Decodable { var rules: RulesDocument }
         var body: [String: Any] = [:]
         if let paused { body["paused"] = paused }
         if let killSwitch { body["killSwitch"] = killSwitch }
+        if let sendKillSwitch { body["sendKillSwitch"] = sendKillSwitch }
         let reply: Reply = try await send("POST", "/v1/rules/switches", json: body)
         return reply.rules
     }

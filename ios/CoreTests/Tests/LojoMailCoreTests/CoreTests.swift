@@ -116,8 +116,11 @@ final class ModelTests: XCTestCase {
         """
         let view = try JSONDecoder().decode(RulesState.self, from: Data(json.utf8))
         XCTAssertTrue(view.rules.killSwitch)
+        XCTAssertNil(view.rules.sendKillSwitch)
         XCTAssertTrue(view.rules.rules[0].autoSends)
         XCTAssertEqual(view.rules.rules[0].actions.map(\.summary), ["Auto-reply (guarded)", "Label ack"])
+        let newer = try JSONDecoder().decode(RulesDocument.self, from: Data(#"{"paused":false,"killSwitch":false,"sendKillSwitch":true,"rules":[]}"#.utf8))
+        XCTAssertEqual(newer.sendKillSwitch, true)
     }
 
     func testSessionValidity() {

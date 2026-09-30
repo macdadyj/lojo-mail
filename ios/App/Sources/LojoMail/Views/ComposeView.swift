@@ -106,6 +106,13 @@ struct ComposeView: View {
                     ? "Encryption is off. This goes out in plain text, even to recipients who have an OpenPGP key."
                     : "Encrypted with OpenPGP when every recipient has a published key; otherwise sent over TLS.")
             }
+            if app.rules?.rules.sendKillSwitch == true {
+                Section {
+                    Label("Stop all sending is on in AI Rules, so the server will refuse to send. You can still save to the approval queue.", systemImage: "xmark.octagon.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+            }
             if !model.blockedByTestMode.isEmpty {
                 Section {
                     Label("Test mode is on. Sending is limited to \(AppModel.testAddress); \(model.blockedByTestMode.joined(separator: ", ")) would be refused. Save to the approval queue instead, or turn test mode off in Settings.", systemImage: "testtube.2")
