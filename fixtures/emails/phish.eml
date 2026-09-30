@@ -1,0 +1,11 @@
+From: Security Team <notice@evil.example>
+Reply-To: steal@other.example
+To: lojo@cyberphysical.us
+Subject: Urgent action required
+Date: Thu, 18 Sep 2026 08:01:00 +0000
+Message-ID: <phish-1@evil.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Your password expires tonight. Verify your account immediately or it will be suspended.
+https://evil.example/login

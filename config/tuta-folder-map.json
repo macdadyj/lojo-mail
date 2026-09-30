@@ -1,0 +1,12 @@
+{
+  "Inbox": "inbox",
+  "Sent": "sent",
+  "Sent Items": "sent",
+  "Drafts": "drafts",
+  "Draft": "drafts",
+  "Spam": "spam",
+  "Junk": "spam",
+  "Trash": "trash",
+  "Bin": "trash",
+  "Archive": "archive"
+}

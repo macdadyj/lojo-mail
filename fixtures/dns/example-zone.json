@@ -1,0 +1,23 @@
+{
+  "comment": "Synthetic stand-in shaped like the September 2026 read-only audit of cyberphysical.us. Token values are fake. This is not a dump of the live zone.",
+  "ResourceRecordSets": [
+    { "Name": "cyberphysical.us.", "Type": "SOA", "TTL": 900, "ResourceRecords": [{ "Value": "ns-1.awsdns-00.com. hostmaster.cyberphysical.us. 1 7200 900 1209600 86400" }] },
+    { "Name": "cyberphysical.us.", "Type": "NS", "TTL": 172800, "ResourceRecords": [{ "Value": "ns-1.awsdns-00.com." }, { "Value": "ns-2.awsdns-00.org." }] },
+    { "Name": "cyberphysical.us.", "Type": "MX", "TTL": 1800, "ResourceRecords": [{ "Value": "10 inbound-smtp.us-east-1.amazonaws.com" }] },
+    { "Name": "cyberphysical.us.", "Type": "TXT", "TTL": 300, "ResourceRecords": [{ "Value": "\"v=spf1 include:amazonses.com ~all\"" }] },
+    { "Name": "_dmarc.cyberphysical.us.", "Type": "TXT", "TTL": 300, "ResourceRecords": [{ "Value": "\"v=DMARC1; p=quarantine; pct=100; fo=1\"" }] },
+    { "Name": "_amazonses.cyberphysical.us.", "Type": "TXT", "TTL": 300, "ResourceRecords": [{ "Value": "\"synthetic-ses-verification\"" }] },
+    { "Name": "token1._domainkey.cyberphysical.us.", "Type": "CNAME", "TTL": 1800, "ResourceRecords": [{ "Value": "token1.dkim.amazonses.com" }] },
+    { "Name": "token2._domainkey.cyberphysical.us.", "Type": "CNAME", "TTL": 1800, "ResourceRecords": [{ "Value": "token2.dkim.amazonses.com" }] },
+    { "Name": "token3._domainkey.cyberphysical.us.", "Type": "CNAME", "TTL": 1800, "ResourceRecords": [{ "Value": "token3.dkim.amazonses.com" }] },
+    { "Name": "token4._domainkey.cyberphysical.us.", "Type": "CNAME", "TTL": 1800, "ResourceRecords": [{ "Value": "token4.dkim.amazonses.com" }] },
+    { "Name": "token5._domainkey.cyberphysical.us.", "Type": "CNAME", "TTL": 1800, "ResourceRecords": [{ "Value": "token5.dkim.amazonses.com" }] },
+    { "Name": "token6._domainkey.cyberphysical.us.", "Type": "CNAME", "TTL": 1800, "ResourceRecords": [{ "Value": "token6.dkim.amazonses.com" }] },
+    { "Name": "mail.cyberphysical.us.", "Type": "MX", "TTL": 300, "ResourceRecords": [{ "Value": "10 feedback-smtp.us-east-1.amazonses.com" }] },
+    { "Name": "mail.cyberphysical.us.", "Type": "TXT", "TTL": 300, "ResourceRecords": [{ "Value": "\"v=spf1 include:amazonses.com ~all\"" }] },
+    { "Name": "_abc123.cyberphysical.us.", "Type": "CNAME", "TTL": 300, "ResourceRecords": [{ "Value": "_abc123.acm-validations.aws." }] },
+    { "Name": "autodiscover.cyberphysical.us.", "Type": "CNAME", "TTL": 300, "ResourceRecords": [{ "Value": "autodiscover.mail.us-east-1.awsapps.com." }] },
+    { "Name": "_amazonchime.cyberphysical.us.", "Type": "TXT", "TTL": 300, "ResourceRecords": [{ "Value": "\"synthetic-chime\"" }] },
+    { "Name": "www.cyberphysical.us.", "Type": "A", "TTL": 300, "ResourceRecords": [{ "Value": "203.0.113.10" }] }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@lojo/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./crypto": "./src/crypto/envelope.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.830.0",
+    "mailparser": "^3.7.4",
+    "openpgp": "^6.1.1",
+    "zod": "^3.25.56"
+  },
+  "devDependencies": {
+    "@types/mailparser": "^3.4.6"
+  }
+}

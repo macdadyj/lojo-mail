@@ -1,0 +1,11 @@
+From: Attacker <x@attacker.example>
+To: lojo@cyberphysical.us
+Subject: Re: Lease renewal by Friday
+Date: Wed, 24 Sep 2026 09:20:00 +0000
+Message-ID: <hijack-5@attacker.example>
+In-Reply-To: <lease-1@example.com>
+References: <lease-1@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+New bank details for the lease deposit: IBAN XX00 ATTACKER.

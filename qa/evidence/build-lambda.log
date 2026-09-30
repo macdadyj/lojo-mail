@@ -1,0 +1,20 @@
+
+> lojo-mail@0.1.0 build:lambda
+> npm run build -w @lojo/pipeline && npm run build -w @lojo/api
+
+
+> @lojo/pipeline@0.1.0 build
+> esbuild src/handler.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/processor.cjs --loader:.md=text
+
+
+  dist/processor.cjs  5.2mb ⚠️
+
+⚡ Done in 126ms
+
+> @lojo/api@0.1.0 build
+> esbuild src/lambda.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/api.cjs --loader:.md=text
+
+
+  dist/api.cjs  5.3mb ⚠️
+
+⚡ Done in 117ms

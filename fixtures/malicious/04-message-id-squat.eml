@@ -1,0 +1,10 @@
+From: Attacker <x@attacker.example>
+To: lojo@cyberphysical.us
+Subject: placeholder
+Date: Wed, 24 Sep 2026 09:15:00 +0000
+Message-ID: <lease-1@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+This message reuses the Message-ID of a legitimate message that has not
+arrived yet. The real one will be discarded as a duplicate.

@@ -1,0 +1,41 @@
+# Copy to terraform.tfvars (gitignored) before plan/apply.
+# Defaults match the read-only audit: lojo@cyberphysical.us, SES in us-east-1.
+# manage_dns stays false. The receipt rule set is active because no set was
+# active in any region. Re-check that before apply.
+
+aws_region         = "us-east-1"
+domain             = "cyberphysical.us"
+local_part         = "lojo"
+ses_identity_mode  = "existing"
+
+manage_dns               = false
+dns_cutover_confirmation = ""
+zone_id                  = ""
+manage_active_rule_set   = true
+
+# First deploy: only lojo-test@ is accepted, so the live checklist in
+# docs/DEPLOY.md runs before real mail. Set "live" when it passes.
+receiving_stage           = "test"
+receiving_test_local_part = "lojo-test"
+
+llm_provider       = "grok"
+daily_token_budget = 100000
+
+# Raw MIME is deleted after indexing; this only expires what failed.
+raw_retention_days = 7
+# Server-readable AI-context copies. 0 turns them off.
+ai_context_days = 30
+
+# SNS topic ARNs for the processor DLQ and error alarms.
+alarm_actions = []
+
+# After `npm run build:lambda`:
+# processor_bundle = "../../packages/pipeline/dist/processor.mjs"
+# api_bundle       = "../../packages/api/dist/api.mjs"
+
+# Add the PWA's HTTPS origin before deploying it; this also sets S3 CORS for
+# presigned attachment downloads.
+web_origins = [
+  "http://127.0.0.1:5173",
+  "http://localhost:5173",
+]

@@ -1,0 +1,275 @@
+✔ [control] inbound pipeline: an obedient model still cannot send, delete, or retarget a draft (54.261956ms)
+✖ [P1] inbound pipeline: model-chosen labels/priority are trusted as-is (phish lands in triage as 'now', labelled 'trusted') (8.879653ms)
+✖ [P0] MCP: an email can drive a send-scoped agent to exfiltrate the mailbox (no human in the loop) (25.940086ms)
+✖ [P1] MCP: a write-scoped agent can be told to trash mail (deletion by injection) (4.538809ms)
+✔ [control] MCP: a read-only token cannot draft, move, or send (5.39915ms)
+✖ [P0] production API (no private key) cannot approve-and-send any draft (15.180808ms)
+✖ [P1] production API (no private key): draft-reply and rewrite are unavailable (4.961662ms)
+✖ [P1] a forged From: lojo@ lands in Sent and is marked read (3.947362ms)
+✖ [P1] Message-ID squatting silently drops the legitimate message (3.71168ms)
+✖ [P2] References-based thread hijack: attacker message joins Jon's lease thread (5.192874ms)
+✖ [P2] RFC 2047 subject can carry CR/LF into outbound raw headers (1.771604ms)
+✖ [P2] Reply-To mismatch heuristic never fires (replyTo is not passed to heuristicPhishing) (1.539837ms)
+✖ [P0] a 300 KB attachment produces a DynamoDB item over the 400 KB item limit (41.676182ms)
+✖ [P1] dedupe on DynamoDB only sees the first Scan page (redelivery after ~500 messages is stored twice) (655.701589ms)
+✔ [control] audit.detail does not carry model output or body fragments when JSON parsing fails (2.013532ms)
+✔ [control] envelope: body is not in the stored item, tampering fails, fresh ephemeral key per message (4.120715ms)
+✖ [P2] envelope is not bound to its message (no AAD): swapping envelopes between rows goes undetected (4.011432ms)
+✖ [P1] OpenPGP send: only To[0] can decrypt, no signature, and Jon's sent copy is unreadable to him (178.312434ms)
+✔ [control] API: path variants do not bypass auth or the send scope (4.527596ms)
+✖ [P2] API: a read-only token cannot search (POST /v1/search is mapped to write) (4.420785ms)
+✖ [P2] web 'Draft reply' on a thread whose latest message is Jon's own reply drafts to Jon (7.89862ms)
+✖ [P2] ingest creates a suggested reply-to-self draft for Jon's own sent copy (3.200197ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 5
+ℹ fail 17
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1416.129701
+
+✖ failing tests:
+
+test at qa/harness/security.test.ts:1:2830
+✖ [P1] inbound pipeline: model-chosen labels/priority are trusted as-is (phish lands in triage as 'now', labelled 'trusted') (8.879653ms)
+  AssertionError [ERR_ASSERTION]: a high-heuristic phish should not top triage
+      at TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:102:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'Your account is suspended',
+    expected: 'Your account is suspended',
+    operator: 'notStrictEqual'
+  }
+
+test at qa/harness/security.test.ts:1:3345
+✖ [P0] MCP: an email can drive a send-scoped agent to exfiltrate the mailbox (no human in the loop) (25.940086ms)
+  AssertionError [ERR_ASSERTION]: approve_and_send accepted a model-created draft to a never-seen address; the sealed body CODEWORD-ZEBRA left the mailbox
+      at TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:121:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '=='
+  }
+
+test at qa/harness/security.test.ts:1:4444
+✖ [P1] MCP: a write-scoped agent can be told to trash mail (deletion by injection) (4.538809ms)
+  AssertionError [ERR_ASSERTION]: destructive moves should need a human confirmation or a separate scope
+      at TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:132:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'trash',
+    expected: 'trash',
+    operator: 'notStrictEqual'
+  }
+
+test at qa/harness/security.test.ts:1:5452
+✖ [P0] production API (no private key) cannot approve-and-send any draft (15.180808ms)
+  AssertionError [ERR_ASSERTION]: send in production returned 423 {"error":"Mailbox is locked","code":"locked"}
+  
+  423 !== 200
+  
+      at TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:165:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 423,
+    expected: 200,
+    operator: 'strictEqual'
+  }
+
+test at qa/harness/security.test.ts:1:6251
+✖ [P1] production API (no private key): draft-reply and rewrite are unavailable (4.961662ms)
+  AssertionError [ERR_ASSERTION]: Got unwanted rejection: web 'Draft reply' calls this; it 423s in production
+  Actual message: "Unlock the mailbox to draft a reply"
+      at async TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:171:3)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: MailError: Unlock the mailbox to draft a reply
+        at Mailbox.draftReply (/workspace/packages/core/src/mailbox.ts:257:24)
+        at async waitForActual (node:assert:875:5)
+        at async Function.doesNotReject (node:assert:1016:33)
+        at async TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:171:3)
+        at async Test.run (node:internal/test_runner/test:980:9)
+        at async Test.processPendingSubtests (node:internal/test_runner/test:677:7),
+    expected: undefined,
+    operator: 'doesNotReject'
+  }
+
+test at qa/harness/security.test.ts:1:6560
+✖ [P1] a forged From: lojo@ lands in Sent and is marked read (3.947362ms)
+  AssertionError [ERR_ASSERTION]: inbound mail must not be filed as sent based on a forgeable header
+  
+  'sent' !== 'inbox'
+  
+      at TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:181:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'sent',
+    expected: 'inbox',
+    operator: 'strictEqual'
+  }
+
+test at qa/harness/security.test.ts:1:6874
+✖ [P1] Message-ID squatting silently drops the legitimate message (3.71168ms)
+  AssertionError [ERR_ASSERTION]: a different sender/body with the same Message-ID is not a duplicate
+  
+  true !== false
+  
+      at TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:189:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual'
+  }
+
+test at qa/harness/security.test.ts:1:7198
+✖ [P2] References-based thread hijack: attacker message joins Jon's lease thread (5.192874ms)
+  AssertionError [ERR_ASSERTION]: unrelated sender joined an existing thread via References only
+      at TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:196:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'thr_b92c05b1bd5902e6042fd4be',
+    expected: 'thr_b92c05b1bd5902e6042fd4be',
+    operator: 'notStrictEqual'
+  }
+
+test at qa/harness/security.test.ts:1:7572
+✖ [P2] RFC 2047 subject can carry CR/LF into outbound raw headers (1.771604ms)
+  AssertionError [ERR_ASSERTION]: decoded subject injected a header line
+      at TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:206:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'From: lojo@cyberphysical.us\r\nTo: mina@example.com\r\nSubject: Re: Hello\r\nBcc: spy@attacker.example\r\nX-Injected: 1\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n-----BEGIN PGP MESSAGE-----',
+    expected: /\r\nBcc: spy@attacker\.example/,
+    operator: 'doesNotMatch'
+  }
+
+test at qa/harness/security.test.ts:1:8062
+✖ [P2] Reply-To mismatch heuristic never fires (replyTo is not passed to heuristicPhishing) (1.539837ms)
+  AssertionError [ERR_ASSERTION]: reasons were ["Urgent or credential language","Mock model flagged credential language"]
+      at TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:221:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '=='
+  }
+
+test at qa/harness/security.test.ts:1:9470
+✖ [P0] a 300 KB attachment produces a DynamoDB item over the 400 KB item limit (41.676182ms)
+  AssertionError [ERR_ASSERTION]: message item is 534 KB; DynamoDB PutItem rejects > 400 KB
+      at TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:291:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '=='
+  }
+
+test at qa/harness/security.test.ts:1:10505
+✖ [P1] dedupe on DynamoDB only sees the first Scan page (redelivery after ~500 messages is stored twice) (655.701589ms)
+  AssertionError [ERR_ASSERTION]: SES/Lambda redelivery of message #501 was not recognised as a duplicate
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:302:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual'
+  }
+
+test at qa/harness/security.test.ts:8:1285
+✖ [P2] envelope is not bound to its message (no AAD): swapping envelopes between rows goes undetected (4.011432ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection: an envelope should only open under its own message id
+      at async TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:339:3)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects'
+  }
+
+test at qa/harness/security.test.ts:8:1797
+✖ [P1] OpenPGP send: only To[0] can decrypt, no signature, and Jon's sent copy is unreadable to him (178.312434ms)
+  AssertionError [ERR_ASSERTION]: expected: encrypt to every recipient that has a key plus Jon's own key, and sign when a signing key is unlocked (SECURITY.md)
+      at TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:355:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'fail'
+  }
+
+test at qa/harness/security.test.ts:8:3919
+✖ [P2] API: a read-only token cannot search (POST /v1/search is mapped to write) (4.420785ms)
+  AssertionError [ERR_ASSERTION]: search_mail is a read tool in MCP but the API returns 403
+  
+  403 !== 200
+  
+      at TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:398:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 403,
+    expected: 200,
+    operator: 'strictEqual'
+  }
+
+test at qa/harness/security.test.ts:8:4558
+✖ [P2] web 'Draft reply' on a thread whose latest message is Jon's own reply drafts to Jon (7.89862ms)
+  AssertionError [ERR_ASSERTION]: reply target is lojo@ itself
+      at TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:406:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'lojo@cyberphysical.us',
+    expected: 'lojo@cyberphysical.us',
+    operator: 'notStrictEqual'
+  }
+
+test at qa/harness/security.test.ts:8:4921
+✖ [P2] ingest creates a suggested reply-to-self draft for Jon's own sent copy (3.200197ms)
+  AssertionError [ERR_ASSERTION]: suggested draft addressed to lojo@
+      at TestContext.<anonymous> (/workspace/qa/harness/security.test.ts:413:10)
+      at async Test.run (node:internal/test_runner/test:980:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:677:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '=='
+  }
