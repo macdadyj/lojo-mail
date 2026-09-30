@@ -333,6 +333,7 @@ Browsers send an `OPTIONS` preflight to the API. API Gateway hands it to the `$d
 - Stop everything at once: `curl -s "$API/v1/rules/switches" -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"paused":true}'`. `{"killSwitch":true}` stops only auto-send. Any `write` token can do this; only your session can undo it (Settings, or `npm run rules -- push` with `"paused": false`).
 - Trashed by a rule by mistake: `POST /v1/messages/:id/restore`. Rule actions are in the audit log (`GET /v1/audit`, actions `rule.apply`, `rule.trash`, `rule.reply`, `rule.autosend`).
 - Trashed mail keeps a `keepUntil` date and is only removed by the trash purge below.
+- `GET /v1/rules` answering 503 `unavailable` ("S3 denied rules/current.bin") means a role is missing `s3:GetObject` on `rules/*` or `s3:ListBucket` on the `rules/` prefix (statements `ReadRules`/`RulesObject` and `ListRulesPrefix` in `iam.tf`). Without ListBucket, S3 reports a missing object as `AccessDenied`, so a mailbox with no rules saved looked broken (the 500 in the 4f5280c rollout). The API refuses to treat that as "no rules", because pause and disable write back what they read and would replace the real rules. The processor delivers without rules and audits `rules.load` / `error`. Fix the role; do not work around it.
 - Auto-send stays off until `auto_send_enabled = true` in `terraform.tfvars` and an apply; the plan shows only the processor's SES statement and `LOJO_AUTO_SEND` changing. Without it, auto-send rules write drafts for approval.
 
 ### Trash purge

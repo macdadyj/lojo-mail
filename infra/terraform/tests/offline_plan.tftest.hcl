@@ -388,6 +388,41 @@ run "rules_are_sealed_by_the_api_and_only_opened_by_the_processor" {
   }
 }
 
+# Rollout of 4f5280c: GET /v1/rules was a 500 on an empty ruleset. Without
+# s3:ListBucket, S3 reports the missing rules/current.bin as AccessDenied.
+run "rules_readers_can_list_the_rules_prefix_and_nothing_else" {
+  command = apply
+
+  assert {
+    condition = alltrue([
+      for doc in [data.aws_iam_policy_document.api, data.aws_iam_policy_document.processor] :
+      length([
+        for s in doc.statement : s if contains(s.actions, "s3:ListBucket") && toset(s.resources) == toset([aws_s3_bucket.mail.arn]) &&
+        anytrue([for c in s.condition : c.test == "StringLike" && c.variable == "s3:prefix" && toset(c.values) == toset(["rules/", "rules/*"])])
+      ]) == 1
+    ])
+    error_message = "the API and processor roles each need s3:ListBucket on the mail bucket, limited to the rules/ prefix"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.api.statement :
+      length(s.condition) > 0 && alltrue([for c in s.condition : c.variable == "s3:prefix" && alltrue([for v in c.values : startswith(v, "rules/")])])
+      if contains(s.actions, "s3:ListBucket")
+    ])
+    error_message = "the API role may list rules/ only, never the mail objects"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.processor.statement :
+      length(s.condition) > 0 && alltrue([for c in s.condition : c.variable == "s3:prefix" && alltrue([for v in c.values : startswith(v, "rules/") || startswith(v, "raw/")])])
+      if contains(s.actions, "s3:ListBucket")
+    ])
+    error_message = "the processor role may list raw/ (sweep) and rules/ only, never the mail objects"
+  }
+}
+
 run "auto_send_is_off_by_default" {
   command = plan
 
