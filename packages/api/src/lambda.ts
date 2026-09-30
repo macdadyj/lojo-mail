@@ -16,7 +16,7 @@ import { documentClient, dynamoLike, KmsKeyWrapper, S3BlobStore, tableNamesFromE
 import { getConnInfo, handle } from "hono/aws-lambda";
 import styleGuide from "../../../config/style-guide.md";
 import { createApp } from "./app.ts";
-import { TokenBook, addBridgeToken, agentTokensOrNone, parseScopes } from "./auth.ts";
+import { TokenBook, addBridgeToken, agentTokensOrNone, bridgeTrashFromEnv, parseScopes } from "./auth.ts";
 import { LoginThrottle, Sessions } from "./session.ts";
 import { SesSender } from "./ses.ts";
 
@@ -59,7 +59,7 @@ async function buildApp() {
   const bridgeToken = await parameter(env("LOJO_BRIDGE_TOKEN_PARAM", "/lojo-mail/bridge-token"));
   if (bridgeToken) {
     try {
-      addBridgeToken(tokens, bridgeToken, true);
+      addBridgeToken(tokens, bridgeToken, true, bridgeTrashFromEnv(process.env));
     } catch (error) {
       console.error(JSON.stringify({ event: "bridge_token_invalid", message: error instanceof Error ? error.message : String(error) }));
     }

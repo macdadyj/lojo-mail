@@ -59,6 +59,8 @@ export interface Entry {
 
 export interface MailStoreOptions {
   folderLimit: number;
+  /** The token holds `trash` and bridge.json allows it: delete moves to Trash. */
+  canTrash?: boolean;
   cacheBytes?: number;
   concurrency?: number;
 }
@@ -151,13 +153,25 @@ export class MailStore extends EventEmitter {
     return this.deleted.has(id);
   }
 
+  get deletesToTrash(): boolean {
+    return this.options.canTrash === true;
+  }
+
   /**
-   * What Thunderbird calls delete. The bridge token cannot trash, so the message
-   * is archived and labelled; Archive and Trash then hide it. It stays
-   * recoverable in the web app.
+   * What Thunderbird calls delete. With the `trash` scope the message moves to
+   * Trash, where the service keeps it for the retention window. Without it, or
+   * when it is already in Trash, the message is labelled and hidden (and archived
+   * if needed). Nothing here is ever a hard delete.
    */
   async remove(id: string, from: MailboxDef): Promise<void> {
     const view = this.requireView(id);
+    if (this.deletesToTrash && from.folder !== "trash") {
+      await this.api.move(id, "trash");
+      view.folder = "trash";
+      this.deleted.delete(id);
+      this.emit("changed");
+      return;
+    }
     if (!view.labels.includes(HIDDEN_LABEL)) {
       const labels = [...view.labels, HIDDEN_LABEL];
       await this.api.setLabels(id, labels);

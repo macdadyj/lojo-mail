@@ -152,7 +152,7 @@ describe("IMAP", () => {
     assert.ok(status && status.messages === 1);
   });
 
-  it("deletes by archiving with a hidden label, never trashing", async () => {
+  it("without the trash scope, deletes by archiving with a hidden label", async () => {
     await client.mailboxOpen("INBOX");
     const uid = await uidFor(client, "lease-1@example.com");
     const archivedBefore = await client.status("Archive", { messages: true });
@@ -232,6 +232,88 @@ describe("IMAP", () => {
     assert.match(await raw.command("H4", "SEARCH TEXT \"see the file\""), /\* SEARCH 1\r\n/);
     assert.match(await raw.command("H5", "STORE 1 +FLAGS (\\Flagged)"), /^H5 NO \[READ-ONLY\]/m);
     raw.end();
+  });
+});
+
+describe("IMAP with the trash scope", () => {
+  let h: Harness;
+  let client: ImapFlow;
+
+  before(async () => {
+    h = await harness({ bridgeTrash: true });
+    await h.t.ingest(fixture("personal.eml"));
+    await h.t.ingest(fixture("attachment.eml"));
+    client = await h.imap();
+  });
+
+  after(async () => {
+    await h.close();
+  });
+
+  async function idOf(rfcMessageId: string): Promise<string> {
+    const found = (await h.t.store.listMessages({ limit: 50 })).find((message) => message.rfcMessageId === rfcMessageId);
+    assert.ok(found);
+    return found.id;
+  }
+
+  it("delete moves to Trash with the bridge as the actor, a retention window, and an audit entry", async () => {
+    await client.mailboxOpen("INBOX");
+    const id = await idOf("lease-1@example.com");
+    const uid = await uidFor(client, "lease-1@example.com");
+    assert.ok(await client.messageDelete(String(uid), { uid: true }));
+    const stored = await h.t.store.getMessage(id);
+    assert.equal(stored?.folder, "trash");
+    assert.equal(stored?.trashedBy, "bridge");
+    assert.ok(stored?.keepUntil && stored.keepUntil > (stored.trashedAt ?? ""));
+    assert.ok(!stored?.labels.includes("thunderbird-deleted"));
+    assert.ok((await h.t.store.listAudit()).some((event) => event.action === "message.trashed" && event.messageId === id && event.detail?.startsWith("by:bridge")));
+    const trash = await client.status("Trash", { messages: true });
+    assert.ok(trash && trash.messages === 1);
+  });
+
+  it("MOVE to Trash is the same soft delete", async () => {
+    await client.mailboxOpen("INBOX");
+    const id = await idOf("att-1@example.com");
+    assert.ok(await client.messageMove(String(await uidFor(client, "att-1@example.com")), "Trash", { uid: true }));
+    assert.equal((await h.t.store.getMessage(id))?.folder, "trash");
+  });
+
+  it("moving out of Trash restores and clears the retention markers", async () => {
+    await client.mailboxOpen("Trash");
+    const id = await idOf("att-1@example.com");
+    assert.ok(await client.messageMove(String(await uidFor(client, "att-1@example.com")), "INBOX", { uid: true }));
+    const stored = await h.t.store.getMessage(id);
+    assert.equal(stored?.folder, "inbox");
+    assert.equal(stored?.keepUntil, undefined);
+    assert.equal(stored?.trashedBy, undefined);
+  });
+
+  it("deleting inside Trash only hides the message; it stays in Trash on the service", async () => {
+    await client.mailboxOpen("Trash");
+    const id = await idOf("lease-1@example.com");
+    assert.ok(await client.messageDelete(String(await uidFor(client, "lease-1@example.com")), { uid: true }));
+    const stored = await h.t.store.getMessage(id);
+    assert.equal(stored?.folder, "trash");
+    assert.ok(stored?.labels.includes("thunderbird-deleted"));
+    const trash = await client.status("Trash", { messages: true });
+    assert.ok(trash && trash.messages === 0);
+  });
+});
+
+describe("IMAP with deleteToTrash off", () => {
+  it("archives with a hidden label even when the token holds trash", async () => {
+    const h = await harness({ bridgeTrash: true, deleteToTrash: false });
+    try {
+      const { message } = await h.t.ingest(fixture("personal.eml"));
+      const client = await h.imap();
+      await client.mailboxOpen("INBOX");
+      assert.ok(await client.messageDelete(String(await uidFor(client, "lease-1@example.com")), { uid: true }));
+      const stored = await h.t.store.getMessage(message.id);
+      assert.equal(stored?.folder, "archive");
+      assert.ok(stored?.labels.includes("thunderbird-deleted"));
+    } finally {
+      await h.close();
+    }
   });
 });
 

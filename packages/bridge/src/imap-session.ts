@@ -520,7 +520,7 @@ export class ImapSession {
       this.slots.splice(index, 1);
       out.push(`* ${index + 1} EXPUNGE\r\n`);
     }
-    out.push(failure ? this.failure(tag, failure) : `${tag} OK EXPUNGE completed; deleted mail is archived and hidden, recoverable in the web app\r\n`);
+    out.push(failure ? this.failure(tag, failure) : `${tag} OK EXPUNGE completed; nothing is hard deleted, deleted mail is recoverable in the web app\r\n`);
     await this.write(out);
   }
 

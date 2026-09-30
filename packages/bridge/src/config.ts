@@ -23,6 +23,12 @@ export interface BridgeConfig {
   pollSeconds: number;
   folderLimit: number;
   notify: boolean;
+  /**
+   * Thunderbird delete moves mail to Trash (a soft delete the service keeps for
+   * its retention window) when this is true and the token holds `trash`.
+   * Otherwise delete archives with a hidden label.
+   */
+  deleteToTrash: boolean;
   webUrl?: string;
 }
 
@@ -120,8 +126,10 @@ export function parseConfig(raw: unknown): BridgeConfig {
     pollSeconds: boundedInt(raw, "pollSeconds", 60, 5, 3600),
     folderLimit: boundedInt(raw, "folderLimit", 2000, 1, 5000),
     notify: raw.notify === undefined ? true : raw.notify === true,
+    deleteToTrash: raw.deleteToTrash === undefined ? true : raw.deleteToTrash === true,
   };
   if (raw.notify !== undefined && typeof raw.notify !== "boolean") throw new ConfigError("notify must be true or false");
+  if (raw.deleteToTrash !== undefined && typeof raw.deleteToTrash !== "boolean") throw new ConfigError("deleteToTrash must be true or false");
   const tokenFile = optionalString(raw, "tokenFile");
   const tokenCommand = optionalArgv(raw, "tokenCommand");
   const privateKeyFile = optionalString(raw, "privateKeyFile");

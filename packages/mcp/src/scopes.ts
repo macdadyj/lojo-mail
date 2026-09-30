@@ -4,7 +4,8 @@
  */
 export type Scope = "read" | "write" | "send" | "body" | "compose" | "admin";
 
-export function asScope(value: string): Scope {
+/** The API's bridge-only `trash` scope is not an MCP scope: no tool can reach Trash. */
+export function knownScope(value: string): Scope | null {
   switch (value) {
     case "read":
     case "write":
@@ -14,8 +15,14 @@ export function asScope(value: string): Scope {
     case "admin":
       return value;
     default:
-      throw new Error(`Unknown scope ${value}`);
+      return null;
   }
+}
+
+export function asScope(value: string): Scope {
+  const scope = knownScope(value);
+  if (!scope) throw new Error(`Unknown scope ${value}`);
+  return scope;
 }
 
 export function hasScope(scopes: readonly Scope[], required: Scope): boolean {

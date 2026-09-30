@@ -130,6 +130,7 @@ export type {
   StoredAttachment,
   StoredMessage,
   Thread,
+  TrashActor,
   Verdicts,
 } from "./types.ts";
 export { FOLDERS } from "./types.ts";

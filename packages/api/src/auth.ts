@@ -3,8 +3,10 @@ import type { Sessions } from "./session.ts";
 /**
  * `compose` lets Jon's own mail client (the local bridge) draft to any address;
  * other tokens may only draft to known correspondents. It never implies send.
+ * `trash` lets the bridge soft-delete (move to Trash). Only the bridge token can
+ * hold it, only when LOJO_BRIDGE_TRASH=on, and `admin` does not imply it.
  */
-export type Scope = "read" | "write" | "send" | "body" | "compose" | "admin";
+export type Scope = "read" | "write" | "send" | "body" | "compose" | "trash" | "admin";
 
 export type PrincipalKind = "token" | "human";
 
@@ -29,12 +31,15 @@ function knownScope(value: string): Scope | null {
     case "send":
     case "body":
     case "compose":
+    case "trash":
     case "admin":
       return value;
     default:
       return null;
   }
 }
+
+const BRIDGE_ONLY_SCOPES: readonly Scope[] = ["trash"];
 
 export function parseScopes(value: string | undefined, fallback: Scope[]): Scope[] {
   if (!value) return fallback;
@@ -44,21 +49,23 @@ export function parseScopes(value: string | undefined, fallback: Scope[]): Scope
     if (!token) continue;
     const scope = knownScope(token);
     if (!scope) throw new Error(`Unknown scope ${token}`);
+    if (BRIDGE_ONLY_SCOPES.includes(scope)) throw new Error(`Scope ${scope} belongs to the bridge token only`);
     scopes.push(scope);
   }
   return scopes.length > 0 ? scopes : fallback;
 }
 
 export function hasScope(scopes: readonly Scope[], required: Scope): boolean {
-  if (scopes.includes("admin")) return true;
   switch (required) {
+    case "trash":
+      return scopes.includes(required);
     case "read":
     case "write":
     case "send":
     case "body":
     case "compose":
     case "admin":
-      return scopes.includes(required);
+      return scopes.includes("admin") || scopes.includes(required);
     default: {
       const unexpected: never = required;
       throw new Error(`Unknown scope ${String(unexpected)}`);
@@ -172,14 +179,19 @@ export function tokenBookFromEnv(env: NodeJS.ProcessEnv, production: boolean): T
     for (const agent of parseAgentTokens(env.LOJO_AGENT_TOKENS, production)) book.add(agent.token, { label: agent.label, scopes: agent.scopes });
   }
   const bridgeToken = env.LOJO_BRIDGE_TOKEN ?? (production ? "" : "dev-bridge-change-me");
-  if (bridgeToken) addBridgeToken(book, bridgeToken, production);
+  if (bridgeToken) addBridgeToken(book, bridgeToken, production, bridgeTrashFromEnv(env));
   return book;
 }
 
-/** The bridge token always has exactly BRIDGE_SCOPES: never send, never admin. */
-export function addBridgeToken(book: TokenBook, token: string, production: boolean): void {
+/** Terraform's `bridge_trash_enabled` sets this. Anything but `on` keeps the bridge out of Trash. */
+export function bridgeTrashFromEnv(env: NodeJS.ProcessEnv): boolean {
+  return env.LOJO_BRIDGE_TRASH === "on";
+}
+
+/** The bridge token has exactly BRIDGE_SCOPES, plus `trash` when Jon enabled it: never send, never admin. */
+export function addBridgeToken(book: TokenBook, token: string, production: boolean, trash: boolean): void {
   if (production && token.length < MIN_AGENT_TOKEN_CHARS) {
     throw new Error(`The bridge token must be at least ${MIN_AGENT_TOKEN_CHARS} characters`);
   }
-  book.add(token, { label: "bridge", scopes: [...BRIDGE_SCOPES] });
+  book.add(token, { label: "bridge", scopes: trash ? [...BRIDGE_SCOPES, "trash"] : [...BRIDGE_SCOPES] });
 }

@@ -1,6 +1,6 @@
 import type { MessageView } from "@lojo/core";
 
-/** EXPUNGE and MOVE-to-Trash add this label and archive the message; Archive and Trash hide it. */
+/** Without the `trash` scope, and for deletes inside Trash, EXPUNGE adds this label (archiving if needed); Archive and Trash hide it. */
 export const HIDDEN_LABEL = "thunderbird-deleted";
 
 /** Labels the service or the bridge set for their own reasons. IMAP flags can neither add nor remove them. */

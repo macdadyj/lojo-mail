@@ -165,15 +165,21 @@ function Mail() {
   );
 }
 
+function trashedByLabel(trashedBy: string | undefined): string {
+  if (trashedBy?.startsWith("rule:")) return `rule ${trashedBy.slice(5)}`;
+  if (trashedBy === "bridge") return "you in Thunderbird";
+  return "you";
+}
+
 function TrashRow({ message, onRestored }: { message: Message; onRestored: () => void }) {
   const [error, setError] = useState<string | null>(null);
-  const by = message.trashedBy?.startsWith("rule:") ? `rule ${message.trashedBy.slice(5)}` : "you";
+  const by = trashedByLabel(message.trashedBy);
   return (
     <div className="row">
       <strong>{person(message.from)}</strong>
       <div className="subject">{message.subject}</div>
       <div className="meta">
-        <span className="muted">Trashed by {by}{message.keepUntil ? `, kept until ${when(message.keepUntil)}` : ""}</span>
+        <span className="muted">Trashed by {by}{message.keepUntil ? `, kept at least until ${when(message.keepUntil)}` : ""}</span>
         <button
           className="ghost"
           type="button"

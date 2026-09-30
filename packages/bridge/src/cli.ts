@@ -26,7 +26,7 @@ const USAGE = `lojo-bridge ${BRIDGE_VERSION}: local IMAP and SMTP bridge for loj
   lojo-bridge init [--api-url URL] [--address ADDRESS] [--web-url URL]
                    [--token-file PATH | --token-command JSON_ARGV]
                    [--private-key-file PATH | --private-key-command JSON_ARGV]
-                   [--imap-port N] [--smtp-port N] [--force]
+                   [--imap-port N] [--smtp-port N] [--no-trash] [--force]
   lojo-bridge serve            run IMAP on 127.0.0.1:1143 and SMTP on 127.0.0.1:1587
   lojo-bridge check            check file modes, the token's scopes, and the envelope key
   lojo-bridge reset-password   print a new app password (restart the service afterwards)
@@ -36,6 +36,10 @@ Options
 
 JSON_ARGV is a command as a JSON array, run without a shell, for example
   --token-command '["pass","show","lojo/bridge-token"]'
+
+Delete in Thunderbird moves mail to Trash when the service granted the bridge
+token the trash scope (a soft delete, kept for the retention window). With
+--no-trash, or without the scope, delete archives with a hidden label.
 
 Mail submitted over SMTP becomes a draft in the approval queue. Nothing is
 sent until Jon approves it in the lojo-mail web app.`;
@@ -53,6 +57,7 @@ const { values, positionals } = parseArgs({
     "private-key-command": { type: "string" },
     "imap-port": { type: "string" },
     "smtp-port": { type: "string" },
+    "no-trash": { type: "boolean", default: false },
     force: { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
   },
@@ -106,6 +111,7 @@ async function init(): Promise<void> {
     pollSeconds: 60,
     folderLimit: 2000,
     notify: true,
+    deleteToTrash: !values["no-trash"],
     webUrl: values["web-url"],
   };
   const password = generateAppPassword();
@@ -136,6 +142,8 @@ async function check(): Promise<void> {
   const api = new ApiClient({ baseUrl: config.apiUrl, token });
   const session = await checkToken(api);
   console.log(`api           ${config.apiUrl} reachable; token "${session.label}" scopes ${session.scopes.join(", ")}`);
+  const toTrash = config.deleteToTrash && session.scopes.includes("trash");
+  console.log(`delete        ${toTrash ? "moves to Trash (soft delete, recoverable for the retention window)" : "archives with a hidden label"}`);
   const [newest] = await api.listFolder("inbox", 1);
   if (!newest) {
     console.log("decrypt       inbox is empty; nothing to test");

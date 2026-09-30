@@ -48,6 +48,7 @@ import type {
   ServerSealedBlob,
   StoredMessage,
   Thread,
+  TrashActor,
 } from "./types.ts";
 
 export interface MailboxDeps {
@@ -842,23 +843,44 @@ export class Mailbox {
     return this.move(messageId, "archive");
   }
 
-  /** Trash is default-deny: only a human session may move mail there. Moving out of trash clears the trash markers. */
+  /** Trash is default-deny: agents never move mail there (see `trash`). Moving out of trash clears the trash markers. */
   async move(messageId: string, folder: Folder, actor: Actor = "agent"): Promise<StoredMessage> {
-    if (folder === "trash" && actor !== "human") {
-      throw new MailError("Only a signed-in human can move mail to trash", "forbidden");
+    if (folder === "trash") {
+      if (actor !== "human") throw new MailError("Only a signed-in human can move mail to trash", "forbidden");
+      return this.trash(messageId, "human");
     }
     const message = await this.requireMessage(messageId);
     if (folder === "drafts") throw new MailError("Messages cannot be filed as drafts", "invalid");
     if (folder === "sent" && message.origin !== "sent") throw new MailError("Only mail Jon sent can be filed in Sent", "invalid");
     const patch: MessagePatch = { folder };
     if (folder !== "inbox") patch.unread = false;
-    if (folder === "trash") {
-      patch.trashedAt = this.now().toISOString();
-      patch.trashedBy = "human";
-    }
-    const remove: Array<keyof MessagePatch> = folder !== "trash" && message.folder === "trash" ? ["trashedAt", "trashedBy", "keepUntil"] : [];
+    const remove: Array<keyof MessagePatch> = message.folder === "trash" ? ["trashedAt", "trashedBy", "keepUntil"] : [];
     const updated = await this.deps.store.updateMessage(messageId, patch, remove);
     await refreshThread(this.deps.store, updated.threadId, updated.subject);
+    if (message.folder === "trash") await this.audit("message.restored", "ok", { messageId, detail: `to ${folder}, was ${message.trashedBy ?? "trashed"}` });
+    return updated;
+  }
+
+  /**
+   * Soft delete: a move to Trash with a retention window, never a hard delete.
+   * Callers are Jon's session or the bridge token with the `trash` scope; the
+   * API decides which (agent tokens and the MCP never reach this).
+   */
+  async trash(messageId: string, by: TrashActor): Promise<StoredMessage> {
+    const message = await this.requireMessage(messageId);
+    if (message.folder === "trash") return message;
+    const at = this.now();
+    const retentionDays = (await this.getRules()).trashRetentionDays;
+    const patch: MessagePatch = {
+      folder: "trash",
+      unread: false,
+      trashedAt: at.toISOString(),
+      trashedBy: by,
+      keepUntil: new Date(at.getTime() + retentionDays * 86_400_000).toISOString(),
+    };
+    const updated = await this.deps.store.updateMessage(messageId, patch);
+    await refreshThread(this.deps.store, updated.threadId, updated.subject);
+    await this.audit("message.trashed", "ok", { messageId, detail: `by:${by} from:${message.folder} keepUntil:${patch.keepUntil ?? ""}` });
     return updated;
   }
 

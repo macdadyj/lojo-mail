@@ -1,4 +1,4 @@
-import { asScope, type Scope } from "./scopes.ts";
+import { knownScope, type Scope } from "./scopes.ts";
 import type { AgentFolder, DraftRequest, MailClient } from "./tools.ts";
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
@@ -41,7 +41,7 @@ export class HttpMailClient implements MailClient {
   /** Who the API thinks this token is. */
   async session(): Promise<{ kind: string; label: string; scopes: Scope[] }> {
     const payload = (await this.request("GET", "/v1/session")) as { kind?: string; label?: string; scopes?: string[] };
-    return { kind: payload.kind ?? "token", label: payload.label ?? "", scopes: (payload.scopes ?? []).map(asScope) };
+    return { kind: payload.kind ?? "token", label: payload.label ?? "", scopes: (payload.scopes ?? []).flatMap((scope) => knownScope(scope) ?? []) };
   }
 
   async search(query: string, mode: "keyword" | "semantic", includeContext: boolean): Promise<unknown> {

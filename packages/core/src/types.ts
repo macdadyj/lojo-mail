@@ -16,6 +16,9 @@ export type MessageOrigin = "inbound" | "sent" | "import";
 /** Who is acting on the mailbox. Agents are default-deny for destructive actions. */
 export type Actor = "human" | "agent";
 
+/** Who may soft-delete: Jon's session, or the Thunderbird bridge token when it holds the `trash` scope. */
+export type TrashActor = "human" | "bridge";
+
 export interface Address {
   name?: string;
   email: string;
@@ -141,11 +144,11 @@ export interface StoredMessage {
   vec?: string;
   /** Which embedder produced `vec`. The sparse `vectors` index is keyed on it. */
   vecModel?: string;
-  /** Set when a rule moved the message to trash. Rules never hard delete. */
+  /** Set when the message moved to trash. Only the trash purge (trash/purge.ts) ever hard deletes. */
   trashedAt?: string;
-  /** `rule:<id>` or `human`. */
+  /** `rule:<id>`, `human`, or `bridge`. */
   trashedBy?: string;
-  /** Earliest time anything may purge it. Until then it is always restorable. */
+  /** Earliest time the purge may delete it. Until then it is always restorable. */
   keepUntil?: string;
   createdAt: string;
 }

@@ -1,4 +1,4 @@
-import { FOLDERS, MailError, type Actor, type Folder, type Mailbox, type PgpMode, type ReviewedDraft, type ViewOptions } from "@lojo/core";
+import { FOLDERS, MailError, type Actor, type Folder, type Mailbox, type PgpMode, type ReviewedDraft, type TrashActor, type ViewOptions } from "@lojo/core";
 import { HttpMailClient } from "@lojo/mcp/http";
 import { handleMcpPost, mcpMethodNotAllowed, type McpHttpReply } from "@lojo/mcp/remote";
 import { Hono, type Context } from "hono";
@@ -82,6 +82,17 @@ async function body<T>(c: Context<Env>): Promise<Partial<T>> {
 
 function actorOf(principal: Principal): Actor {
   return principal.kind === "human" ? "human" : "agent";
+}
+
+/** Soft delete is Jon's session, or the bridge token when Jon granted it `trash`. Never an agent token. */
+function trashActorOf(principal: Principal): TrashActor {
+  if (principal.kind === "human") return "human";
+  if (hasScope(principal.scopes, "trash")) return "bridge";
+  throw new MailError("Only a signed-in human, or the Thunderbird bridge with the trash scope, can move mail to trash", "forbidden");
+}
+
+function isMcpScope(scope: Scope): scope is Exclude<Scope, "trash"> {
+  return scope !== "trash";
 }
 
 /** Only Jon's own mail client (the `compose` scope) may draft to people the mailbox has never written to. */
@@ -180,8 +191,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (token.startsWith("hs_")) return c.json({ error: "MCP takes an API token, not a web session" }, 403);
     const principal = deps.tokens.principal(authorization, null);
     if (!principal) return c.json({ error: "unauthorized" }, 401, MCP_CHALLENGE);
+    if (principal.scopes.includes("trash")) return c.json({ error: "The Thunderbird bridge token cannot be used for MCP" }, 403);
     const mailbox = new HttpMailClient("http://lojo.internal", token, (url, init) => Promise.resolve(app.request(url, init)));
-    const reply = mcpResponse(await handleMcpPost(await c.req.text(), c.req.raw.headers, { label: principal.label, scopes: principal.scopes, mailbox }));
+    const reply = mcpResponse(await handleMcpPost(await c.req.text(), c.req.raw.headers, { label: principal.label, scopes: principal.scopes.filter(isMcpScope), mailbox }));
     deps.accessLog?.({ principal: principal.label, method: "POST", path: "/mcp", status: reply.status });
     return reply;
   });
@@ -363,7 +375,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
   app.post("/v1/messages/:id/move", need("write"), async (c) => {
     const input = await body<{ folder: Folder }>(c);
-    return c.json(await mailbox.move(c.req.param("id"), folder(input.folder), actorOf(c.get("principal"))));
+    const principal = c.get("principal");
+    const target = folder(input.folder);
+    if (target === "trash") return c.json(await mailbox.trash(c.req.param("id"), trashActorOf(principal)));
+    return c.json(await mailbox.move(c.req.param("id"), target, actorOf(principal)));
   });
   app.get("/v1/action-items", need("read"), need("body"), async (c) => c.json({ items: await mailbox.actionItems() }));
   app.get("/v1/export/index", need("read"), async (c) => c.json(await mailbox.exportIndex()));

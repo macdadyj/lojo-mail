@@ -24,8 +24,8 @@ export interface Harness {
 }
 
 /** The bridge on ephemeral loopback ports over the in-memory API. The API is locked, as in production. */
-export async function harness(options: { token?: string; pollSeconds?: number } = {}): Promise<Harness> {
-  const t = await testApp({ unlocked: false });
+export async function harness(options: { token?: string; pollSeconds?: number; bridgeTrash?: boolean; deleteToTrash?: boolean } = {}): Promise<Harness> {
+  const t = await testApp({ unlocked: false, bridgeTrash: options.bridgeTrash ?? false });
   const dir = mkdtempSync(join(tmpdir(), "lojo-bridge-test-"));
   const statePath = join(dir, "bridge-state.json");
   cachedHash ??= await hashPassword(APP_PASSWORD);
@@ -40,6 +40,7 @@ export async function harness(options: { token?: string; pollSeconds?: number } 
       privateKeyFile: join(dir, "unused-key"),
       appPasswordHash: cachedHash,
       notify: false,
+      deleteToTrash: options.deleteToTrash ?? true,
     }),
     pollSeconds: options.pollSeconds ?? 60,
   };

@@ -32,6 +32,7 @@ export async function checkToken(api: ApiClient, logger: Logger = silentLogger):
   const missing = REQUIRED_SCOPES.filter((scope) => !session.scopes.includes(scope));
   if (missing.length > 0) throw new ScopeError(`The bridge token is missing the ${missing.join(", ")} scope`);
   if (!session.scopes.includes("compose")) logger.warn("token.no_compose", { detail: "SMTP drafts can only go to known correspondents" });
+  if (!session.scopes.includes("trash")) logger.info("token.no_trash", { detail: "Thunderbird delete archives with a hidden label" });
   return session;
 }
 
@@ -66,8 +67,10 @@ export async function startBridge(options: BridgeOptions): Promise<RunningBridge
   });
   const session = await checkToken(api, logger);
   const state = new UidState(options.statePath, logger);
+  const canTrash = config.deleteToTrash && session.scopes.includes("trash");
   const store = new MailStore(api, state, options.privateJwk, logger, {
     folderLimit: config.folderLimit,
+    canTrash,
     ...(options.cacheBytes ? { cacheBytes: options.cacheBytes } : {}),
   });
   const guard = new LoginGuard(config.address, config.appPasswordHash, options.guard);
@@ -82,7 +85,7 @@ export async function startBridge(options: BridgeOptions): Promise<RunningBridge
     await imap.close();
     throw error;
   }
-  logger.info("bridge.started", { imapPort, smtpPort, host: LOOPBACK, token: session.label, scopes: session.scopes.join(",") });
+  logger.info("bridge.started", { imapPort, smtpPort, host: LOOPBACK, token: session.label, scopes: session.scopes.join(","), deleteTo: canTrash ? "trash" : "archive" });
   return {
     imapPort,
     smtpPort,
