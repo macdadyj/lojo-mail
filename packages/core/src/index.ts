@@ -9,12 +9,29 @@ export {
 } from "./ai/pipeline.ts";
 export { ModelOutputError, parseAiResult, aiResultSchema } from "./ai/schema.ts";
 export type { AiResult } from "./ai/schema.ts";
-export { BedrockLlm, GrokLlm, MockLlm, OllamaLlm, createLlmClient } from "./ai/providers.ts";
-export type { LlmClient, LlmCompletion, LlmRequest } from "./ai/types.ts";
+export { BedrockLlm, GeminiLlm, GrokLlm, MockLlm, OllamaLlm, OpenAiCompatibleLlm, createLlmClient } from "./ai/providers.ts";
+export {
+  BedrockTitanEmbedder,
+  GoogleEmbedder,
+  MockEmbedder,
+  OllamaEmbedder,
+  OpenAiCompatibleEmbedder,
+  TITAN_V2_DIMENSIONS,
+  createEmbedder,
+} from "./ai/embedders.ts";
+export { ServiceAccountTokens, googleHeaders, googleModelUrl, parseServiceAccount } from "./ai/google-auth.ts";
+export type { GoogleEndpoint, ServiceAccountKey } from "./ai/google-auth.ts";
+export { DEFAULT_PROVIDER_TIMEOUT_MS, estimateTokens, postJson, postJsonOrThrow } from "./ai/http.ts";
+export type { FetchLike } from "./ai/http.ts";
+export { SECRET_SOURCES, loadProviderSecrets, secretsFor } from "./ai/secrets.ts";
+export type { ParameterReader } from "./ai/secrets.ts";
+export { cosineInt8, packVector, rankVectors, unpackVector, vectorTag } from "./ai/vectors.ts";
+export type { VectorRow } from "./ai/vectors.ts";
+export type { Embedder, EmbedPurpose, LlmClient, LlmCompletion, LlmEmbedding, LlmRequest, ProviderSecrets } from "./ai/types.ts";
 export { APPROVAL_TTL_MS, approvalContentHash, hashApprovalToken, newApprovalToken, sameHash } from "./approval.ts";
 export { FsBlobStore, MemoryBlobStore, aiContextKey, attachmentKey, bodyKey } from "./blob/store.ts";
 export type { BlobStore } from "./blob/store.ts";
-export { loadConfig } from "./config.ts";
+export { EMBED_PROVIDERS, LLM_PROVIDERS, loadConfig } from "./config.ts";
 export {
   attachmentContext,
   b64ToBytes,
@@ -40,7 +57,7 @@ export type { DataKey, KeyWrapper } from "./crypto/server-seal.ts";
 export { MailError, assertNever } from "./errors.ts";
 export type { MailErrorCode } from "./errors.ts";
 export { newId, sha256, utcDay, normalizeMessageId } from "./ids.ts";
-export { ingestRaw, messageIdFor, refreshThread, threadParticipants } from "./ingest.ts";
+export { embedForStorage, embeddingInput, ingestRaw, messageIdFor, refreshThread, threadParticipants } from "./ingest.ts";
 export type { IngestDeps, IngestOptions, IngestResult } from "./ingest.ts";
 export { Mailbox } from "./mailbox.ts";
 export type { AttachmentPayload, DraftInput, DraftPatch, MailboxDeps, ReviewedDraft, ViewOptions } from "./mailbox.ts";
@@ -86,11 +103,13 @@ export type {
   DraftStatus,
   DraftView,
   EcPrivateJwk,
+  EmbedProviderName,
   EcPublicJwk,
   EncryptionContext,
   EnvelopeBlob,
   Folder,
   ListQuery,
+  LlmProviderName,
   LojoConfig,
   MessageOrigin,
   MessageView,

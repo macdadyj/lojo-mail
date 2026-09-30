@@ -3,17 +3,21 @@ import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { S3Client } from "@aws-sdk/client-s3";
 import {
+  createEmbedder,
   createLlmClient,
   DynamoMailStore,
   FsBlobStore,
   generateIdentity,
   loadConfig,
+  loadProviderSecrets,
   MemoryStore,
   MockLlm,
   type BlobStore,
   type EcPublicJwk,
+  type Embedder,
   type LlmClient,
   type LojoConfig,
+  type ProviderSecrets,
   type MailStore,
 } from "@lojo/core";
 import { documentClient, dynamoLike, S3BlobStore, tableNamesFromEnv } from "@lojo/pipeline/aws";
@@ -24,14 +28,23 @@ function fail(message: string): never {
   process.exit(2);
 }
 
-function analyzer(config: LojoConfig): LlmClient {
+function analyzer(config: LojoConfig, secrets: ProviderSecrets): LlmClient {
   if (config.llmProvider === "mock") return new MockLlm();
-  const grokApiKey = process.env.LOJO_GROK_API_KEY;
-  if (config.llmProvider === "grok" && !grokApiKey) {
-    console.error("--analyze: LOJO_LLM_PROVIDER is grok and LOJO_GROK_API_KEY is unset. Using the mock model.");
+  try {
+    return createLlmClient(config, secrets);
+  } catch (error) {
+    console.error(`--analyze: ${error instanceof Error ? error.message : String(error)}. Using the mock model.`);
     return new MockLlm();
   }
-  return createLlmClient(config, { grokApiKey });
+}
+
+function embedderOrNull(config: LojoConfig, secrets: ProviderSecrets): Embedder | null {
+  try {
+    return createEmbedder(config, secrets);
+  } catch (error) {
+    console.error(`--embed: ${error instanceof Error ? error.message : String(error)}. Importing without vectors.`);
+    return null;
+  }
 }
 
 function readPublicKey(path: string): EcPublicJwk {
@@ -49,13 +62,14 @@ const { values } = parseArgs({
     store: { type: "string", default: "data/mailbox.json" },
     target: { type: "string" },
     analyze: { type: "boolean", default: false },
+    embed: { type: "boolean", default: false },
     "public-key": { type: "string" },
   },
 });
 
 if (!values.input) {
   fail(
-    "usage: npm run import -- --input imports/tuta [--contacts contacts.vcf] [--store data/mailbox.json]\n" +
+    "usage: npm run import -- --input imports/tuta [--contacts contacts.vcf] [--store data/mailbox.json] [--analyze] [--embed]\n" +
       "       npm run import -- --target aws --input imports/tuta --public-key keys/envelope.public.jwk",
   );
 }
@@ -63,6 +77,7 @@ if (!values.input) {
 const target = values.target ?? (process.env.LOJO_STORE === "dynamo" ? "aws" : "local");
 if (target !== "local" && target !== "aws") fail(`--target must be local or aws, not ${target}`);
 const config = loadConfig();
+const secrets = await loadProviderSecrets(config, process.env);
 
 let store: MailStore;
 let blobs: BlobStore;
@@ -109,7 +124,8 @@ const report = await importMailbox({
     store,
     blobs,
     publicJwk,
-    llm: values.analyze ? analyzer(config) : null,
+    llm: values.analyze ? analyzer(config, secrets) : null,
+    embedder: values.embed ? embedderOrNull(config, secrets) : null,
     config,
     styleGuide: existsSync("config/style-guide.md") ? readFileSync("config/style-guide.md", "utf8") : "",
   },
