@@ -5,6 +5,46 @@
 # docs/RUNBOOK.md promise. Started as the QA review's harness
 # (qa/REVIEW_REPORT.md); the finding runs now assert the fix.
 
+# `terraform test` also reads terraform.tfvars, *.auto.tfvars and TF_VAR_* from the
+# machine running it. These file-level values take precedence, so a real deployment's
+# settings (web hosting on, a zone id, live receiving, bundles) cannot change what the
+# runs below assert. Runs that need other values set them in their own block.
+variables {
+  aws_region                      = "us-east-1"
+  domain                          = "cyberphysical.us"
+  local_part                      = "lojo"
+  receiving_stage                 = "test"
+  receiving_test_local_part       = "lojo-test"
+  ses_identity_mode               = "existing"
+  manage_dns                      = false
+  dns_cutover_confirmation        = ""
+  zone_id                         = ""
+  manage_active_rule_set          = true
+  web_origins                     = ["http://127.0.0.1:5173", "http://localhost:5173"]
+  llm_provider                    = "grok"
+  embed_provider                  = "none"
+  daily_token_budget              = 100000
+  raw_retention_days              = 7
+  ai_context_days                 = 30
+  alarm_actions                   = []
+  login_failure_alarm_threshold   = 20
+  processor_reserved_concurrency  = -1
+  raw_sweep_minutes               = 15
+  processor_bundle                = ""
+  api_bundle                      = ""
+  dmarc_rua_local_part            = "dmarc"
+  dmarc_policy                    = "quarantine"
+  auto_send_enabled               = false
+  bridge_trash_enabled            = true
+  trash_purge_mode                = "report"
+  web_hosting_enabled             = false
+  web_app_label                   = "app"
+  web_mta_sts_label               = "mta-sts"
+  web_hosting_publish_mta_sts_txt = false
+  web_hosting_publish_tls_rpt     = true
+  web_headers_path                = "tests/fixtures/web_headers"
+}
+
 mock_provider "aws" {
   mock_data "aws_caller_identity" {
     defaults = {
@@ -144,6 +184,29 @@ override_resource {
 override_resource {
   target = aws_cloudwatch_event_rule.trash_purge
   values = { arn = "arn:aws:events:us-east-1:111122223333:rule/lojo-mail-trash-purge" }
+}
+
+# A mocked certificate has no validation options, so with web hosting on every
+# validation record lacked its name and type ("Missing required argument").
+override_resource {
+  target = aws_acm_certificate.web
+  values = {
+    arn = "arn:aws:acm:us-east-1:111122223333:certificate/00000000-0000-0000-0000-000000000000"
+    domain_validation_options = [
+      {
+        domain_name           = "app.cyberphysical.us"
+        resource_record_name  = "_app-validation.app.cyberphysical.us."
+        resource_record_type  = "CNAME"
+        resource_record_value = "_app.acm-validations.aws."
+      },
+      {
+        domain_name           = "mta-sts.cyberphysical.us"
+        resource_record_name  = "_mta-validation.mta-sts.cyberphysical.us."
+        resource_record_type  = "CNAME"
+        resource_record_value = "_mta.acm-validations.aws."
+      },
+    ]
+  }
 }
 
 override_resource {
@@ -976,4 +1039,33 @@ run "web_hosting_without_zone_is_refused" {
   }
 
   expect_failures = [var.web_hosting_enabled]
+}
+
+run "web_hosting_applies_with_a_zone" {
+  command = apply
+
+  variables {
+    web_hosting_enabled = true
+    zone_id             = "Z0000000000000000000"
+  }
+
+  assert {
+    condition     = toset(keys(aws_route53_record.web_cert_validation)) == toset(["app.cyberphysical.us", "mta-sts.cyberphysical.us"])
+    error_message = "one validation record per web host"
+  }
+
+  assert {
+    condition     = aws_route53_record.web_cert_validation["app.cyberphysical.us"].name == "_app-validation.app.cyberphysical.us." && aws_route53_record.web_cert_validation["mta-sts.cyberphysical.us"].type == "CNAME"
+    error_message = "validation records take their name and type from the certificate"
+  }
+
+  assert {
+    condition     = alltrue([for r in aws_route53_record.web_cert_validation : r.zone_id == "Z0000000000000000000" && r.allow_overwrite == false])
+    error_message = "validation records go in the given zone and never overwrite an existing record"
+  }
+
+  assert {
+    condition     = strcontains(aws_cloudfront_response_headers_policy.app[0].security_headers_config[0].content_security_policy[0].content_security_policy, "frame-ancestors 'none'")
+    error_message = "the app's CSP comes from the web build's _headers"
+  }
 }
