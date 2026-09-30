@@ -21,7 +21,8 @@ resource "aws_iam_role" "api" {
 
 locals {
   # Every table and every index. No Scan, no DeleteItem: empty threads are
-  # retired from the sparse index instead of deleted.
+  # retired from the sparse index instead of deleted. The only DeleteItem in the
+  # stack is the trash purge role's, on messages, in purge mode (purge.tf).
   table_arns = flatten([
     for table in [
       aws_dynamodb_table.messages,

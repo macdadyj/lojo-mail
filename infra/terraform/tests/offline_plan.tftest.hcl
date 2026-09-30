@@ -142,6 +142,11 @@ override_resource {
 }
 
 override_resource {
+  target = aws_cloudwatch_event_rule.trash_purge
+  values = { arn = "arn:aws:events:us-east-1:111122223333:rule/lojo-mail-trash-purge" }
+}
+
+override_resource {
   target = aws_dynamodb_table.budget
   values = { arn = "arn:aws:dynamodb:us-east-1:111122223333:table/lojo-mail-budget" }
 }
@@ -274,7 +279,7 @@ run "roles_query_the_indexes_and_never_scan_or_delete" {
       for doc in [data.aws_iam_policy_document.processor, data.aws_iam_policy_document.api] :
       length(setintersection(toset(flatten([for s in doc.statement : s.actions])), toset(["dynamodb:Scan", "dynamodb:DeleteItem", "dynamodb:*"]))) == 0
     ])
-    error_message = "no role may Scan or DeleteItem"
+    error_message = "neither the processor nor the API may Scan or DeleteItem"
   }
 
   assert {
@@ -809,4 +814,111 @@ run "zero_reserved_concurrency_is_refused" {
   }
 
   expect_failures = [var.processor_reserved_concurrency]
+}
+
+run "bridge_trash_is_on_by_default_and_can_be_turned_off" {
+  command = plan
+
+  assert {
+    condition     = aws_lambda_function.api.environment[0].variables.LOJO_BRIDGE_TRASH == "on"
+    error_message = "Jon's decision: the bridge may move mail to Trash"
+  }
+}
+
+run "bridge_trash_flag_off" {
+  command = plan
+
+  variables {
+    bridge_trash_enabled = false
+  }
+
+  assert {
+    condition     = aws_lambda_function.api.environment[0].variables.LOJO_BRIDGE_TRASH == "off"
+    error_message = "bridge_trash_enabled = false keeps the bridge out of Trash"
+  }
+}
+
+run "trash_purge_reports_by_default_and_cannot_delete" {
+  command = plan
+
+  assert {
+    condition     = aws_lambda_function.trash_purge.environment[0].variables.LOJO_TRASH_PURGE == "report"
+    error_message = "the purge only reports until Jon sets trash_purge_mode = purge"
+  }
+
+  assert {
+    condition     = length(setintersection(toset(flatten([for s in data.aws_iam_policy_document.trash_purge.statement : s.actions])), toset(["dynamodb:DeleteItem", "s3:DeleteObject"]))) == 0
+    error_message = "in report mode the purge role cannot delete anything"
+  }
+
+  assert {
+    condition     = aws_lambda_function.trash_purge.role == aws_iam_role.trash_purge.arn && aws_lambda_function.trash_purge.reserved_concurrent_executions == 1
+    error_message = "the purge runs alone, under its own role"
+  }
+
+  assert {
+    condition     = aws_cloudwatch_event_rule.trash_purge.state == "ENABLED"
+    error_message = "the daily report runs"
+  }
+}
+
+run "trash_purge_role_reads_no_mail_and_no_secrets" {
+  command = apply
+
+  assert {
+    condition = length([
+      for a in flatten([for s in data.aws_iam_policy_document.trash_purge.statement : s.actions]) : a
+      if startswith(a, "ssm:") || startswith(a, "ses:") || startswith(a, "bedrock:") || a == "s3:GetObject" || a == "dynamodb:Scan" || a == "dynamodb:*"
+    ]) == 0
+    error_message = "the purge role opens no mail and reads no secrets"
+  }
+
+  assert {
+    condition     = alltrue([for s in data.aws_iam_policy_document.trash_purge.statement : !contains(s.resources, "*")])
+    error_message = "no purge statement may use Resource *"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.trash_purge.statement : alltrue([for c in s.condition : c.variable == "kms:ViaService"])
+      if contains(s.actions, "kms:Decrypt")
+    ])
+    error_message = "the purge role can only use the key through DynamoDB"
+  }
+}
+
+run "trash_purge_mode_purge_grants_delete_on_messages_and_its_objects_only" {
+  command = apply
+
+  variables {
+    trash_purge_mode = "purge"
+  }
+
+  assert {
+    condition     = one([for s in data.aws_iam_policy_document.trash_purge.statement : s.resources if s.sid == "PurgeExpiredTrash"]) == toset([aws_dynamodb_table.messages.arn])
+    error_message = "DeleteItem is on the messages table only, not its indexes or other tables"
+  }
+
+  assert {
+    condition = alltrue([
+      for r in one([for s in data.aws_iam_policy_document.trash_purge.statement : s.resources if s.sid == "DeletePurgedObjects"]) :
+      endswith(r, "/objects/*") || endswith(r, "/ai-context/*")
+    ])
+    error_message = "DeleteObject is limited to sealed bodies, attachments, and AI-context copies"
+  }
+
+  assert {
+    condition     = aws_lambda_function.trash_purge.environment[0].variables.LOJO_TRASH_PURGE == "purge"
+    error_message = "purge mode reaches the function"
+  }
+}
+
+run "trash_purge_mode_is_validated" {
+  command = plan
+
+  variables {
+    trash_purge_mode = "delete-everything"
+  }
+
+  expect_failures = [var.trash_purge_mode]
 }
