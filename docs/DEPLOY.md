@@ -2,7 +2,44 @@
 
 This is the go/no-go check for the first `terraform apply`. It proves, with one test message to a test address, that SES can write into the KMS-encrypted bucket and that the processor picks the message up, seals it, and indexes it. Real mail to `lojo@cyberphysical.us` stays untouched until the last step.
 
-Nothing in this repo has been applied. Run this as the apply principal from [RUNBOOK.md](RUNBOOK.md#who-can-apply), in us-east-1.
+Run this as the apply principal from [RUNBOOK.md](RUNBOOK.md#who-can-apply), in us-east-1.
+
+## Required permissions
+
+The apply principal needs exactly the actions below. The same set is in [`infra/iam/apply-policy.json`](../infra/iam/apply-policy.json), ready to attach. `scripts/apply-policy.test.mjs` fails CI when a new Terraform resource type has no matching actions there. Every resource carries `default_tags`, so each service also needs its tagging actions.
+
+| Service | Actions |
+| --- | --- |
+| Identity | `sts:GetCallerIdentity` |
+| KMS | `kms:CreateKey`, `kms:DescribeKey`, `kms:GetKeyPolicy`, `kms:PutKeyPolicy`, `kms:GetKeyRotationStatus`, `kms:EnableKeyRotation`, `kms:ListResourceTags`, `kms:TagResource`, `kms:UntagResource`, `kms:ScheduleKeyDeletion`, `kms:CreateAlias`, `kms:UpdateAlias`, `kms:DeleteAlias`, `kms:ListAliases`, `kms:CreateGrant` |
+| S3 | `s3:CreateBucket`, `s3:DeleteBucket`, `s3:ListBucket`, `s3:GetBucketLocation`, `s3:GetBucketTagging`, `s3:PutBucketTagging`, `s3:GetBucketAcl`, `s3:GetBucketCORS`, `s3:PutBucketCORS`, `s3:GetBucketWebsite`, `s3:GetBucketVersioning`, `s3:PutBucketVersioning`, `s3:GetAccelerateConfiguration`, `s3:GetBucketRequestPayment`, `s3:GetBucketLogging`, `s3:GetLifecycleConfiguration`, `s3:PutLifecycleConfiguration`, `s3:GetReplicationConfiguration`, `s3:GetEncryptionConfiguration`, `s3:PutEncryptionConfiguration`, `s3:GetBucketObjectLockConfiguration`, `s3:GetBucketPolicy`, `s3:PutBucketPolicy`, `s3:DeleteBucketPolicy`, `s3:GetBucketPublicAccessBlock`, `s3:PutBucketPublicAccessBlock`, `s3:GetBucketOwnershipControls`, `s3:PutBucketOwnershipControls`, `s3:GetBucketNotification`, `s3:PutBucketNotification` |
+| DynamoDB | `dynamodb:CreateTable`, `dynamodb:DescribeTable`, `dynamodb:UpdateTable`, `dynamodb:DeleteTable`, `dynamodb:DescribeContinuousBackups`, `dynamodb:UpdateContinuousBackups`, `dynamodb:DescribeTimeToLive`, `dynamodb:UpdateTimeToLive`, `dynamodb:ListTagsOfResource`, `dynamodb:TagResource`, `dynamodb:UntagResource` |
+| IAM (roles `lojo-mail-*`) | `iam:CreateRole`, `iam:GetRole`, `iam:DeleteRole`, `iam:UpdateAssumeRolePolicy`, `iam:TagRole`, `iam:UntagRole`, `iam:ListRolePolicies`, `iam:ListAttachedRolePolicies`, `iam:ListInstanceProfilesForRole`, `iam:PutRolePolicy`, `iam:GetRolePolicy`, `iam:DeleteRolePolicy` |
+| IAM PassRole (to Lambda only) | `iam:PassRole` |
+| Lambda | `lambda:CreateFunction`, `lambda:GetFunction`, `lambda:GetFunctionConfiguration`, `lambda:GetFunctionCodeSigningConfig`, `lambda:ListVersionsByFunction`, `lambda:UpdateFunctionCode`, `lambda:UpdateFunctionConfiguration`, `lambda:DeleteFunction`, `lambda:PutFunctionConcurrency`, `lambda:DeleteFunctionConcurrency`, `lambda:GetFunctionConcurrency`, `lambda:ListTags`, `lambda:TagResource`, `lambda:UntagResource`, `lambda:AddPermission`, `lambda:RemovePermission`, `lambda:GetPolicy`, `lambda:PutFunctionEventInvokeConfig`, `lambda:UpdateFunctionEventInvokeConfig`, `lambda:GetFunctionEventInvokeConfig`, `lambda:DeleteFunctionEventInvokeConfig` |
+| SQS | `sqs:CreateQueue`, `sqs:GetQueueUrl`, `sqs:GetQueueAttributes`, `sqs:SetQueueAttributes`, `sqs:DeleteQueue`, `sqs:ListQueueTags`, `sqs:TagQueue`, `sqs:UntagQueue` |
+| CloudWatch Logs | `logs:CreateLogGroup`, `logs:DeleteLogGroup`, `logs:DescribeLogGroups`, `logs:PutRetentionPolicy`, `logs:DeleteRetentionPolicy`, `logs:ListTagsForResource`, `logs:ListTagsLogGroup`, `logs:TagResource`, `logs:UntagResource`, `logs:PutMetricFilter`, `logs:DeleteMetricFilter`, `logs:DescribeMetricFilters` |
+| CloudWatch alarms | `cloudwatch:PutMetricAlarm`, `cloudwatch:DescribeAlarms`, `cloudwatch:DeleteAlarms`, `cloudwatch:ListTagsForResource`, `cloudwatch:TagResource`, `cloudwatch:UntagResource` |
+| EventBridge (raw/ sweep) | `events:PutRule`, `events:DescribeRule`, `events:DeleteRule`, `events:ListTagsForResource`, `events:TagResource`, `events:UntagResource`, `events:PutTargets`, `events:RemoveTargets`, `events:ListTargetsByRule` |
+| API Gateway (HTTP API) | `apigateway:GET`, `apigateway:POST`, `apigateway:PUT`, `apigateway:PATCH`, `apigateway:DELETE` |
+| SES | `ses:GetEmailIdentity`, `ses:CreateReceiptRuleSet`, `ses:DescribeReceiptRuleSet`, `ses:DeleteReceiptRuleSet`, `ses:CreateReceiptRule`, `ses:DescribeReceiptRule`, `ses:UpdateReceiptRule`, `ses:DeleteReceiptRule`, `ses:SetActiveReceiptRuleSet`, `ses:DescribeActiveReceiptRuleSet`, `ses:CreateConfigurationSet`, `ses:GetConfigurationSet`, `ses:DeleteConfigurationSet`, `ses:PutConfigurationSetDeliveryOptions`, `ses:PutConfigurationSetReputationOptions`, `ses:PutConfigurationSetSendingOptions`, `ses:ListTagsForResource`, `ses:TagResource`, `ses:UntagResource` |
+
+Notes:
+
+- **`cloudwatch:PutMetricAlarm`** creates the four alarms: processor DLQ not empty, processor errors, sign-in failures, and raw/ swept. `cloudwatch:DescribeAlarms` reads them back, `cloudwatch:TagResource` applies the default tags, and `cloudwatch:DeleteAlarms` is used on destroy. Without them the apply stops partway.
+- `kms:CreateGrant` is needed because the DynamoDB tables are encrypted with the stack's key.
+- The policy uses `"Resource": "*"` except for IAM and API Gateway, because bucket, table, and key names are generated at apply. After the first apply you can narrow it to the `lojo-mail-*` names and the key ARN.
+- Only with `ses_identity_mode = "create"`: `ses:CreateEmailIdentity`, `ses:GetEmailIdentity`, `ses:DeleteEmailIdentity`, `ses:PutEmailIdentityMailFromAttributes`, `ses:PutEmailIdentityDkimSigningAttributes`. Only with `manage_dns = true`: `route53:GetHostedZone`, `route53:ListResourceRecordSets`, `route53:ChangeResourceRecordSets`, `route53:GetChange`. Neither applies to this domain's defaults.
+- The checks below read state and need more actions: `ses:DescribeActiveReceiptRuleSet`, `s3:GetObject`, `s3:PutObject` (for the trigger test), `s3:ListBucket`, `kms:Decrypt` and `kms:GenerateDataKey` on the stack's key, `dynamodb:Query`, `logs:FilterLogEvents`, `sqs:GetQueueAttributes`, `cloudwatch:DescribeAlarms`, `cloudwatch:GetMetricStatistics`, `lambda:GetPolicy`, `lambda:GetFunctionConcurrency`, `lambda:InvokeFunction` (manual sweep only), and `events:DescribeRule`.
+- If an apply stops with `AccessDenied`, fix the policy and run a full `terraform apply` again. Do not use `-target` to finish it: a targeted apply skips the resources and dependencies it does not name, which is how a trigger or an ordering guarantee gets left out.
+
+## How mail gets from raw/ to the processor
+
+1. **S3 event notification (primary).** `aws_s3_bucket_notification.raw` sends every `s3:ObjectCreated:*` under `raw/` to `lojo-mail-processor`. S3 may invoke it only for this bucket and this account (`aws_lambda_permission.s3_invoke`, with `source_arn` and `source_account`). A message is normally indexed within seconds.
+2. **Scheduled sweep (safety net).** EventBridge rule `lojo-mail-raw-sweep` invokes the processor every `raw_sweep_minutes` (15 by default) with `{"lojo":"sweep-raw"}`. The processor lists `raw/` and ingests anything older than 5 minutes, up to 25 per run. It skips the SES setup object. Ingest is idempotent per raw key, so a message the notification also handled is stored once. Each pickup logs `raw_swept`, and alarm **`lojo-mail-raw-swept`** fires. So mail keeps flowing when the notification is broken, and you still find out. A message that fails in the sweep stays in `raw/`, the run fails, and the processor-errors alarm fires.
+3. **Creation order.** The receipt rule is created only after the key, the bucket's SSE-KMS configuration, the bucket policy, the Lambda permission, and the notification exist. The rule set is activated only after the rule exists. Earlier, SES could write before bucket encryption existed; the setup object from the first test deploy was AES256 for that reason. `scripts/check-tf-order.mjs` checks this order in `terraform graph`, and it runs in `npm run infra:validate` and CI.
+
+`aws_s3_bucket_notification.raw` owns the bucket's whole notification configuration. Anything else that writes it, such as the console, another stack, or turning on EventBridge notifications by hand, replaces it. The next `terraform plan` shows the change; apply to restore it.
 
 ## How the test stage works
 
@@ -62,15 +99,35 @@ terraform output receiving   # stage "test", recipients ["lojo-test@cyberphysica
   # sse "aws:kms", key == $KEY
   ```
 
-  If it is missing, SES could not write, either because the bucket policy or the key policy refuses it. Stop here. Fix it, then run `terraform apply -replace=aws_ses_receipt_rule.store` so SES writes the setup object again. The processor skips this object on purpose, and the `raw/` lifecycle removes it after `raw_retention_days`.
+  If it is missing, SES could not write, either because the bucket policy or the key policy refuses it. If it shows `AES256`, the rule was created before bucket encryption; this happened on the first test deploy from `cd429ce`. In either case, stop here. Fix the cause, delete the old object (`aws s3 rm "s3://$BUCKET/raw/AMAZON_SES_SETUP_NOTIFICATION"`), and run `terraform apply -replace=aws_ses_receipt_rule.store` so SES writes it again. Then repeat this check. The processor skips this object on purpose, and the `raw/` lifecycle removes it after `raw_retention_days`.
 
-- [ ] New objects under `raw/` trigger the processor:
+- [ ] New objects under `raw/` are wired to the processor, S3 is allowed to invoke it, and nothing throttles it:
 
   ```bash
   aws s3api get-bucket-notification-configuration --bucket "$BUCKET" \
     --query 'LambdaFunctionConfigurations[].{fn:LambdaFunctionArn,events:Events,filter:Filter}'
-  # lojo-mail-processor, s3:ObjectCreated:*, prefix raw/
+  # lojo-mail-processor, s3:ObjectCreated:*, prefix raw/ (an empty answer means no trigger)
+  aws lambda get-policy --function-name lojo-mail-processor --query Policy --output text \
+    | jq '.Statement[] | {sid:.Sid, principal:.Principal.Service, condition:.Condition}'
+  # AllowS3Invoke: s3.amazonaws.com, SourceArn = the bucket, SourceAccount = this account
+  # AllowRawSweep: events.amazonaws.com, SourceArn = rule lojo-mail-raw-sweep
+  aws lambda get-function-concurrency --function-name lojo-mail-processor
+  # {} (unreserved) or a number of at least 1; 0 would silently throttle every event
+  aws events describe-rule --name lojo-mail-raw-sweep --query '{state:State,schedule:ScheduleExpression}'
+  # ENABLED, rate(15 minutes)
   ```
+
+- [ ] **Trigger test, without SES.** Put a small message under `raw/` by hand. It must be indexed with no manual invoke:
+
+  ```bash
+  printf 'From: trigger-test@example.com\r\nTo: lojo-test@cyberphysical.us\r\nSubject: trigger test %s\r\nMessage-ID: <trigger-%s@example.com>\r\n\r\nHand-placed object.\r\n' "$(date -u +%FT%TZ)" "$(date +%s)" > /tmp/trigger.eml
+  aws s3 cp /tmp/trigger.eml "s3://$BUCKET/raw/trigger-test-$(date +%s)"
+  sleep 30
+  aws s3 ls "s3://$BUCKET/raw/"                 # the trigger-test object is gone
+  aws logs tail /aws/lambda/lojo-mail-processor --since 5m   # one invocation, no error, no raw_swept
+  ```
+
+  If the object is still there after a minute, the notification is not working. Go to [If mail sits in raw/](#if-mail-sits-in-raw) before sending mail. The sweep would eventually pick it up, but the primary path must work first. Trash the test message in the web app afterwards. It has no DMARC pass, so it is flagged as unverified; that is expected.
 
 - [ ] The dead-letter queue is empty, and no alarm is in `ALARM`:
 
@@ -93,6 +150,15 @@ Receiving does not need SES production access.
 ## 4. Follow it through each hop (allow about 2 minutes)
 
 - [ ] **SES accepted it.** The sender gets no bounce. A bounce such as `550 mailbox unavailable` means the rule set is not active or the recipient does not match. Recheck step 2.
+- [ ] **It was indexed automatically, with no manual invoke.** Do not run `aws lambda invoke` during this step. Within 2 minutes of sending, and before the 5-minute sweep threshold could apply, the processor log shows an invocation for the new `raw/` key, and there is no `raw_swept` line for it. The sweep alarm stays `OK`:
+
+  ```bash
+  aws logs filter-log-events --log-group-name /aws/lambda/lojo-mail-processor \
+    --start-time $(( ($(date +%s) - 600) * 1000 )) --filter-pattern '"raw_swept"' --query 'events[].message'
+  # []  (anything here means the notification missed it and the sweep caught it)
+  aws cloudwatch describe-alarms --alarm-names lojo-mail-raw-swept --query 'MetricAlarms[0].StateValue'
+  ```
+
 - [ ] **The processor ran without errors:**
 
   ```bash
@@ -155,3 +221,32 @@ terraform output receiving   # stage "live", recipients lojo@ and dmarc@
 Then send one more message from outside, this time to `lojo@cyberphysical.us`. Repeat the step 4 checks for indexed, raw gone, and sealed. After that, mail to the real address is live. Mail to `lojo-test@` is no longer accepted.
 
 To go back, set `receiving_stage = "test"` and apply. Real mail then stops being accepted again, and nothing already stored is touched. To stop all receiving, follow RUNBOOK section 8.
+
+## If mail sits in raw/
+
+The sweep ingests anything older than 5 minutes on its next run, and the `lojo-mail-raw-swept` alarm says the primary trigger missed it. Find out why:
+
+1. **Is the notification there?** `aws s3api get-bucket-notification-configuration --bucket "$BUCKET"`. If the answer is empty or has no `LambdaFunctionConfigurations`, it was never created or something overwrote it. CloudTrail shows who: search `PutBucketNotificationConfiguration` on the bucket. Run a full `terraform apply` (not `-target`) to restore it.
+2. **Did S3 send the event?** Check the processor's `AsyncEventsReceived` metric for the last hour:
+
+   ```bash
+   aws cloudwatch get-metric-statistics --namespace AWS/Lambda --metric-name AsyncEventsReceived \
+     --dimensions Name=FunctionName,Value=lojo-mail-processor --statistics Sum --period 300 \
+     --start-time "$(date -u -d '-1 hour' +%FT%TZ)" --end-time "$(date -u +%FT%TZ)"
+   # GNU date; on macOS use: date -u -v-1H +%FT%TZ
+   ```
+
+   Zero means S3 did not invoke: see steps 1 and 3. A non-zero value with no log lines means Lambda received the event but did not run it. Check `get-function-concurrency`: 0 throttles everything, and the variable now refuses 0. Also check `AsyncEventsDropped`, and the DLQ.
+3. **May S3 invoke it?** `aws lambda get-policy --function-name lojo-mail-processor` must have `AllowS3Invoke` with the bucket ARN and this account. If it is missing, apply again.
+4. **Did it run and fail?** Errors in `aws logs tail /aws/lambda/lojo-mail-processor --since 1h`, and messages in the DLQ, mean the trigger works and ingest failed. See RUNBOOK section 7.
+
+To drain `raw/` now rather than wait for the schedule, run the sweep by hand. It still skips objects younger than 5 minutes:
+
+```bash
+aws lambda invoke --function-name lojo-mail-processor \
+  --cli-binary-format raw-in-base64-out --payload '{"lojo":"sweep-raw"}' /tmp/sweep.json && cat /tmp/sweep.json
+# {"processed": N, "skipped": M}, where skipped counts objects deferred to the next run
+```
+
+Nothing in `raw/` is lost while you investigate. The lifecycle keeps it for `raw_retention_days` (7).
+

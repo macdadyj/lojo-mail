@@ -35,7 +35,7 @@ terraform plan
 With the defaults (`ses_identity_mode = existing`, `manage_dns = false`, `manage_active_rule_set = true`, `aws_region = us-east-1`) the plan should:
 
 - Read the existing SES identity. It should not create one, and it should not create DKIM or MAIL FROM attributes.
-- Create KMS, S3, six DynamoDB tables, IAM, a configuration set, a receipt rule set, the active association, two Lambdas, an SQS dead-letter queue, a sign-in failure metric filter, three CloudWatch alarms, and an HTTP API.
+- Create KMS, S3, six DynamoDB tables, IAM, a configuration set, a receipt rule set, the active association, two Lambdas, an SQS dead-letter queue, an EventBridge rule for the raw/ sweep, two log metric filters, four CloudWatch alarms, and an HTTP API. [DEPLOY.md](DEPLOY.md#required-permissions) lists the exact IAM actions the apply needs.
 - Create **no** Route 53 records.
 
 `manage_dns = true` in existing mode fails the plan on purpose.
@@ -236,7 +236,7 @@ The item has a `bodyKey` and no body text. Its `verdicts` should show SPF, DKIM,
 
 ## 7. Failed messages and redrive
 
-If the processor throws (for example a KMS or DynamoDB error), S3's async invoke retries twice, then puts the event in the DLQ. Alarm `lojo-mail-processor-dlq-not-empty` fires, and the raw MIME stays under `raw/` until `raw_retention_days` (7). Fix the cause, then redrive. Each message body is the original S3 event, so it can be replayed as-is; ingest is idempotent per `raw/` key.
+If the processor throws (for example a KMS or DynamoDB error), S3's async invoke retries twice, then puts the event in the DLQ. Alarm `lojo-mail-processor-dlq-not-empty` fires, and the raw MIME stays under `raw/` until `raw_retention_days` (7). Fix the cause, then redrive. Each message body is the original S3 event, so it can be replayed as-is; ingest is idempotent per `raw/` key. The raw/ sweep also retries anything still under `raw/` every 15 minutes. After you fix the cause, the sweep drains `raw/` on its own. The DLQ still holds the events, so redrive them or purge the queue to clear the alarm. A sweep that keeps failing on the same object keeps the processor-errors alarm firing until it is fixed or the object expires.
 
 ```bash
 cd infra/terraform
@@ -294,7 +294,7 @@ Netlify and Cloudflare Pages read `_headers` as it is. On CloudFront, copy the s
 - Follow [MIGRATION.md](MIGRATION.md) for Tuta.
 - Add the DMARC `rua` when you want reports. Reports arrive at `dmarc@cyberphysical.us`, skip the model, and are archived with the label `dmarc-report`.
 - Rotate a token, the passphrase hash, or the session secret by writing a new SSM value (`--overwrite`). The API caches its configuration for `LOJO_CONFIG_TTL_MS` (5 minutes by default), so the old value keeps working for up to that long in a warm container. Rotating the session secret signs everyone out.
-- Point `alarm_actions` at an SNS topic if you want the DLQ, error, and sign-in failure alarms to page you. `login_failure_alarm_threshold` (default 20 per hour) sets when failed sign-ins across all sources trip the alarm. If it fires and it was not you, rotate the passphrase hash and the session secret.
+- Point `alarm_actions` at an SNS topic if you want the DLQ, error, raw/ swept, and sign-in failure alarms to page you. The raw/ swept alarm means the S3 notification missed mail and the sweep delivered it; see [DEPLOY.md](DEPLOY.md#if-mail-sits-in-raw). `login_failure_alarm_threshold` (default 20 per hour) sets when failed sign-ins across all sources trip the alarm. If it fires and it was not you, rotate the passphrase hash and the session secret.
 - To switch the domain later, set `domain` and `ses_identity_mode = create`, then repeat identity, DKIM, and DNS for that new name. Do not delete the `cyberphysical.us` identity until mail to it can die. `manage_dns` is allowed only in create mode, and only with the confirmation string, after an audit of the new zone.
 
 ## 11. Local demo, no AWS
