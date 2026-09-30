@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import test from "node:test";
-import { hasScope, parseAgentTokens, tokenBookFromEnv, TokenBook } from "./auth.ts";
+import { agentTokensOrNone, hasScope, parseAgentTokens, tokenBookFromEnv, TokenBook } from "./auth.ts";
 import { MemoryStore } from "@lojo/core";
 import {
   DEV_PASSPHRASE,
@@ -157,4 +157,15 @@ test("agent tokens: one per client, never send or admin, long enough in producti
     () => tokenBookFromEnv({ LOJO_AGENT_TOKENS: JSON.stringify([{ label: "x", token: `hs_${good}`, scopes: ["read"] }]) }, true),
     /reserved prefix/,
   );
+});
+
+test("a malformed agent-token list disables all agent tokens instead of taking the API down", () => {
+  const good = "a".repeat(40);
+  const warnings: string[] = [];
+  const bad = JSON.stringify([{ label: "grok", token: good, scopes: ["read"] }, { label: "cursor", token: good.replace("a", "b"), scopes: ["send"] }]);
+  assert.deepEqual(agentTokensOrNone(bad, true, (message) => warnings.push(message)), []);
+  assert.match(warnings[0] ?? "", /send is not allowed/);
+  assert.doesNotMatch(warnings[0] ?? "", /aaaa/, "the warning never carries a token");
+  assert.deepEqual(agentTokensOrNone(undefined, true, () => assert.fail("no warning when unset")), []);
+  assert.equal(agentTokensOrNone(JSON.stringify([{ label: "grok", token: good, scopes: ["read"] }]), true, () => undefined).length, 1);
 });

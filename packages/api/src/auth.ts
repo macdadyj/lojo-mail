@@ -99,6 +99,20 @@ const MIN_AGENT_TOKEN_CHARS = 32;
  * send and admin are refused here: sending needs Jon's approval token, and admin
  * implies send.
  */
+/**
+ * A malformed agent-token list disables every agent token and keeps the API up,
+ * so a typo in one entry cannot lock Jon out of the web app.
+ */
+export function agentTokensOrNone(json: string | undefined, production: boolean, warn: (message: string) => void): AgentToken[] {
+  if (!json) return [];
+  try {
+    return parseAgentTokens(json, production);
+  } catch (error) {
+    warn(error instanceof Error ? error.message : String(error));
+    return [];
+  }
+}
+
 export function parseAgentTokens(json: string, production: boolean): AgentToken[] {
   let parsed: unknown;
   try {
