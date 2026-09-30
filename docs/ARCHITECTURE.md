@@ -170,7 +170,7 @@ In production the API has no envelope private key. Draft reply and summarize use
 
 ## Thunderbird and other IMAP clients
 
-`packages/bridge` runs on Jon's desktop (Santa Computa) as a systemd user service. It speaks IMAP4rev1 (with IDLE, MOVE, SPECIAL-USE, UIDPLUS-style stable UIDs) and SMTP submission on `127.0.0.1` only, and HTTPS to the API with the bridge token. See [THUNDERBIRD.md](THUNDERBIRD.md).
+`packages/bridge` runs on Jon's desktop (Santa Computa) as a systemd user service. It speaks IMAP4rev1 (with IDLE, MOVE, SPECIAL-USE, and UIDs that stay stable across restarts; UIDPLUS is not advertised) and SMTP submission on `127.0.0.1` only, and HTTPS to the API with the bridge token. See [THUNDERBIRD.md](THUNDERBIRD.md).
 
 - Folders map one to one: INBOX, Archive, Sent, Drafts, Junk (`spam`), Trash.
 - Messages are listed with `GET /v1/folders/:folder/messages`, and each body envelope is fetched and opened on the desktop with the envelope private key. The bridge rebuilds a MIME message from the metadata, the decrypted text and HTML, and the decrypted attachments. Plaintext stays in memory; only UIDs and sizes are written to disk.
