@@ -17,7 +17,7 @@ interface AppDeps {
   clientAddress: (c: Context<Env>) => string | undefined;
   dev: boolean;
   corsOrigin?: string[];
-  info: { mailbox: string; domain: string; llmProvider: string; embedProvider?: string; dailyTokenBudget: number };
+  info: { mailbox: string; domain: string; llmProvider: string; embedProvider?: string; dailyTokenBudget: number; autoSendEnabled?: boolean };
   /** One entry per authenticated request, so each token's use can be traced. Never bodies or query strings. */
   accessLog?: (entry: AccessLogEntry) => void;
 }
@@ -342,6 +342,25 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json(await mailbox.setUnread(c.req.param("id"), input.unread));
   });
   app.post("/v1/messages/:id/archive", need("write"), async (c) => c.json(await mailbox.archive(c.req.param("id"))));
+  app.post("/v1/messages/:id/restore", need("write"), async (c) => c.json(await mailbox.restore(c.req.param("id"))));
+
+  app.get("/v1/rules", need("read"), async (c) => c.json({ rules: await mailbox.getRules(), autoSendEnabled: deps.info.autoSendEnabled ?? false }));
+  /** Replaces the whole document. Human sessions only; tokens can only make rules safer (below). */
+  app.put("/v1/rules", need("human"), async (c) => c.json({ rules: await mailbox.putRules(await body<unknown>(c), actorOf(c.get("principal"))) }));
+  app.post("/v1/rules/switches", need("write"), async (c) => {
+    const input = await body<{ paused: boolean; killSwitch: boolean }>(c);
+    const switches: { paused?: boolean; killSwitch?: boolean } = {};
+    if (typeof input.paused === "boolean") switches.paused = input.paused;
+    if (typeof input.killSwitch === "boolean") switches.killSwitch = input.killSwitch;
+    if (Object.keys(switches).length === 0) throw new MailError("Send paused and/or killSwitch as true or false", "invalid");
+    return c.json({ rules: await mailbox.setRuleSwitches(switches, actorOf(c.get("principal"))) });
+  });
+  app.post("/v1/rules/:id/disable", need("write"), async (c) => c.json({ rules: await mailbox.disableRule(c.req.param("id"), actorOf(c.get("principal"))) }));
+  app.post("/v1/rules/test", need("read"), async (c) => {
+    const input = await body<{ messageId: string }>(c);
+    if (typeof input.messageId !== "string" || !input.messageId) throw new MailError("messageId is required", "invalid");
+    return c.json(await mailbox.testRules(input.messageId));
+  });
   app.post("/v1/messages/:id/move", need("write"), async (c) => {
     const input = await body<{ folder: Folder }>(c);
     return c.json(await mailbox.move(c.req.param("id"), folder(input.folder), actorOf(c.get("principal"))));

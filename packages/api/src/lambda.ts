@@ -101,6 +101,7 @@ async function buildApp() {
     llm,
     embedder,
     sender: SesSender.fromEnv(),
+    autoSendEnabled: process.env.LOJO_AUTO_SEND === "on",
     styleGuide: process.env.LOJO_STYLE_GUIDE ?? styleGuide,
     ...(ownPgpPublicKey ? { ownPgpPublicKey } : {}),
     ...(signingKey ? { pgpSigningKey: { armoredKey: signingKey, ...(signingPassphrase ? { passphrase: signingPassphrase } : {}) } } : {}),
@@ -120,6 +121,7 @@ async function buildApp() {
       llmProvider: config.llmProvider,
       embedProvider: config.embedProvider,
       dailyTokenBudget: config.dailyTokenBudget,
+      autoSendEnabled: process.env.LOJO_AUTO_SEND === "on",
     },
   });
 }
