@@ -26,7 +26,8 @@
     "infra:validate": "terraform -chdir=infra/terraform init -backend=false -input=false && terraform -chdir=infra/terraform validate && terraform -chdir=infra/terraform fmt -check -recursive && node scripts/check-tf-order.mjs && terraform -chdir=infra/terraform test",
     "secrets:check": "node scripts/check-no-secrets.mjs",
     "bundles:check": "node scripts/check-bundles.mjs",
-    "passphrase-hash": "tsx scripts/passphrase-hash.ts"
+    "passphrase-hash": "tsx scripts/passphrase-hash.ts",
+    "rules": "tsx scripts/rules.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.28.0",

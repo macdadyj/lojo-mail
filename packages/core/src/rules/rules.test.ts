@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { MockLlm } from "../ai/providers.ts";
 import type { LlmRequest } from "../ai/types.ts";
@@ -257,4 +258,9 @@ test("the template placeholder only ever inserts a plain first name", () => {
   assert.equal(renderTemplate("Hi {{first_name}}", { from: { email: "a@b.c", name: "Mina Cho" } }), "Hi Mina");
   assert.equal(renderTemplate("Hi {{ first_name }}", { from: { email: "a@b.c", name: "<script>alert(1)</script>" } }), "Hi there");
   assert.equal(renderTemplate("Hi {{first_name}}", { from: { email: "a@b.c", name: "https://evil.example" } }), "Hi there");
+});
+
+test("config/rules.example.json is a valid rules file", () => {
+  const example: unknown = JSON.parse(readFileSync(new URL("../../../../config/rules.example.json", import.meta.url), "utf8"));
+  assert.deepEqual(checkRulesFile(example), { ok: true, rules: 5 });
 });
