@@ -247,6 +247,6 @@ export function parsePrivateJwk(raw: string): EcPrivateJwk {
   return { kty: "EC", crv: "P-256", x, y, d };
 }
 
-export async function loadPrivateKey(config: BridgeConfig): Promise<EcPrivateJwk> {
+export async function loadPrivateKey(config: Pick<BridgeConfig, "privateKeyFile" | "privateKeyCommand">): Promise<EcPrivateJwk> {
   return parsePrivateJwk(await readSecret(config.privateKeyFile, config.privateKeyCommand, "envelope private key"));
 }

@@ -19,6 +19,7 @@ import {
   parseConfig,
   saveConfig,
 } from "./config.ts";
+import { exportWrapped, importWrapped, terminalIo, verifyWrapped } from "./keytool.ts";
 import { jsonLogger } from "./log.ts";
 
 const USAGE = `lojo-bridge ${BRIDGE_VERSION}: local IMAP and SMTP bridge for lojo-mail (Thunderbird)
@@ -31,6 +32,17 @@ const USAGE = `lojo-bridge ${BRIDGE_VERSION}: local IMAP and SMTP bridge for loj
   lojo-bridge check            check file modes, the token's scopes, and the envelope key
   lojo-bridge reset-password   print a new app password (restart the service afterwards)
 
+  lojo-bridge key export-wrapped [--out PATH] [--force]
+      wrap the envelope key under a new generated key passphrase, for the web
+      app on other devices and for backup; the passphrase is shown once
+  lojo-bridge key verify-wrapped --in PATH
+      check that a wrapped key opens with its passphrase (asked on the terminal)
+  lojo-bridge key import-wrapped --in PATH --out PATH [--force]
+      recovery: turn a wrapped key back into envelope.private.jwk
+
+  The key commands read the envelope key from bridge.json, or from
+  --private-key-file / --private-key-command when given.
+
 Options
   --config PATH   default $XDG_CONFIG_HOME/lojo-mail/bridge.json
 
@@ -41,8 +53,8 @@ Delete in Thunderbird moves mail to Trash when the service granted the bridge
 token the trash scope (a soft delete, kept for the retention window). With
 --no-trash, or without the scope, delete archives with a hidden label.
 
-Mail submitted over SMTP becomes a draft in the approval queue. Nothing is
-sent until Jon approves it in the lojo-mail web app.`;
+With the client-send scope, Send in Thunderbird goes out at once; without it,
+mail submitted over SMTP becomes a draft in the web approval queue.`;
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -59,6 +71,8 @@ const { values, positionals } = parseArgs({
     "smtp-port": { type: "string" },
     "no-trash": { type: "boolean", default: false },
     force: { type: "boolean", default: false },
+    in: { type: "string" },
+    out: { type: "string" },
     help: { type: "boolean", short: "h", default: false },
   },
 });
@@ -187,8 +201,39 @@ async function serve(): Promise<void> {
   process.on("SIGINT", () => stop("SIGINT"));
 }
 
+function keySource(): { privateKeyFile?: string; privateKeyCommand?: string[] } {
+  const file = values["private-key-file"];
+  const command = argv(values["private-key-command"], "--private-key-command");
+  if (file || command) return { ...(file ? { privateKeyFile: file } : {}), ...(command ? { privateKeyCommand: command } : {}) };
+  return loadConfig(configPath);
+}
+
+function required(value: string | undefined, flag: string): string {
+  if (!value) throw new ConfigError(`${flag} is required`);
+  return value;
+}
+
+async function key(subcommand: string | undefined): Promise<void> {
+  const force = values.force;
+  switch (subcommand) {
+    case "export-wrapped":
+      await exportWrapped(await loadPrivateKey(keySource()), { ...(values.out ? { out: values.out } : {}), force }, terminalIo);
+      return;
+    case "verify-wrapped": {
+      const source = values["private-key-file"] || values["private-key-command"] || exists(configPath) ? keySource() : null;
+      await verifyWrapped({ in: required(values.in, "--in"), ...(source ? { expected: await loadPrivateKey(source) } : {}) }, terminalIo);
+      return;
+    }
+    case "import-wrapped":
+      await importWrapped({ in: required(values.in, "--in"), out: required(values.out, "--out"), force }, terminalIo);
+      return;
+    default:
+      throw new ConfigError(`key needs export-wrapped, verify-wrapped, or import-wrapped\n\n${USAGE}`);
+  }
+}
+
 async function main(): Promise<void> {
-  const [command] = positionals;
+  const [command, subcommand] = positionals;
   if (!command || values.help) {
     console.log(USAGE);
     return;
@@ -202,6 +247,8 @@ async function main(): Promise<void> {
       return check();
     case "reset-password":
       return resetPassword();
+    case "key":
+      return key(subcommand);
     default:
       console.error(`Unknown command ${command}\n\n${USAGE}`);
       process.exit(2);

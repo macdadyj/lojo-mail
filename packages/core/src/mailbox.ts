@@ -214,6 +214,11 @@ export class Mailbox {
     return Boolean(this.deps.privateJwk);
   }
 
+  /** The public half mail is sealed to. Public data: the web app compares an unwrapped key against it. */
+  get publicJwk(): EcPublicJwk {
+    return this.deps.publicJwk;
+  }
+
   unlock(privateJwk: EcPrivateJwk): void {
     this.deps.privateJwk = privateJwk;
   }

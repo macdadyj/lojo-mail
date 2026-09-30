@@ -16,6 +16,7 @@ Nothing in this repo deploys itself. Terraform plans; it does not apply. There a
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | Exact steps Jon runs: parameters, apply, first test email, DLQ redrive, rollback |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | First-deploy live test: a test message to a test address through SES, the encrypted bucket, and the processor, before real mail is switched on |
 | [docs/THUNDERBIRD.md](docs/THUNDERBIRD.md) | Thunderbird as the full mail client through the local IMAP/SMTP bridge: install, account setup, direct send, Drafts, delete |
+| [docs/WEB_KEY.md](docs/WEB_KEY.md) | Using the web app from any device: wrapped envelope key, lock and auto-lock, passkey remember, password-manager layout, backup and recovery, rotating the sign-in passphrase |
 | [docs/BOTS.md](docs/BOTS.md) | Bots managing your mail: Grok Bot, Grok Build, Cursor, grok.com, local Ollama; bot drafts approved by Send in Thunderbird |
 | [config/rules.example.json](config/rules.example.json) | Mail rules: sort, label, archive, trash (restorable), and replies (drafts by default; guarded auto-send). See SECURITY.md, mail rules |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | Leaving Tuta (`lojo@tuta.io`) without IMAP, locally or straight into AWS |

@@ -120,6 +120,8 @@ export interface Settings {
   dailyTokenBudget: number;
   budgetUsed: number;
   unlocked: boolean;
+  /** Public: which envelope key mail is sealed to. */
+  envelopeKeyFingerprint?: string;
   dev: boolean;
   principal: "human" | "token";
 }

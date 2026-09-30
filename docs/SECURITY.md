@@ -40,9 +40,12 @@ Jon's machines (the browser tab that holds the envelope private key, the passwor
 | Stolen API token, `send` | Nothing more on its own. Sending also needs a one-time approval token that only a human session can mint. |
 | Stolen API token, `body` | The AI-context text of recent mail, draft text, action items, semantic search, and (with `write`) model summaries of threads. Treat `body` like a read key to recent mail. |
 | Stolen agent token | The same as an API token with that token's scopes, which can never include `send` or `admin`. Revoke it alone by removing its entry from `/lojo-mail/agent-tokens`. |
-| Stolen human passphrase | Everything the web app can do, including approving sends and full export. It still cannot open sealed bodies without the envelope private key. Rotate it with `npm run passphrase-hash`. |
+| Stolen human passphrase | Everything the web app can do, including approving sends and full export. It still cannot open sealed bodies without the envelope private key. Rotate it with `npm run passphrase-hash` ([WEB_KEY.md](WEB_KEY.md#6-rotating-the-web-sign-in-passphrase)). |
 | Stolen session signing secret | Can mint human sessions. Rotate the SSM parameter; every session dies. |
 | Stolen envelope private key | Can open every sealed body and attachment, forever. There is no forward secrecy against a later key compromise. |
+| Stolen wrapped key, without its key passphrase | Nothing: a 150-bit passphrase behind scrypt. |
+| Stolen wrapped key and key passphrase | The same as a stolen envelope private key. |
+| Stolen phone or laptop that used the web app | Locked tab: nothing, unless "keep the wrapped key" (still needs the key passphrase) or a passkey (still needs the device's biometric or PIN) was chosen. An unlocked tab gives mail access until auto-lock. |
 | A hostile email | Is text. It can try to steer a model (prompt injection). The controls below are designed so that the worst it can do through a model is create a draft that Jon has to read and approve, label or archive mail, and waste token budget. |
 
 ## What is not end-to-end
@@ -59,11 +62,32 @@ There are three kinds of key. Each has one owner.
 
 | Key | Owner | Where it lives | Used for |
 | --- | --- | --- | --- |
-| Envelope private key (P-256 JWK) | Jon only | Password manager; browser memory while unlocked | Opening sealed bodies and attachments in the browser |
+| Envelope private key (P-256 JWK) | Jon only | Santa Computa (bridge); password manager as a wrapped key; browser memory while unlocked | Opening sealed bodies and attachments in the browser and the bridge |
+| Key passphrase | Jon only | Password manager, ideally a separate entry or vault | Unwrapping the wrapped key |
 | Envelope public key | Anyone | SSM `/lojo-mail/envelope-public-jwk` (String) | Sealing bodies, attachments, and the sent copy |
 | KMS key `alias/lojo-mail` | AWS account | KMS | S3 and DynamoDB at rest; wrapping per-draft and per-message AI-context data keys |
 
 **The envelope private key is never in AWS.** It is not in SSM, not in Lambda environment variables, not in the repo, and not written to disk by any server. The deployed API cannot open a sealed body. The browser fetches the envelope and opens it locally. Local dev (`npm run dev`) generates a throwaway keypair for the synthetic demo and holds it in the dev server process; that server binds to `127.0.0.1` only. Pointed at an imported store (`LOJO_STORE_FILE`), the dev server is locked like production and never reads the private key file. Do not "make production easier" by putting the private key in SSM. That would turn every API bug into a mailbox leak.
+
+### Wrapped key (`lojo-key-v1`)
+
+To use the web app on devices other than Santa, `lojo-bridge key export-wrapped` wraps the private key under a generated key passphrase (guide: [WEB_KEY.md](WEB_KEY.md)).
+
+- **Key passphrase:** 30 Crockford base32 characters from the CSPRNG, 150 bits. It is shown once and never written to disk by the tool. It is not the web sign-in passphrase and is never sent to the API.
+- **KDF:** scrypt (pure JS, `@noble/hashes`), N = 2^17, r = 8, p = 1 (128 MiB), random 16-byte salt. On parse, the web app and the CLI refuse N below 2^17 or above 2^20, r outside 8 to 32, and p above 4, so an edited blob can't downgrade the cost or exhaust memory.
+- **Cipher:** AES-256-GCM, random 12-byte IV. The plaintext is the key's PKCS#8 DER. The AAD is `lojo-mail-wrapped-key-v1|` plus the header (version, KDF parameters, salt, IV, public key `x`/`y`, creation time) in a fixed order, so changing any header field, including swapping the public key, fails decryption.
+- **Format:** `lojo-key-v1.` + base64url(JSON), one line, about 640 characters, with no `d` member.
+- **Fingerprint:** SHA-256 over `P-256:x:y`, first 80 bits. `/v1/settings` publishes the mailbox's `envelopeKeyFingerprint` (public data). The web app refuses to unlock a key whose fingerprint differs, and it proves the unwrapped private key matches the public key by opening a probe sealed to it.
+
+With 150 bits, the wrapped key alone is safe to store anywhere; scrypt only adds margin. The wrapped key plus its passphrase equals the private key: whoever holds both can read every sealed body. Re-exporting gives a new passphrase and salt, but old blobs keep working with their old passphrase until destroyed; only a new envelope keypair revokes them.
+
+### The key in the browser
+
+- The unwrapped PKCS#8 bytes are imported as a **non-extractable** ECDH `CryptoKey` and then zeroed. The key lives only in the tab's memory. The app never stores the unwrapped key or the key passphrase anywhere; the old opt-in `sessionStorage` JWK is deleted at startup.
+- **Opt-in, "keep the wrapped key":** stores only the wrapped blob in `localStorage`. A device thief still needs the key passphrase.
+- **Opt-in, "remember on this device":** a passkey created with the WebAuthn PRF extension (user verification required) yields a 32-byte secret; HKDF-SHA256 (info `lojo-mail-device-key-v1`) turns it into an AES-256-GCM key that seals the PKCS#8, with the credential id and public key in the AAD. The sealed record is in `localStorage`. Every unlock needs the authenticator and a biometric or PIN. Without PRF support the option is off; there is no weaker device-key fallback, because a key the page can use on its own would protect against nothing a device thief can't also do.
+- **Lock:** manual (rail button), idle (5, 15, 60 or 240 minutes; default 15), a 12-hour hard cap from unlock, and sign-out. Timers are re-checked on every interaction and when the tab becomes visible, since browsers throttle timers in background tabs. Locking drops the `CryptoKey` and purges decrypted messages from the page.
+- **What this does not stop:** script running in the page while unlocked (an XSS, a malicious extension) can use the key to open mail, though it cannot export it. The CSP and the no-third-party-scripts rule are the defense. A compromised device can capture the key passphrase as it is typed.
 
 ### Envelope (`lojo-env-v2`)
 
@@ -389,7 +413,8 @@ Thunderbird on Jon's Linux desktop talks IMAP and SMTP to a bridge on the same m
 - SES production access is account-level. Guard the passphrase and the `send` token accordingly.
 - MTA-STS in `testing` mode does not fail closed.
 - Reprocessing raw MIME re-exposes plaintext to the processor. Raw is kept only until it is processed, or 7 days.
-- The browser holds the private key in memory; `sessionStorage` only if Jon opts in. Do not add third-party scripts to the PWA.
+- The browser holds the private key in memory as a non-extractable key while unlocked; script in the page can use it but not export it. Do not add third-party scripts to the PWA.
+- scrypt at 128 MiB may be slow or fail on old phones with little memory. The cost is fixed by the minimum on purpose; use a newer device rather than lowering it.
 
 ## Out of scope
 

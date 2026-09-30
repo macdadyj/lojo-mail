@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, sessionToken, signOut, SIGNED_OUT_EVENT } from "./api.ts";
 import { Compose } from "./Compose.tsx";
+import { KeyButton } from "./KeyPanel.tsx";
 import { Login } from "./Login.tsx";
 import { Reader } from "./Reader.tsx";
 import { Search } from "./Search.tsx";
@@ -94,6 +95,7 @@ function Mail() {
         <a className={route.tab === "search" ? "active" : ""} href="#/search">Search</a>
         <a className={route.tab === "settings" ? "active" : ""} href="#/settings">Settings</a>
         <a className={route.tab === "compose" ? "active" : ""} href="#/compose">Write</a>
+        <KeyButton />
         <button type="button" onClick={() => signOut()}>Sign out</button>
       </nav>
       <section className="list">

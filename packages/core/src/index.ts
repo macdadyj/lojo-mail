@@ -41,6 +41,7 @@ export {
   decodeEnvelope,
   encodeEnvelope,
   generateIdentity,
+  keyFingerprint,
   messageBodyContext,
   openBytes,
   openJson,
