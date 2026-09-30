@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "paused": false,
+  "killSwitch": false,
+  "trashRetentionDays": 30,
+  "maxAutoSendPerDay": 20,
+  "rules": [
+    {
+      "id": "receipts",
+      "name": "File receipts",
+      "match": { "categories": ["transactional"], "subjectContains": ["receipt", "order", "invoice"] },
+      "actions": [{ "type": "label", "labels": ["receipts"] }, { "type": "move", "folder": "archive" }, { "type": "markRead" }]
+    },
+    {
+      "id": "newsletters",
+      "name": "Label newsletters and keep them out of the inbox",
+      "match": { "bulk": true },
+      "actions": [{ "type": "label", "labels": ["lists"] }, { "type": "move", "folder": "archive" }]
+    },
+    {
+      "id": "old-vendor",
+      "name": "Bin mail from a vendor I left (restorable for 30 days)",
+      "enabled": false,
+      "match": { "from": ["@old-vendor.example"] },
+      "actions": [{ "type": "trash" }]
+    },
+    {
+      "id": "family-ack",
+      "name": "Draft an acknowledgement for family, for my approval",
+      "match": { "from": ["mina@example.com"], "categories": ["personal"] },
+      "actions": [
+        {
+          "type": "reply",
+          "reply": { "mode": "draft", "ai": { "instruction": "Thank them, say I read it and will answer properly within two days." } }
+        }
+      ]
+    },
+    {
+      "id": "travel-autoreply",
+      "name": "While travelling, tell two known people I will answer next week",
+      "enabled": false,
+      "match": { "from": ["mina@example.com", "@harbor.example"] },
+      "actions": [
+        {
+          "type": "reply",
+          "reply": {
+            "mode": "autoSend",
+            "template": "Hi {{first_name}},\n\nI am travelling this week and will answer when I am back.\n\nJon",
+            "allowSenders": ["mina@example.com", "@harbor.example"],
+            "allowCategories": ["personal"],
+            "perSenderPerDay": 1,
+            "perDay": 5
+          }
+        }
+      ]
+    }
+  ]
+}

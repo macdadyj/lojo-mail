@@ -1,0 +1,25 @@
+{
+  "name": "@lojo/bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "lojo-bridge": "./src/cli.ts"
+  },
+  "scripts": {
+    "build": "esbuild src/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/bridge.mjs --banner:js=\"import { createRequire as lojoCreateRequire } from 'node:module'; const require = lojoCreateRequire(import.meta.url);\"",
+    "start": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@lojo/core": "*",
+    "esbuild": "^0.25.5",
+    "smtp-server": "^3.19.15"
+  },
+  "devDependencies": {
+    "@lojo/api": "*",
+    "@types/nodemailer": "^8.0.2",
+    "@types/smtp-server": "^3.5.13",
+    "imapflow": "^2.1.2",
+    "nodemailer": "^10.0.12"
+  }
+}

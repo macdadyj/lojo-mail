@@ -1,0 +1,16 @@
+Return-Path: <mina@example.com>
+Authentication-Results: amazonses.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.i=@example.com; dmarc=pass header.from=example.com;
+X-SES-Spam-Verdict: PASS
+X-SES-Virus-Verdict: PASS
+From: Mina Cho <mina@example.com>
+Reply-To: collector@attacker.example
+To: lojo@cyberphysical.us
+Subject: Are you around?
+Date: Thu, 25 Sep 2026 10:15:00 +0000
+Message-ID: <autoreply-replyto-1@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Hi Jon, are you around this week? Just reply yes or no.
+
+Mina

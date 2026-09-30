@@ -12,7 +12,7 @@
   "scripts": {
     "dev": "tsx scripts/dev.ts",
     "test": "node scripts/run-tests.mjs",
-    "typecheck": "tsc -p packages/core --noEmit && tsc -p packages/pipeline --noEmit && tsc -p packages/api --noEmit && tsc -p packages/mcp --noEmit && tsc -p packages/web --noEmit && tsc -p packages/web/tsconfig.node.json --noEmit && tsc -p packages/importer --noEmit && tsc -p packages/local --noEmit",
+    "typecheck": "tsc -p packages/core --noEmit && tsc -p packages/pipeline --noEmit && tsc -p packages/api --noEmit && tsc -p packages/mcp --noEmit && tsc -p packages/web --noEmit && tsc -p packages/web/tsconfig.node.json --noEmit && tsc -p packages/importer --noEmit && tsc -p packages/local --noEmit && tsc -p packages/bridge --noEmit",
     "lint": "eslint .",
     "keygen": "tsx scripts/keygen.ts",
     "wkd-hash": "tsx scripts/wkd-hash.ts",
@@ -20,11 +20,14 @@
     "local": "tsx packages/local/src/cli.ts",
     "mcp": "tsx packages/mcp/src/server.ts",
     "build:web": "npm run build -w @lojo/web",
+    "build:bridge": "npm run build -w @lojo/bridge",
+    "bridge": "tsx packages/bridge/src/cli.ts",
     "build:lambda": "npm run build -w @lojo/pipeline && npm run build -w @lojo/api",
     "infra:validate": "terraform -chdir=infra/terraform init -backend=false -input=false && terraform -chdir=infra/terraform validate && terraform -chdir=infra/terraform fmt -check -recursive && node scripts/check-tf-order.mjs && terraform -chdir=infra/terraform test",
     "secrets:check": "node scripts/check-no-secrets.mjs",
     "bundles:check": "node scripts/check-bundles.mjs",
-    "passphrase-hash": "tsx scripts/passphrase-hash.ts"
+    "passphrase-hash": "tsx scripts/passphrase-hash.ts",
+    "rules": "tsx scripts/rules.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.28.0",

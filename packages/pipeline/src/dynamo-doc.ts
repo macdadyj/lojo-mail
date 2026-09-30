@@ -1,5 +1,5 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { DEFAULT_TABLE_NAMES, type Condition, type DynamoLike, type Item, type TableNames } from "@lojo/core";
 
 export function tableNamesFromEnv(env: NodeJS.ProcessEnv = process.env): TableNames {
@@ -66,7 +66,7 @@ function conditionFailed(error: unknown): boolean {
   return error instanceof Error && error.name === "ConditionalCheckFailedException";
 }
 
-/** Get, Put, Query, and Update only. The IAM policy grants nothing else. */
+/** Get, Put, Query, Update, and conditional Delete. Only the trash purge role is granted DeleteItem. */
 export function dynamoLike(doc: DynamoDBDocumentClient): DynamoLike {
   return {
     async get(table, key) {
@@ -134,6 +134,20 @@ export function dynamoLike(doc: DynamoDBDocumentClient): DynamoLike {
             ...expr.attributes(),
             ReturnValues: "ALL_NEW",
           }),
+        );
+        return (out.Attributes as Item | undefined) ?? null;
+      } catch (error) {
+        if (conditionFailed(error)) return null;
+        throw error;
+      }
+    },
+    async delete(table, key, condition) {
+      const expr = new Expression();
+      const clause = expr.condition(condition);
+      if (!clause) throw new Error("delete needs a condition");
+      try {
+        const out = await doc.send(
+          new DeleteCommand({ TableName: table, Key: key, ConditionExpression: clause, ...expr.attributes(), ReturnValues: "ALL_OLD" }),
         );
         return (out.Attributes as Item | undefined) ?? null;
       } catch (error) {

@@ -142,6 +142,11 @@ override_resource {
 }
 
 override_resource {
+  target = aws_cloudwatch_event_rule.trash_purge
+  values = { arn = "arn:aws:events:us-east-1:111122223333:rule/lojo-mail-trash-purge" }
+}
+
+override_resource {
   target = aws_dynamodb_table.budget
   values = { arn = "arn:aws:dynamodb:us-east-1:111122223333:table/lojo-mail-budget" }
 }
@@ -274,7 +279,7 @@ run "roles_query_the_indexes_and_never_scan_or_delete" {
       for doc in [data.aws_iam_policy_document.processor, data.aws_iam_policy_document.api] :
       length(setintersection(toset(flatten([for s in doc.statement : s.actions])), toset(["dynamodb:Scan", "dynamodb:DeleteItem", "dynamodb:*"]))) == 0
     ])
-    error_message = "no role may Scan or DeleteItem"
+    error_message = "neither the processor nor the API may Scan or DeleteItem"
   }
 
   assert {
@@ -349,11 +354,86 @@ run "server_seal_kms_use_is_bound_to_its_purpose" {
   }
 
   assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.processor.statement :
+      alltrue([for c in s.condition : c.values == tolist(["rules"]) if c.variable == "kms:EncryptionContext:purpose"])
+      if contains(s.actions, "kms:Decrypt") && anytrue([for c in s.condition : c.variable == "kms:EncryptionContext:purpose"])
+    ])
+    error_message = "the processor seals AI-context and draft copies but must not open them; it may only open the rules"
+  }
+}
+
+run "rules_are_sealed_by_the_api_and_only_opened_by_the_processor" {
+  command = plan
+
+  assert {
     condition = !contains(flatten([
       for s in data.aws_iam_policy_document.processor.statement : s.actions
-      if anytrue([for c in s.condition : c.variable == "kms:EncryptionContext:purpose"])
-    ]), "kms:Decrypt")
-    error_message = "the processor seals AI-context and draft copies but must not open them"
+      if anytrue([for c in s.condition : c.variable == "kms:EncryptionContext:purpose" && contains(c.values, "rules")])
+    ]), "kms:GenerateDataKey")
+    error_message = "the processor must not be able to produce a sealed rules document"
+  }
+
+  assert {
+    condition = contains(flatten([
+      for s in data.aws_iam_policy_document.api.statement : s.actions
+      if anytrue([for c in s.condition : c.variable == "kms:EncryptionContext:purpose" && contains(c.values, "rules")])
+    ]), "kms:GenerateDataKey")
+    error_message = "the API seals the rules Jon saves"
+  }
+
+  assert {
+    condition     = length([for r in flatten([for s in data.aws_iam_policy_document.processor.statement : s.resources if contains(s.actions, "s3:PutObject")]) : r if endswith(r, "/rules/*")]) == 0
+    error_message = "the processor never writes rules"
+  }
+}
+
+run "auto_send_is_off_by_default" {
+  command = plan
+
+  assert {
+    condition     = aws_lambda_function.processor.environment[0].variables.LOJO_AUTO_SEND == "off"
+    error_message = "rules must not auto-send unless auto_send_enabled is set"
+  }
+
+  assert {
+    condition     = length(setintersection(toset(flatten([for s in data.aws_iam_policy_document.processor.statement : s.actions])), toset(["ses:SendEmail", "ses:SendRawEmail"]))) == 0
+    error_message = "the processor has no SES send permission by default"
+  }
+}
+
+run "auto_send_flag_grants_the_processor_ses_as_the_mailbox_only" {
+  command = plan
+
+  variables {
+    auto_send_enabled = true
+  }
+
+  assert {
+    condition     = aws_lambda_function.processor.environment[0].variables.LOJO_AUTO_SEND == "on"
+    error_message = "the flag turns auto-send on"
+  }
+
+  assert {
+    condition = length([
+      for s in data.aws_iam_policy_document.processor.statement : s
+      if s.sid == "RuleAutoSendAsMailbox" && anytrue([for c in s.condition : c.variable == "ses:FromAddress" && c.values == tolist(["lojo@cyberphysical.us"])])
+    ]) == 1
+    error_message = "auto-send may only send as the mailbox"
+  }
+}
+
+run "the_api_reads_the_bridge_token" {
+  command = plan
+
+  assert {
+    condition     = contains(flatten([for s in data.aws_iam_policy_document.api.statement : s.resources if s.sid == "ReadConfig"]), "arn:aws:ssm:us-east-1:111122223333:parameter/lojo-mail/bridge-token")
+    error_message = "the API reads the bridge token"
+  }
+
+  assert {
+    condition     = !contains(flatten([for s in data.aws_iam_policy_document.processor.statement : s.resources]), "arn:aws:ssm:us-east-1:111122223333:parameter/lojo-mail/bridge-token")
+    error_message = "the processor never needs the bridge token"
   }
 }
 
@@ -734,6 +814,113 @@ run "zero_reserved_concurrency_is_refused" {
   }
 
   expect_failures = [var.processor_reserved_concurrency]
+}
+
+run "bridge_trash_is_on_by_default_and_can_be_turned_off" {
+  command = plan
+
+  assert {
+    condition     = aws_lambda_function.api.environment[0].variables.LOJO_BRIDGE_TRASH == "on"
+    error_message = "Jon's decision: the bridge may move mail to Trash"
+  }
+}
+
+run "bridge_trash_flag_off" {
+  command = plan
+
+  variables {
+    bridge_trash_enabled = false
+  }
+
+  assert {
+    condition     = aws_lambda_function.api.environment[0].variables.LOJO_BRIDGE_TRASH == "off"
+    error_message = "bridge_trash_enabled = false keeps the bridge out of Trash"
+  }
+}
+
+run "trash_purge_reports_by_default_and_cannot_delete" {
+  command = plan
+
+  assert {
+    condition     = aws_lambda_function.trash_purge.environment[0].variables.LOJO_TRASH_PURGE == "report"
+    error_message = "the purge only reports until Jon sets trash_purge_mode = purge"
+  }
+
+  assert {
+    condition     = length(setintersection(toset(flatten([for s in data.aws_iam_policy_document.trash_purge.statement : s.actions])), toset(["dynamodb:DeleteItem", "s3:DeleteObject"]))) == 0
+    error_message = "in report mode the purge role cannot delete anything"
+  }
+
+  assert {
+    condition     = aws_lambda_function.trash_purge.role == aws_iam_role.trash_purge.arn && aws_lambda_function.trash_purge.reserved_concurrent_executions == 1
+    error_message = "the purge runs alone, under its own role"
+  }
+
+  assert {
+    condition     = aws_cloudwatch_event_rule.trash_purge.state == "ENABLED"
+    error_message = "the daily report runs"
+  }
+}
+
+run "trash_purge_role_reads_no_mail_and_no_secrets" {
+  command = apply
+
+  assert {
+    condition = length([
+      for a in flatten([for s in data.aws_iam_policy_document.trash_purge.statement : s.actions]) : a
+      if startswith(a, "ssm:") || startswith(a, "ses:") || startswith(a, "bedrock:") || a == "s3:GetObject" || a == "dynamodb:Scan" || a == "dynamodb:*"
+    ]) == 0
+    error_message = "the purge role opens no mail and reads no secrets"
+  }
+
+  assert {
+    condition     = alltrue([for s in data.aws_iam_policy_document.trash_purge.statement : !contains(s.resources, "*")])
+    error_message = "no purge statement may use Resource *"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.trash_purge.statement : alltrue([for c in s.condition : c.variable == "kms:ViaService"])
+      if contains(s.actions, "kms:Decrypt")
+    ])
+    error_message = "the purge role can only use the key through DynamoDB"
+  }
+}
+
+run "trash_purge_mode_purge_grants_delete_on_messages_and_its_objects_only" {
+  command = apply
+
+  variables {
+    trash_purge_mode = "purge"
+  }
+
+  assert {
+    condition     = one([for s in data.aws_iam_policy_document.trash_purge.statement : s.resources if s.sid == "PurgeExpiredTrash"]) == toset([aws_dynamodb_table.messages.arn])
+    error_message = "DeleteItem is on the messages table only, not its indexes or other tables"
+  }
+
+  assert {
+    condition = alltrue([
+      for r in one([for s in data.aws_iam_policy_document.trash_purge.statement : s.resources if s.sid == "DeletePurgedObjects"]) :
+      endswith(r, "/objects/*") || endswith(r, "/ai-context/*")
+    ])
+    error_message = "DeleteObject is limited to sealed bodies, attachments, and AI-context copies"
+  }
+
+  assert {
+    condition     = aws_lambda_function.trash_purge.environment[0].variables.LOJO_TRASH_PURGE == "purge"
+    error_message = "purge mode reaches the function"
+  }
+}
+
+run "trash_purge_mode_is_validated" {
+  command = plan
+
+  variables {
+    trash_purge_mode = "delete-everything"
+  }
+
+  expect_failures = [var.trash_purge_mode]
 }
 
 run "web_hosting_is_off_by_default" {

@@ -61,3 +61,11 @@ test("thread assignment joins a reply to its parent", async () => {
   ]);
   assert.equal(ids.get(personal.rfcMessageId), ids.get(reply.rfcMessageId));
 });
+
+test("List-Id and List-Unsubscribe are read even though mailparser folds them into one `list` value", async () => {
+  const parsed = await parseMime(fixture("newsletter.eml"));
+  assert.equal(parsed.listId, "<notes.northwind.example>");
+  assert.equal(parsed.listUnsubscribe, "<https://northwind.example/unsub>");
+  const withoutPrecedence = await parseMime(fixture("newsletter.eml").toString().replace("Precedence: bulk\n", ""));
+  assert.equal(isBulk(withoutPrecedence), true);
+});

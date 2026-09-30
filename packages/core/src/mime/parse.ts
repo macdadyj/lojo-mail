@@ -27,6 +27,9 @@ export interface ParsedInbound {
   listId?: string;
   precedence?: string;
   autoSubmitted?: string;
+  autoResponseSuppress?: string;
+  /** The envelope sender SES records. `<>` marks a bounce or other automatic message. */
+  returnPath?: string;
   attachments: ParsedAttachment[];
   pgpEncrypted: boolean;
   verdicts: Verdicts;
@@ -133,6 +136,7 @@ export async function parseMime(raw: Buffer | string): Promise<ParsedInbound> {
       bytes,
     };
   });
+  const headers = rawHeaders(buffer);
   const message: ParsedInbound = {
     rfcMessageId: parsed.messageId ? normalizeMessageId(parsed.messageId) : `generated.${sha256(buffer)}`,
     from,
@@ -145,19 +149,25 @@ export async function parseMime(raw: Buffer | string): Promise<ParsedInbound> {
     references,
     attachments,
     pgpEncrypted: false,
-    verdicts: sesVerdicts(rawHeaders(buffer)),
+    verdicts: sesVerdicts(headers),
   };
   if (inReplyToRaw) message.inReplyTo = normalizeMessageId(inReplyToRaw.split(/\s+/)[0] ?? inReplyToRaw);
   const replyTo = asAddressList(parsed.replyTo)[0];
   if (replyTo) message.replyTo = replyTo;
-  const listUnsubscribe = headerString(parsed, "list-unsubscribe");
+  // mailparser folds every List-* header into one structured `list` value, so read the raw lines.
+  const header = (name: string) => headers.find(([key]) => key === name)?.[1];
+  const listUnsubscribe = header("list-unsubscribe");
   if (listUnsubscribe) message.listUnsubscribe = listUnsubscribe;
-  const listId = headerString(parsed, "list-id");
+  const listId = header("list-id");
   if (listId) message.listId = listId;
   const precedence = headerString(parsed, "precedence");
   if (precedence) message.precedence = precedence;
   const autoSubmitted = headerString(parsed, "auto-submitted");
   if (autoSubmitted) message.autoSubmitted = autoSubmitted;
+  const suppress = header("x-auto-response-suppress");
+  if (suppress) message.autoResponseSuppress = suppress;
+  const returnPath = header("return-path");
+  if (returnPath !== undefined) message.returnPath = returnPath;
   message.pgpEncrypted = looksLikePgp(message, contentType);
   return message;
 }

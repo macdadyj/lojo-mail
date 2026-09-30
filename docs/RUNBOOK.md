@@ -110,6 +110,7 @@ aws ssm put-parameter --region us-east-1 --name /lojo-mail/pgp-signing-passphras
 | `gemini-api-key` | processor, API | only with `"gemini"`, or `"vertex"` in express mode |
 | `vertex-sa-json` | processor, API | only with `"vertex"` and a service account (the key file's JSON) |
 | `agent-tokens` | API | no; one token per assistant, see [INTEGRATIONS.md](INTEGRATIONS.md#tokens-one-per-client) |
+| `bridge-token` | API | no; only for Thunderbird through the local bridge, see [THUNDERBIRD.md](THUNDERBIRD.md). At least 32 characters: `openssl rand -base64 36` |
 
 Store the SecureString values in the password manager. Skip the Grok parameter if you set `llm_provider = "bedrock"` or `"ollama"`. Create a provider key parameter only for the provider you select; [INTEGRATIONS.md](INTEGRATIONS.md#server-side-ai-providers) lists them. The lab Ollama host is on the tailnet. This stack does not connect the Lambda to it.
 
@@ -324,6 +325,26 @@ Browsers send an `OPTIONS` preflight to the API. API Gateway hands it to the `$d
 - Rotate a token, the passphrase hash, or the session secret by writing a new SSM value (`--overwrite`). The API caches its configuration for `LOJO_CONFIG_TTL_MS` (5 minutes by default), so the old value keeps working for up to that long in a warm container. Rotating the session secret signs everyone out.
 - Point `alarm_actions` at an SNS topic if you want the DLQ, error, raw/ swept, and sign-in failure alarms to page you. The raw/ swept alarm means the S3 notification missed mail and the sweep delivered it; see [DEPLOY.md](DEPLOY.md#if-mail-sits-in-raw). `login_failure_alarm_threshold` (default 20 per hour) sets when failed sign-ins across all sources trip the alarm. If it fires and it was not you, rotate the passphrase hash and the session secret.
 - To switch the domain later, set `domain` and `ses_identity_mode = create`, then repeat identity, DKIM, and DNS for that new name. Do not delete the `cyberphysical.us` identity until mail to it can die. `manage_dns` is allowed only in create mode, and only with the confirmation string, after an audit of the new zone.
+
+### Mail rules
+
+- Start from `config/rules.example.json`. Check a file with `npm run rules -- validate my-rules.json`; it lists every rule that trashes or auto-sends. Push it with `npm run rules -- push my-rules.json --api "$API"`: it asks you to type `yes`, then for your passphrase, and saves with a human session. Tokens cannot save rules.
+- Try a rule against a stored message before relying on it: `curl -s "$API/v1/rules/test" -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"messageId":"msg_…"}'`. It lists the matching rules and every reason an auto-send would be refused.
+- Stop everything at once: `curl -s "$API/v1/rules/switches" -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"paused":true}'`. `{"killSwitch":true}` stops only auto-send. Any `write` token can do this; only your session can undo it (Settings, or `npm run rules -- push` with `"paused": false`).
+- Trashed by a rule by mistake: `POST /v1/messages/:id/restore`. Rule actions are in the audit log (`GET /v1/audit`, actions `rule.apply`, `rule.trash`, `rule.reply`, `rule.autosend`).
+- Trashed mail keeps a `keepUntil` date and is only removed by the trash purge below.
+- Auto-send stays off until `auto_send_enabled = true` in `terraform.tfvars` and an apply; the plan shows only the processor's SES statement and `LOJO_AUTO_SEND` changing. Without it, auto-send rules write drafts for approval.
+
+### Trash purge
+
+Trash is emptied only by the `lojo-mail-trash-purge` Lambda (daily). It starts in report mode: it deletes nothing and audits what it would delete.
+
+- Read the reports: `curl -s "$API/v1/audit" -H "Authorization: Bearer $TOKEN"` and look for `trash.purge_report` (report mode: how many messages are in Trash, past their window, and unmarked). In purge mode each run writes `trash.purge_run` (counts, and `backlog` when more than 100 were due) and one `trash.purged` per message. To see which messages are due before switching, open Trash in the web app: each row shows its `keepUntil` date. Messages in Trash without a `keepUntil` or `trashedAt` are never purged; restore them or re-trash them from the web app to give them a window.
+- Keep something longer: restore it (`POST /v1/messages/:id/restore`, or the web app). Raising `trashRetentionDays` applies only to mail trashed afterwards.
+- Switch to deleting: set `trash_purge_mode = "purge"` in `terraform.tfvars`, `terraform plan` (only the purge role's `PurgeExpiredTrash` and `DeletePurgedObjects` statements and `LOJO_TRASH_PURGE` change), then apply. Back to `report` removes the delete permissions again; `off` disables the schedule.
+- Run it once by hand: `aws lambda invoke --function-name lojo-mail-trash-purge --payload '{}' /dev/stdout`. The log line `trash_purge` gives the counts.
+- The errors alarm means a run failed. Nothing is lost: expired trash stays until a run succeeds. Look for `trash.purge_skipped` (a message changed during the run, usually a restore) and `trash.purge_blob_failed` (the row is gone but an object was left; it is sealed and unreadable without your key, and you can delete it by the key in the audit detail).
+- Undo a purge within the backup windows: objects come back from their S3 noncurrent version (30 days: `aws s3api list-object-versions --bucket <bucket> --prefix objects/<id>`, then copy the version back), and the message row from DynamoDB point-in-time recovery (35 days: restore the messages table to a new table from before the run, and copy the item back). After those windows the message is gone.
 
 ## 11. Local demo, no AWS
 

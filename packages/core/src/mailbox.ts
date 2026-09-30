@@ -23,6 +23,9 @@ import { embedForStorage, embeddingInput, ingestRaw, refreshThread } from "./ing
 import { newId, sha256, utcDay } from "./ids.ts";
 import { buildRawMessage, cleanEmail, cleanHeaderValue } from "./mime/compose.ts";
 import { encryptText, type PgpSigningKey } from "./openpgp/mail.ts";
+import { dryRunRules, loadRules, saveRules, type DryRun } from "./rules/engine.ts";
+import type { RuleAuthor, RulesDocument } from "./rules/types.ts";
+import { emptyRules, parseRulesDocument, rulesHash } from "./rules/validate.ts";
 import type { MailSender, OutboundMessage } from "./send.ts";
 import type { MailStore } from "./store/types.ts";
 import type {
@@ -38,12 +41,14 @@ import type {
   EnvelopeBlob,
   Folder,
   LojoConfig,
+  MessagePatch,
   MessageView,
   PgpMode,
   SealedBody,
   ServerSealedBlob,
   StoredMessage,
   Thread,
+  TrashActor,
 } from "./types.ts";
 
 export interface MailboxDeps {
@@ -59,6 +64,8 @@ export interface MailboxDeps {
   /** Embeds search queries and backfills vectors. Must be the embedder the pipeline stores with. */
   embedder?: Embedder | null;
   sender?: MailSender | null;
+  /** Whether the processor may auto-send (LOJO_AUTO_SEND=on). The API never sends for a rule itself. */
+  autoSendEnabled?: boolean;
   styleGuide: string;
   /** Jon's own OpenPGP public key, so his sent copy of encrypted mail is readable to him elsewhere. */
   ownPgpPublicKey?: string;
@@ -85,7 +92,7 @@ export interface DraftInput {
   inReplyTo?: string;
   pgp?: PgpMode;
   /** Who wrote it. Defaults to agent, which may only address known correspondents. */
-  origin?: Exclude<DraftOrigin, "ai">;
+  origin?: Extract<DraftOrigin, "human" | "agent" | "client">;
 }
 
 export interface DraftPatch {
@@ -120,6 +127,8 @@ function viewOf(message: StoredMessage, opened: SealedBody | null, contextText: 
   const view: MessageView = {
     id: message.id,
     threadId: message.threadId,
+    rfcMessageId: message.rfcMessageId,
+    references: message.references,
     folder: message.folder,
     origin: message.origin,
     from: message.from,
@@ -137,6 +146,11 @@ function viewOf(message: StoredMessage, opened: SealedBody | null, contextText: 
     locked: opened === null,
   };
   if (message.verdicts) view.verdicts = message.verdicts;
+  if (message.inReplyTo) view.inReplyTo = message.inReplyTo;
+  if (message.replyTo) view.replyTo = message.replyTo;
+  if (message.trashedAt) view.trashedAt = message.trashedAt;
+  if (message.trashedBy) view.trashedBy = message.trashedBy;
+  if (message.keepUntil) view.keepUntil = message.keepUntil;
   if (contextText !== null) view.contextText = contextText;
   if (opened) {
     view.text = opened.text;
@@ -163,6 +177,10 @@ function addresses(emails: string[] | undefined): Address[] {
 
 function replySubject(subject: string): string {
   return subject.toLowerCase().startsWith("re:") ? subject : `Re: ${subject}`;
+}
+
+function authorOf(actor: Actor): RuleAuthor {
+  return actor === "human" ? "human" : "token";
 }
 
 function withoutApproval(draft: Draft): Draft {
@@ -310,6 +328,19 @@ export class Mailbox {
   async listInbox(limit = 50, opts: ViewOptions = {}): Promise<MessageView[]> {
     const messages = await this.deps.store.listMessages({ folder: "inbox", limit });
     return Promise.all(messages.map((message) => this.present(message, opts)));
+  }
+
+  /** Newest first. The bridge maps each folder to an IMAP mailbox. */
+  async listFolder(folder: Folder, limit: number, opts: ViewOptions = {}): Promise<MessageView[]> {
+    const messages = await this.deps.store.listMessages({ folder, limit });
+    return Promise.all(messages.map((message) => this.present(message, opts)));
+  }
+
+  async setUnread(messageId: string, unread: boolean): Promise<StoredMessage> {
+    await this.requireMessage(messageId);
+    const updated = await this.deps.store.updateMessage(messageId, { unread });
+    await refreshThread(this.deps.store, updated.threadId, updated.subject);
+    return updated;
   }
 
   async triage(limit = 50, opts: ViewOptions = {}): Promise<MessageView[]> {
@@ -489,7 +520,9 @@ export class Mailbox {
     const to = addresses(input.to);
     const cc = addresses(input.cc);
     if (to.length === 0) throw new MailError("At least one recipient is required", "invalid");
-    if (origin === "agent") await this.assertKnownRecipients([...to, ...cc].map((item) => item.email), input.threadId);
+    const parent = !input.threadId && input.inReplyTo ? (await this.deps.store.getMessagesByRfcId(input.inReplyTo))[0] : undefined;
+    const threadId = input.threadId ?? parent?.threadId;
+    if (origin === "agent") await this.assertKnownRecipients([...to, ...cc].map((item) => item.email), threadId);
     const id = newId("drf");
     const now = this.now().toISOString();
     const draft: Draft = {
@@ -505,8 +538,9 @@ export class Mailbox {
       createdAt: now,
       updatedAt: now,
     };
-    if (input.threadId) draft.threadId = input.threadId;
+    if (threadId) draft.threadId = threadId;
     if (input.inReplyTo) draft.inReplyTo = input.inReplyTo;
+    if (parent) draft.references = [...parent.references, parent.rfcMessageId];
     await this.deps.store.putDraft(draft);
     return draft;
   }
@@ -809,17 +843,114 @@ export class Mailbox {
     return this.move(messageId, "archive");
   }
 
-  /** Trash is default-deny: only a human session may move mail there. */
+  /** Trash is default-deny: agents never move mail there (see `trash`). Moving out of trash clears the trash markers. */
   async move(messageId: string, folder: Folder, actor: Actor = "agent"): Promise<StoredMessage> {
-    if (folder === "trash" && actor !== "human") {
-      throw new MailError("Only a signed-in human can move mail to trash", "forbidden");
+    if (folder === "trash") {
+      if (actor !== "human") throw new MailError("Only a signed-in human can move mail to trash", "forbidden");
+      return this.trash(messageId, "human");
     }
-    await this.requireMessage(messageId);
-    const patch: { folder: Folder; unread?: boolean } = { folder };
+    const message = await this.requireMessage(messageId);
+    if (folder === "drafts") throw new MailError("Messages cannot be filed as drafts", "invalid");
+    if (folder === "sent" && message.origin !== "sent") throw new MailError("Only mail Jon sent can be filed in Sent", "invalid");
+    const patch: MessagePatch = { folder };
     if (folder !== "inbox") patch.unread = false;
+    const remove: Array<keyof MessagePatch> = message.folder === "trash" ? ["trashedAt", "trashedBy", "keepUntil"] : [];
+    const updated = await this.deps.store.updateMessage(messageId, patch, remove);
+    await refreshThread(this.deps.store, updated.threadId, updated.subject);
+    if (message.folder === "trash") await this.audit("message.restored", "ok", { messageId, detail: `to ${folder}, was ${message.trashedBy ?? "trashed"}` });
+    return updated;
+  }
+
+  /**
+   * Soft delete: a move to Trash with a retention window, never a hard delete.
+   * Callers are Jon's session or the bridge token with the `trash` scope; the
+   * API decides which (agent tokens and the MCP never reach this).
+   */
+  async trash(messageId: string, by: TrashActor): Promise<StoredMessage> {
+    const message = await this.requireMessage(messageId);
+    if (message.folder === "trash") return message;
+    const at = this.now();
+    const retentionDays = (await this.getRules()).trashRetentionDays;
+    const patch: MessagePatch = {
+      folder: "trash",
+      unread: false,
+      trashedAt: at.toISOString(),
+      trashedBy: by,
+      keepUntil: new Date(at.getTime() + retentionDays * 86_400_000).toISOString(),
+    };
     const updated = await this.deps.store.updateMessage(messageId, patch);
     await refreshThread(this.deps.store, updated.threadId, updated.subject);
+    await this.audit("message.trashed", "ok", { messageId, detail: `by:${by} from:${message.folder} keepUntil:${patch.keepUntil ?? ""}` });
     return updated;
+  }
+
+  /** Takes a message out of trash, back to the inbox. Safe for any `write` caller: it only undoes a delete. */
+  async restore(messageId: string): Promise<StoredMessage> {
+    const message = await this.requireMessage(messageId);
+    if (message.folder !== "trash") throw new MailError("Message is not in trash", "invalid");
+    const updated = await this.deps.store.updateMessage(messageId, { folder: "inbox" }, ["trashedAt", "trashedBy", "keepUntil"]);
+    await refreshThread(this.deps.store, updated.threadId, updated.subject);
+    await this.audit("message.restored", "ok", { messageId, detail: `was ${message.trashedBy ?? "trashed"}` });
+    return updated;
+  }
+
+  async getRules(): Promise<RulesDocument> {
+    return (await loadRules(this.deps.blobs, this.deps.keys)) ?? emptyRules(this.now());
+  }
+
+  /**
+   * Human sessions only. Jon's session is what authorizes the engine: rules are
+   * sealed under a KMS purpose only the API role can generate keys for, and
+   * each rule records that a human wrote it.
+   */
+  async putRules(input: unknown, actor: Actor): Promise<RulesDocument> {
+    if (actor !== "human") throw new MailError("Only a signed-in human can change mail rules", "forbidden");
+    const previous = await loadRules(this.deps.blobs, this.deps.keys);
+    const doc = parseRulesDocument(input, "human", this.now(), previous);
+    await saveRules(this.deps.blobs, this.deps.keys, doc);
+    const autoSend = doc.rules.filter((rule) => rule.enabled && rule.actions.some((action) => action.type === "reply" && action.reply.mode === "autoSend"));
+    await this.audit("rules.updated", "ok", {
+      detail: `sha256:${rulesHash(doc)} rules:${doc.rules.length} autoSend:${autoSend.map((rule) => rule.id).join(",") || "none"} killSwitch:${doc.killSwitch} paused:${doc.paused}`,
+    });
+    return doc;
+  }
+
+  /** Anyone with `write` can make the rules safer (pause, kill switch on, disable a rule); only Jon can undo it. */
+  async setRuleSwitches(input: { paused?: boolean; killSwitch?: boolean }, actor: Actor): Promise<RulesDocument> {
+    if (actor !== "human" && (input.paused === false || input.killSwitch === false)) {
+      throw new MailError("Only a signed-in human can resume rules or release the kill switch", "forbidden");
+    }
+    const doc = await this.getRules();
+    const next: RulesDocument = {
+      ...doc,
+      ...(input.paused !== undefined ? { paused: input.paused } : {}),
+      ...(input.killSwitch !== undefined ? { killSwitch: input.killSwitch } : {}),
+      updatedAt: this.now().toISOString(),
+      updatedBy: authorOf(actor),
+    };
+    await saveRules(this.deps.blobs, this.deps.keys, next);
+    await this.audit("rules.switches", "ok", { detail: `by:${actor} paused:${next.paused} killSwitch:${next.killSwitch}` });
+    return next;
+  }
+
+  async disableRule(ruleId: string, actor: Actor): Promise<RulesDocument> {
+    const doc = await this.getRules();
+    if (!doc.rules.some((rule) => rule.id === ruleId)) throw new MailError(`No rule ${ruleId}`, "not_found");
+    const at = this.now().toISOString();
+    const next: RulesDocument = {
+      ...doc,
+      rules: doc.rules.map((rule) => (rule.id === ruleId ? { ...rule, enabled: false, updatedAt: at } : rule)),
+      updatedAt: at,
+      updatedBy: authorOf(actor),
+    };
+    await saveRules(this.deps.blobs, this.deps.keys, next);
+    await this.audit("rules.disabled", "ok", { detail: `rule:${ruleId} by:${actor}` });
+    return next;
+  }
+
+  async testRules(messageId: string): Promise<DryRun> {
+    const message = await this.requireMessage(messageId);
+    return dryRunRules(await this.getRules(), message, { store: this.deps.store, config: this.deps.config, autoSendEnabled: this.deps.autoSendEnabled ?? false });
   }
 
   async actionItems(): Promise<Array<{ messageId: string; subject: string; items: ActionItem[] }>> {

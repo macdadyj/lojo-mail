@@ -1,9 +1,12 @@
 import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-const bundles = ["packages/pipeline/dist/processor.mjs", "packages/api/dist/api.mjs"];
+const bundles = [
+  { path: "packages/pipeline/dist/processor.mjs", exports: ["handler", "purge"] },
+  { path: "packages/api/dist/api.mjs", exports: ["handler"] },
+];
 let failed = false;
-for (const path of bundles) {
+for (const { path, exports } of bundles) {
   if (!existsSync(path)) {
     console.error(`${path}: missing. Run npm run build:lambda first.`);
     failed = true;
@@ -11,7 +14,7 @@ for (const path of bundles) {
   }
   try {
     const mod = await import(pathToFileURL(path).href);
-    if (typeof mod.handler !== "function") throw new Error("export handler is not a function");
+    for (const name of exports) if (typeof mod[name] !== "function") throw new Error(`export ${name} is not a function`);
     console.log(`${path}: ok`);
   } catch (error) {
     console.error(`${path}: ${error instanceof Error ? error.stack : error}`);

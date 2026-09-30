@@ -60,6 +60,9 @@ export interface Message {
   draftReply?: string;
   phishingReasons?: string[];
   attachments: AttachmentMeta[];
+  trashedAt?: string;
+  trashedBy?: string;
+  keepUntil?: string;
 }
 
 export interface SealedBody {
@@ -91,8 +94,8 @@ export interface Draft {
   cc: Address[];
   subject: string;
   status: DraftStatus;
-  origin: "human" | "agent" | "ai";
-  lastEditedBy?: "human" | "agent" | "ai";
+  origin: "human" | "agent" | "ai" | "client" | "rule";
+  lastEditedBy?: "human" | "agent" | "ai" | "client" | "rule";
   aiGenerated: boolean;
   pgp: "auto" | "off";
   createdAt: string;
@@ -150,4 +153,16 @@ export function statusLabel(status: DraftStatus): string {
       return unexpected;
     }
   }
+}
+
+export interface RuleSummary {
+  id: string;
+  name: string;
+  enabled: boolean;
+  actions: Array<{ type: "label" | "move" | "markRead" | "trash" | "reply"; reply?: { mode: "draft" | "autoSend"; allowSenders: string[] } }>;
+}
+
+export interface RulesView {
+  rules: { paused: boolean; killSwitch: boolean; trashRetentionDays: number; rules: RuleSummary[]; updatedAt: string };
+  autoSendEnabled: boolean;
 }

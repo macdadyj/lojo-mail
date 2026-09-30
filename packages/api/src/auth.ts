@@ -1,6 +1,12 @@
 import type { Sessions } from "./session.ts";
 
-export type Scope = "read" | "write" | "send" | "body" | "admin";
+/**
+ * `compose` lets Jon's own mail client (the local bridge) draft to any address;
+ * other tokens may only draft to known correspondents. It never implies send.
+ * `trash` lets the bridge soft-delete (move to Trash). Only the bridge token can
+ * hold it, only when LOJO_BRIDGE_TRASH=on, and `admin` does not imply it.
+ */
+export type Scope = "read" | "write" | "send" | "body" | "compose" | "trash" | "admin";
 
 export type PrincipalKind = "token" | "human";
 
@@ -10,7 +16,10 @@ export interface Principal {
   scopes: Scope[];
 }
 
-export const DEV_TOKEN_VALUES = ["dev-only-change-me", "dev-read-only", "dev-send-change-me"] as const;
+export const DEV_TOKEN_VALUES = ["dev-only-change-me", "dev-read-only", "dev-send-change-me", "dev-bridge-change-me"] as const;
+
+/** The Thunderbird bridge: reads and decrypts locally, syncs flags and moves, and turns SMTP submissions into drafts. */
+export const BRIDGE_SCOPES: readonly Scope[] = ["read", "write", "body", "compose"];
 
 /** Prefixes reserved for human sessions and approval tokens. An API token can never look like either. */
 const RESERVED_PREFIXES = ["hs_", "apv_"] as const;
@@ -21,12 +30,16 @@ function knownScope(value: string): Scope | null {
     case "write":
     case "send":
     case "body":
+    case "compose":
+    case "trash":
     case "admin":
       return value;
     default:
       return null;
   }
 }
+
+const BRIDGE_ONLY_SCOPES: readonly Scope[] = ["trash"];
 
 export function parseScopes(value: string | undefined, fallback: Scope[]): Scope[] {
   if (!value) return fallback;
@@ -36,20 +49,23 @@ export function parseScopes(value: string | undefined, fallback: Scope[]): Scope
     if (!token) continue;
     const scope = knownScope(token);
     if (!scope) throw new Error(`Unknown scope ${token}`);
+    if (BRIDGE_ONLY_SCOPES.includes(scope)) throw new Error(`Scope ${scope} belongs to the bridge token only`);
     scopes.push(scope);
   }
   return scopes.length > 0 ? scopes : fallback;
 }
 
 export function hasScope(scopes: readonly Scope[], required: Scope): boolean {
-  if (scopes.includes("admin")) return true;
   switch (required) {
+    case "trash":
+      return scopes.includes(required);
     case "read":
     case "write":
     case "send":
     case "body":
+    case "compose":
     case "admin":
-      return scopes.includes(required);
+      return scopes.includes("admin") || scopes.includes(required);
     default: {
       const unexpected: never = required;
       throw new Error(`Unknown scope ${String(unexpected)}`);
@@ -162,5 +178,20 @@ export function tokenBookFromEnv(env: NodeJS.ProcessEnv, production: boolean): T
   if (env.LOJO_AGENT_TOKENS) {
     for (const agent of parseAgentTokens(env.LOJO_AGENT_TOKENS, production)) book.add(agent.token, { label: agent.label, scopes: agent.scopes });
   }
+  const bridgeToken = env.LOJO_BRIDGE_TOKEN ?? (production ? "" : "dev-bridge-change-me");
+  if (bridgeToken) addBridgeToken(book, bridgeToken, production, bridgeTrashFromEnv(env));
   return book;
+}
+
+/** Terraform's `bridge_trash_enabled` sets this. Anything but `on` keeps the bridge out of Trash. */
+export function bridgeTrashFromEnv(env: NodeJS.ProcessEnv): boolean {
+  return env.LOJO_BRIDGE_TRASH === "on";
+}
+
+/** The bridge token has exactly BRIDGE_SCOPES, plus `trash` when Jon enabled it: never send, never admin. */
+export function addBridgeToken(book: TokenBook, token: string, production: boolean, trash: boolean): void {
+  if (production && token.length < MIN_AGENT_TOKEN_CHARS) {
+    throw new Error(`The bridge token must be at least ${MIN_AGENT_TOKEN_CHARS} characters`);
+  }
+  book.add(token, { label: "bridge", scopes: trash ? [...BRIDGE_SCOPES, "trash"] : [...BRIDGE_SCOPES] });
 }

@@ -29,7 +29,7 @@ export { cosineInt8, packVector, rankVectors, unpackVector, vectorTag } from "./
 export type { VectorRow } from "./ai/vectors.ts";
 export type { Embedder, EmbedPurpose, LlmClient, LlmCompletion, LlmEmbedding, LlmRequest, ProviderSecrets } from "./ai/types.ts";
 export { APPROVAL_TTL_MS, approvalContentHash, hashApprovalToken, newApprovalToken, sameHash } from "./approval.ts";
-export { FsBlobStore, MemoryBlobStore, aiContextKey, attachmentKey, bodyKey } from "./blob/store.ts";
+export { FsBlobStore, MemoryBlobStore, RULES_KEY, aiContextKey, attachmentKey, bodyKey } from "./blob/store.ts";
 export type { BlobStore } from "./blob/store.ts";
 export { EMBED_PROVIDERS, LLM_PROVIDERS, loadConfig } from "./config.ts";
 export {
@@ -50,6 +50,7 @@ export {
   aiContextContext,
   canonicalContext,
   draftContext,
+  rulesContext,
   serverOpen,
   serverSeal,
 } from "./crypto/server-seal.ts";
@@ -71,6 +72,16 @@ export { assignThreadIds, threadIdForRoot } from "./mime/thread.ts";
 export { decryptText, encryptText, generateTestKey } from "./openpgp/mail.ts";
 export type { PgpSigningKey } from "./openpgp/mail.ts";
 export { wkdAdvancedUrl, wkdLocalPartHash, zBase32Encode } from "./openpgp/wkd.ts";
+export { AUTO_REPLY_FOOTER, autoSendRefusals, rateLimitRefusals, renderTemplate, replyBlockers, replyTextRefusals } from "./rules/autosend.ts";
+export type { AutoSendContext, LoopHeaders } from "./rules/autosend.ts";
+export { dryRunRules, fileByRules, loadRules, rulesRuntime, runRuleReply, saveRules } from "./rules/engine.ts";
+export type { DryRun, ReplyResult, RulesRuntime } from "./rules/engine.ts";
+export { evaluateRules, ruleMatches, senderMatches } from "./rules/match.ts";
+export { RULE_FOLDERS } from "./rules/types.ts";
+export type { ReplyAction, Rule, RuleAction, RuleAuthor, RuleFolder, RuleHit, RuleMatch, RuleOutcome, RulesDocument } from "./rules/types.ts";
+export { checkRulesFile, emptyRules, parseRulesDocument, rulesHash } from "./rules/validate.ts";
+export { isPurgeDue, ownedBlobKeys, PURGE_MAX_PER_RUN, PURGE_MIN_AGE_DAYS, purgeExpiredTrash, purgeModeFrom } from "./trash/purge.ts";
+export type { PurgeDeps, PurgeMode, PurgeResult } from "./trash/purge.ts";
 export { MemorySender } from "./send.ts";
 export type { MailSender, OutboundMessage } from "./send.ts";
 export { DynamoMailStore } from "./store/dynamo.ts";
@@ -121,6 +132,7 @@ export type {
   StoredAttachment,
   StoredMessage,
   Thread,
+  TrashActor,
   Verdicts,
 } from "./types.ts";
 export { FOLDERS } from "./types.ts";

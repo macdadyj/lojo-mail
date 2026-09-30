@@ -71,6 +71,10 @@ export function buildRawMessage(message: OutboundMessage, extra: RawHeaders = {}
   if (message.inReplyTo) lines.push(`In-Reply-To: <${cleanHeaderValue(message.inReplyTo).replace(/[<>\s]/g, "")}>`);
   const references = (message.references ?? []).map((ref) => cleanHeaderValue(ref).replace(/[<>\s]/g, "")).filter(Boolean);
   if (references.length > 0) lines.push(`References: ${references.map((ref) => `<${ref}>`).join(" ")}`);
+  if (message.autoReplied) {
+    lines.push("Auto-Submitted: auto-replied");
+    lines.push("X-Auto-Response-Suppress: All");
+  }
   lines.push("MIME-Version: 1.0");
   lines.push("Content-Type: text/plain; charset=utf-8");
   lines.push("Content-Transfer-Encoding: base64");

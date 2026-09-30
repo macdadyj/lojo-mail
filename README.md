@@ -1,6 +1,6 @@
 # lojo-mail
 
-Personal mail for **lojo@cyberphysical.us**. AWS SES receives and sends, S3 and DynamoDB store, a Lambda seals each body to a key only Jon holds, and an AI pipeline summarizes and drafts. A web app, an HTTP API, and an MCP server sit on top. Nothing is sent without Jon approving it in the web app; assistants can only queue drafts for approval. The domain is configuration, so it can move (for example to lojo.dev) without a rewrite.
+Personal mail for **lojo@cyberphysical.us**. AWS SES receives and sends, S3 and DynamoDB store, a Lambda seals each body to a key only Jon holds, and an AI pipeline summarizes and drafts. A web app, an HTTP API, and an MCP server sit on top. Nothing is sent without Jon approving it in the web app; assistants, Thunderbird (through a local IMAP/SMTP bridge) and mail rules can only queue drafts for approval. The one opt-in exception is an auto-reply rule Jon writes himself, which is off unless he turns it on and is fenced by allowlists, DMARC, loop checks and rate limits. The domain is configuration, so it can move (for example to lojo.dev) without a rewrite.
 
 Nothing in this repo deploys itself. Terraform plans; it does not apply. There are no cloud credentials here and there should never be any.
 
@@ -15,6 +15,8 @@ Nothing in this repo deploys itself. Terraform plans; it does not apply. There a
 | [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | Connecting Cursor, Grok, and local models (Ollama); choosing the AI and embedding provider; semantic search |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | Exact steps Jon runs: parameters, apply, first test email, DLQ redrive, rollback |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | First-deploy live test: a test message to a test address through SES, the encrypted bucket, and the processor, before real mail is switched on |
+| [docs/THUNDERBIRD.md](docs/THUNDERBIRD.md) | Thunderbird on Linux through the local IMAP/SMTP bridge: install, account setup, what send and delete do |
+| [config/rules.example.json](config/rules.example.json) | Mail rules: sort, label, archive, trash (restorable), and replies (drafts by default; guarded auto-send). See SECURITY.md, mail rules |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | Leaving Tuta (`lojo@tuta.io`) without IMAP, locally or straight into AWS |
 | [qa/REVIEW_REPORT.md](qa/REVIEW_REPORT.md) | Independent pre-deploy review, with evidence and screenshots under `qa/` |
 
@@ -56,7 +58,9 @@ packages/mcp        MCP tools: stdio server and the remote /mcp handler
 packages/local      lojo-local CLI and tool-calling adapter for local models
 packages/web        PWA
 packages/importer   eml / mbox / vCard / CSV import
-integrations/       Drop-in client config (Cursor mcp.json)
+packages/bridge     Local IMAP + SMTP bridge for Thunderbird (127.0.0.1 only)
+packages/core/src/rules  Mail rules engine and auto-send guards
+integrations/       Drop-in client config (Cursor mcp.json, systemd unit for the bridge)
 fixtures/           Sample, malicious, and DNS fixtures used by the tests
 ```
 

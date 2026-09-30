@@ -83,12 +83,12 @@ export class DynamoMailStore implements MailStore {
     return items as unknown as StoredMessage[];
   }
 
-  async updateMessage(id: string, patch: MessagePatch): Promise<StoredMessage> {
+  async updateMessage(id: string, patch: MessagePatch, remove: Array<keyof MessagePatch> = []): Promise<StoredMessage> {
     const set: Item = {};
     for (const [key, value] of Object.entries(patch)) {
       if (value !== undefined) set[key] = stripEmpty(value);
     }
-    const updated = await this.db.update(this.tables.messages, { id }, { set, condition: { exists: ["id"] } });
+    const updated = await this.db.update(this.tables.messages, { id }, { set, ...(remove.length > 0 ? { remove } : {}), condition: { exists: ["id"] } });
     if (!updated) throw new MailError(`No message ${id}`, "not_found");
     return updated as unknown as StoredMessage;
   }
@@ -118,6 +118,11 @@ export class DynamoMailStore implements MailStore {
 
   async retireThread(id: string): Promise<void> {
     await this.db.update(this.tables.threads, { id }, { remove: ["kind"], set: { messageIds: [], unreadCount: 0 }, condition: { exists: ["id"] } });
+  }
+
+  async deleteTrashedMessage(id: string, keepUntil: string): Promise<StoredMessage | null> {
+    const deleted = await this.db.delete(this.tables.messages, { id }, { equals: { folder: "trash", keepUntil } });
+    return deleted ? (deleted as unknown as StoredMessage) : null;
   }
 
   async putDraft(draft: Draft): Promise<void> {

@@ -10,6 +10,10 @@ import { isBulk } from "./mime/bulk.ts";
 import { snippetFrom } from "./mime/html.ts";
 import { parseMime, type ParsedInbound } from "./mime/parse.ts";
 import { threadIdForRoot } from "./mime/thread.ts";
+import { replyBlockers } from "./rules/autosend.ts";
+import { fileByRules, runRuleReply, type ReplyResult, type RulesRuntime } from "./rules/engine.ts";
+import { evaluateRules } from "./rules/match.ts";
+import type { RuleOutcome, RulesDocument } from "./rules/types.ts";
 import type { MailStore } from "./store/types.ts";
 import type {
   AiPublic,
@@ -36,6 +40,8 @@ export interface IngestDeps {
   embedder?: Embedder | null;
   config: LojoConfig;
   styleGuide: string;
+  /** Jon's mail rules. Only inbound mail headed for the inbox is filtered. */
+  rules?: RulesRuntime | null;
   now?: Date;
 }
 
@@ -350,7 +356,7 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
       : null;
 
   const folder = folderFor(origin, classes, options.folder);
-  const message: StoredMessage = {
+  let message: StoredMessage = {
     id,
     deliveryId,
     origin,
@@ -381,6 +387,15 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
   if (contextKey) message.aiContextKey = contextKey;
   if (parsed.replyTo) message.replyTo = parsed.replyTo;
   if (parsed.inReplyTo) message.inReplyTo = parsed.inReplyTo;
+  if (parsed.listId) message.listId = parsed.listId.slice(0, 200);
+  if (origin === "inbound") {
+    const { replyTo, from, ...headers } = parsed;
+    const blockers = replyBlockers({ ...headers, from: from.email, ...(replyTo ? { replyTo: replyTo.email } : {}) });
+    if (blockers.length > 0) message.replyBlockers = blockers;
+  }
+
+  const ruled = origin === "inbound" && folder === "inbox" && !classes.fromSelf ? await rulesFor(message, deps, now) : null;
+  if (ruled) message = fileByRules(message, ruled.outcome, ruled.doc, now);
 
   if (!(await deps.store.putMessage(message, { ifAbsent: true }))) {
     const winner = await deps.store.getMessage(id);
@@ -391,8 +406,12 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
   }
   await refreshThread(deps.store, threadId, parsed.subject);
 
+  const reply = ruled ? await afterStore(message, ruled, deps, now, parsed.text) : null;
+
   if (
     origin === "inbound" &&
+    !reply &&
+    message.folder === "inbox" &&
     deps.keys &&
     !classes.fromSelf &&
     sensitive?.draftReply &&
@@ -422,4 +441,66 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
   }
 
   return { message, duplicate: false };
+}
+
+async function rulesFor(message: StoredMessage, deps: IngestDeps, now: Date): Promise<{ doc: RulesDocument; outcome: RuleOutcome } | null> {
+  if (!deps.rules) return null;
+  let doc: RulesDocument | null;
+  try {
+    doc = await deps.rules.load();
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    await deps.store.putAudit({ id: newId("aud"), day: utcDay(now), at: now.toISOString(), action: "rules.load", messageId: message.id, outcome: "error", detail: detail.slice(0, 200) });
+    return null;
+  }
+  if (!doc) return null;
+  const outcome = evaluateRules(doc, { ...message, ...(message.listId ? { listId: message.listId } : {}) });
+  return outcome.hits.length > 0 ? { doc, outcome } : null;
+}
+
+/** Audits what the rules did and runs a reply rule. A failing rule never fails delivery. */
+async function afterStore(
+  message: StoredMessage,
+  ruled: { doc: RulesDocument; outcome: RuleOutcome },
+  deps: IngestDeps,
+  now: Date,
+  incoming: string,
+): Promise<ReplyResult | null> {
+  const base = { day: utcDay(now), at: now.toISOString(), messageId: message.id };
+  for (const hit of ruled.outcome.hits) {
+    await deps.store.putAudit({ ...base, id: newId("aud"), action: "rule.apply", outcome: "ok", detail: `rule:${hit.ruleId} ${hit.actions.join(",")}` });
+  }
+  if (message.folder === "trash") {
+    await deps.store.putAudit({ ...base, id: newId("aud"), action: "rule.trash", outcome: "trashed", detail: `${message.trashedBy ?? ""} keepUntil:${message.keepUntil ?? ""}` });
+  }
+  const reply = ruled.outcome.reply;
+  if (!reply) return null;
+  if (!deps.keys) {
+    await deps.store.putAudit({ ...base, id: newId("aud"), action: "rule.reply", outcome: "skipped", detail: `rule:${reply.rule.id} no key to seal drafts` });
+    return null;
+  }
+  try {
+    return await runRuleReply(
+      {
+        store: deps.store,
+        keys: deps.keys,
+        llm: deps.llm,
+        config: deps.config,
+        autoSender: deps.rules?.autoSender ?? null,
+        now,
+        recordSent: async (raw, deliveryId) => {
+          await ingestRaw(raw, { ...deps, llm: null, embedder: null, rules: null, now }, { origin: "sent", deliveryId });
+        },
+      },
+      ruled.doc,
+      reply.rule,
+      reply.action,
+      message,
+      incoming,
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    await deps.store.putAudit({ ...base, id: newId("aud"), action: "rule.reply", outcome: "error", detail: `rule:${reply.rule.id} ${detail}`.slice(0, 300) });
+    return null;
+  }
 }

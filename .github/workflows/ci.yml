@@ -21,6 +21,8 @@ jobs:
       - run: npm run build:lambda
       - run: npm run bundles:check
       - run: npm run build:web
+      - run: npm run build:bridge
+      - run: bash -n scripts/install-bridge.sh
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.9.8

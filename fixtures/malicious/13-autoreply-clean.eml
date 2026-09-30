@@ -1,0 +1,15 @@
+Return-Path: <mina@example.com>
+Authentication-Results: amazonses.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.i=@example.com; dmarc=pass header.from=example.com;
+X-SES-Spam-Verdict: PASS
+X-SES-Virus-Verdict: PASS
+From: Mina Cho <mina@example.com>
+To: lojo@cyberphysical.us
+Subject: Coffee next week?
+Date: Thu, 25 Sep 2026 12:00:00 +0000
+Message-ID: <autoreply-clean-1@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Hi Jon, are you around next week for coffee?
+
+Mina

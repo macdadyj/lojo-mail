@@ -340,6 +340,29 @@ variable "mta_sts_id" {
   default     = "202609290000"
 }
 
+variable "auto_send_enabled" {
+  type        = bool
+  description = "Lets mail rules auto-send replies: grants the processor SES send as the mailbox and sets LOJO_AUTO_SEND=on. Every rule still needs Jon's opt-in, a sender allowlist, DMARC pass, loop checks and rate limits. Off means every rule reply is a draft for approval."
+  default     = false
+}
+
+variable "bridge_trash_enabled" {
+  type        = bool
+  description = "Gives the Thunderbird bridge token the trash scope (LOJO_BRIDGE_TRASH=on): delete in Thunderbird moves mail to Trash, a soft delete kept for the retention window. Agent tokens and the MCP never get it. Off means delete archives with a hidden label."
+  default     = true
+}
+
+variable "trash_purge_mode" {
+  type        = string
+  description = "What the daily trash purge does with mail past its retention window: report (audit what is due, delete nothing), purge (hard delete; grants the purge role DeleteItem on messages and DeleteObject on objects/ and ai-context/), or off."
+  default     = "report"
+
+  validation {
+    condition     = contains(["off", "report", "purge"], var.trash_purge_mode)
+    error_message = "trash_purge_mode must be off, report, or purge."
+  }
+}
+
 variable "web_hosting_enabled" {
   type        = bool
   description = "Host the built PWA (packages/web/dist) and the MTA-STS policy on a private S3 bucket behind CloudFront (origin access control) with ACM certificates. Writes Route 53 records in zone_id, so it needs zone_id. Build the web app first: the response headers policy is read from packages/web/dist/_headers. See docs/RUNBOOK.md section 9."

@@ -1,0 +1,15 @@
+Return-Path: <bounce@attacker.example>
+Authentication-Results: amazonses.com; spf=fail smtp.mailfrom=attacker.example; dkim=none; dmarc=fail header.from=example.com;
+X-SES-Spam-Verdict: PASS
+X-SES-Virus-Verdict: PASS
+From: Mina Cho <mina@example.com>
+To: lojo@cyberphysical.us
+Subject: Are you around?
+Date: Thu, 25 Sep 2026 10:10:00 +0000
+Message-ID: <autoreply-spoof-1@attacker.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Hi Jon, are you around this week? Just reply yes or no.
+
+Mina

@@ -8,6 +8,7 @@ import {
   ingestRaw,
   loadConfig,
   loadProviderSecrets,
+  rulesRuntime,
   type EcPublicJwk,
   type Embedder,
   type IngestDeps,
@@ -20,7 +21,10 @@ import { documentClient, dynamoLike, tableNamesFromEnv } from "./dynamo-doc.ts";
 import { KmsKeyWrapper } from "./kms.ts";
 import { isSweepEvent, processRawKey, sweepRaw, type RawDeps, type SweepEvent } from "./raw.ts";
 import { S3BlobStore } from "./s3-blobs.ts";
+import { SesSender } from "./ses.ts";
 import { ttlCache } from "./ttl-cache.ts";
+
+export { purge } from "./purge.ts";
 
 export interface S3Notification {
   Records?: Array<{
@@ -62,7 +66,7 @@ function providers(config: LojoConfig, secrets: ProviderSecrets): { llm: LlmClie
   };
 }
 
-type Deps = Omit<IngestDeps, "blobs"> & { bucket?: string };
+type Deps = Omit<IngestDeps, "blobs" | "rules"> & { bucket?: string; autoSender: SesSender | null };
 
 const deps = ttlCache<Deps>(5 * 60 * 1000, async () => {
   const raw = await parameter(process.env.LOJO_PUBLIC_KEY_PARAM ?? "/lojo-mail/envelope-public-jwk", false);
@@ -78,6 +82,8 @@ const deps = ttlCache<Deps>(5 * 60 * 1000, async () => {
     config,
     styleGuide: process.env.LOJO_STYLE_GUIDE ?? styleGuide,
     bucket: process.env.LOJO_BUCKET,
+    // Terraform grants this role SES send only when auto_send_enabled, which is also what sets LOJO_AUTO_SEND.
+    autoSender: process.env.LOJO_AUTO_SEND === "on" ? SesSender.fromEnv() : null,
   };
 });
 
@@ -99,7 +105,9 @@ export async function handler(event: S3Notification | SweepEvent): Promise<{ pro
     deleteRaw,
     ingest: async (bytes, deliveryId) => {
       const blobs = new S3BlobStore(s3, loaded.bucket ?? bucket);
-      await ingestRaw(bytes, { ...loaded, blobs }, { origin: "inbound", deliveryId });
+      const { autoSender, ...ingestDeps } = loaded;
+      const rules = ingestDeps.keys ? rulesRuntime(blobs, ingestDeps.keys, autoSender) : null;
+      await ingestRaw(bytes, { ...ingestDeps, blobs, rules }, { origin: "inbound", deliveryId });
     },
   });
 

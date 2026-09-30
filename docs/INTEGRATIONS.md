@@ -4,7 +4,7 @@ Three ways to search and work the mailbox from an assistant, and one switch for 
 
 - No assistant can send. There is no send tool. Sending needs the `send` scope **and** a one-time approval token that only Jon's signed-in web session can mint for that exact content ([SECURITY.md](SECURITY.md#human-approval-for-sending)). The most an assistant can do is `submit_for_approval`, which puts a draft in the web app's approval queue.
 - Message text (bodies, AI summaries, action items, semantic search) needs the `body` scope. Without it a token sees headers, labels, and the short snippet.
-- Trash, full export, and approval are human-only. No token reaches them.
+- Trash, full export, and approval are human-only. No agent token and no MCP client reaches them. The one exception is the Thunderbird bridge token, which can hold the `trash` scope (soft delete to Trash, audited, restorable) when `bridge_trash_enabled` is on; `/mcp` refuses any token that holds it.
 - Every tool result is wrapped as untrusted content, because it is mail that anyone can write.
 
 | Client | Transport | Where it runs | Default scopes |
@@ -12,6 +12,9 @@ Three ways to search and work the mailbox from an assistant, and one switch for 
 | Cursor | stdio MCP server (`packages/mcp`) or remote MCP at `/mcp` | Jon's machine / API Gateway | `read` |
 | Grok (xAI API, Grok Build, grok.com) | remote MCP at `POST /mcp`, Streamable HTTP | xAI's servers call the API | `read` |
 | Local models (Ollama, llama.cpp, vLLM, LM Studio) | `lojo-local` CLI and tool-calling adapter (`packages/local`) | Jon's machine | whatever the token has, narrowed by `LOJO_API_SCOPES` |
+| Thunderbird | local IMAP + SMTP bridge (`packages/bridge`), see [THUNDERBIRD.md](THUNDERBIRD.md) | Santa Computa, 127.0.0.1 | the bridge token: `read`, `write`, `body`, `compose` |
+
+Assistants cannot change Jon's mail rules. With `write` they can only pause the rules, engage the auto-send kill switch, or disable one rule (`POST /v1/rules/switches`, `POST /v1/rules/:id/disable`); with `read` they can list them and dry-run them against a message (`GET /v1/rules`, `POST /v1/rules/test`). See [SECURITY.md](SECURITY.md#mail-rules-and-automation).
 
 ## Tokens: one per client
 
