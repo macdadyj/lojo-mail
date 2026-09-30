@@ -407,14 +407,18 @@ export class Mailbox {
     let unreadable = 0;
     let failed = 0;
     let attempted = 0;
+    let visited = 0;
+    // Unreadable messages stay pending forever (bulk mail, expired AI context), so
+    // they must not use up the limit or they would block everything behind them.
     for (const message of pending) {
       if (attempted >= limit) break;
-      attempted += 1;
+      visited += 1;
       const text = await this.serverText(message);
       if (text === null) {
         unreadable += 1;
         continue;
       }
+      attempted += 1;
       const vector = await embedForStorage({ store: this.deps.store, embedder, config: this.deps.config }, this.now(), message.id, embeddingInput(message.subject, text));
       if (!vector) {
         failed += 1;
@@ -423,7 +427,7 @@ export class Mailbox {
       await this.deps.store.updateMessage(message.id, vector);
       embedded += 1;
     }
-    return { embedded, unreadable, failed, remaining: pending.length - attempted };
+    return { embedded, unreadable, failed, remaining: pending.length - visited };
   }
 
   /** Plaintext for server-side AI: the unlocked body in dev, else the AI-context copy. */

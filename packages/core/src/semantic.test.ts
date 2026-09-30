@@ -129,3 +129,22 @@ test("backfill counts messages with no server-readable text", async () => {
   await store.updateMessage(message.id, { vecModel: "stale/model@1" });
   assert.deepEqual(await w.mailbox.backfillVectors(5), { embedded: 0, unreadable: 1, failed: 0, remaining: 0 });
 });
+
+test("unreadable messages do not use up the backfill limit, so they cannot block readable ones", async () => {
+  const w = await memoryWorld({ unlocked: false, embedder: new KeywordEmbedder() });
+  const unreadable = [];
+  for (let i = 0; i < 3; i += 1) {
+    const { message } = await w.ingest(fixture("reply.eml"), { deliveryId: `stale-${i}` }, null);
+    await w.blobs.delete(`ai-context/${message.id}.bin`);
+    unreadable.push(message.id);
+  }
+  const { message: readable } = await w.ingest(fixture("personal.eml"), {}, null);
+  for (const message of await w.store.listMessages({ limit: 10 })) await w.store.updateMessage(message.id, { vecModel: "stale/model@1" });
+
+  const report = await w.mailbox.backfillVectors(1);
+  assert.equal(report.embedded, 1);
+  assert.equal(report.unreadable, 3);
+  assert.equal(report.remaining, 0);
+  assert.equal((await w.store.getMessage(readable.id))?.vecModel, "keyword/v1@native");
+  for (const id of unreadable) assert.equal((await w.store.getMessage(id))?.vecModel, "stale/model@1");
+});
