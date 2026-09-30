@@ -24,11 +24,12 @@ trap 'rm -rf "$WORK"' EXIT
 umask 077
 "$IOS/scripts/session-token.sh" "$API" > "$WORK/session.json"
 
-push() { pymobiledevice3 apps push --documents "$BUNDLE" "$1" "$2" >/dev/null; }
-push "$WORK/session.json" "provision/session.json"
+# VendContainer (not --documents): the app keeps UIFileSharingEnabled off, so Documents is not exposed.
+push() { pymobiledevice3 apps push "$BUNDLE" "$1" "Documents/$2" >/dev/null; }
+push "$WORK/session.json" "provision-session.json"
 if [[ "${1:-}" != "--session" ]]; then
   [[ -r "$KEYFILE" ]] || { echo "no envelope key at $KEYFILE" >&2; exit 1; }
-  push "$KEYFILE" "provision/envelope.private.jwk"
+  push "$KEYFILE" "provision-envelope.private.jwk"
 fi
 pymobiledevice3 developer core-device launch-application --userspace --kill-existing "$BUNDLE" '' >/dev/null
 echo "provisioned $BUNDLE (session${1:+ only}); the app imported and deleted the files on launch"

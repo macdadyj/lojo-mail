@@ -11,23 +11,21 @@ enum Provisioning {
         var apiURL: URL?
     }
 
-    static var inbox: URL? {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("provision", isDirectory: true)
-    }
+    static let files = ["provision-session.json", "provision-envelope.private.jwk", "provision-api-url.txt"]
 
     static func importPending() -> Imported {
         var out = Imported()
-        guard let dir = inbox, FileManager.default.fileExists(atPath: dir.path) else { return out }
-        defer { try? FileManager.default.removeItem(at: dir) }
-        if let data = try? Data(contentsOf: dir.appendingPathComponent("session.json")),
+        guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return out }
+        defer { for name in files { try? FileManager.default.removeItem(at: dir.appendingPathComponent(name)) } }
+        if let data = try? Data(contentsOf: dir.appendingPathComponent("provision-session.json")),
            let session = try? JSONDecoder().decode(Session.self, from: data), session.isValid() {
             out.session = session
         }
-        if let text = try? String(contentsOf: dir.appendingPathComponent("envelope.private.jwk"), encoding: .utf8),
+        if let text = try? String(contentsOf: dir.appendingPathComponent("provision-envelope.private.jwk"), encoding: .utf8),
            let key = try? Envelope.PrivateKey(pasted: text) {
             out.key = key
         }
-        if let text = try? String(contentsOf: dir.appendingPathComponent("api-url.txt"), encoding: .utf8) {
+        if let text = try? String(contentsOf: dir.appendingPathComponent("provision-api-url.txt"), encoding: .utf8) {
             out.apiURL = APIClient.validatedBaseURL(text)
         }
         return out
