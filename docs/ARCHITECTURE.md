@@ -143,7 +143,7 @@ The pipeline asks for one JSON object: summary, category, priority, action items
 
 Cost guards: daily token budget in DynamoDB, body truncation, skip mail that looks like a list (`List-Id` + `List-Unsubscribe`, or `Precedence: bulk|list|junk`). Every model call, skip, and failure is an audit event. Prompts are not stored; the audit row keeps a SHA-256 of the prompt, the token counts, and the message id.
 
-The model cannot send. It has no tools, and a suggested reply lands as a `suggested` draft. The ingest path receives a `MailSender` only through the rules runtime, only when `LOJO_AUTO_SEND=on`, and only uses it for a human-written auto-send rule that passes every guard. Sending needs the `send` scope *and* an approval token that only a signed-in human session can mint; see SECURITY.md, human approval. Priority and labels from the model are advisory: phishing-scored mail is demoted out of triage and labels pass an allowlist.
+The model cannot send. It has no tools, and a suggested reply lands as a `suggested` draft. The ingest path receives a `MailSender` only through the rules runtime, only when `LOJO_AUTO_SEND=on`, and only uses it for a human-written auto-send rule that passes every guard. Sending needs the `send` scope *and* an approval token that only a signed-in human session can mint, or Jon's own Send through the Thunderbird bridge (`client-send`, bridge token only); see SECURITY.md, human approval. Priority and labels from the model are advisory: phishing-scored mail is demoted out of triage and labels pass an allowlist.
 
 In production the API has no envelope private key. Draft reply and summarize use the AI-context copy when it exists, or text the browser opened locally and sent as `sourceText`.
 
@@ -184,7 +184,9 @@ Every path into Trash (the web app, a rule, the bridge) is a soft delete that st
 - Folders map one to one: INBOX, Archive, Sent, Drafts, Junk (`spam`), Trash.
 - Messages are listed with `GET /v1/folders/:folder/messages`, and each body envelope is fetched and opened on the desktop with the envelope private key. The bridge rebuilds a MIME message from the metadata, the decrypted text and HTML, and the decrypted attachments. Plaintext stays in memory; only UIDs and sizes are written to disk.
 - Flags and labels sync back: `\Seen` to `POST /v1/messages/:id/flags`, `\Flagged` and keywords to labels, moves to `move` or `archive`. Delete moves to Trash when the bridge token has the `trash` scope (`bridge_trash_enabled`, on by default) and `bridge.json` keeps `deleteToTrash`: a soft delete with `trashedBy: bridge` and `keepUntil`, audited as `message.trashed`. Without the scope, or when deleting inside Trash, it archives with a hidden `thunderbird-deleted` label.
-- SMTP submissions become drafts (origin `client`) and are submitted to the approval queue. Jon approves them in the web app.
+- SMTP submissions go to `POST /v1/client/send` when the bridge token holds `client-send` (`bridge_send_enabled`, on by default): the API checks the global send kill switch, the From list, size and rate limits, sends the raw MIME with SES `SendEmail` (Raw content, so Bcc and attachments go out as Thunderbird built them), matches and closes a bot draft if this was one, and seals a Sent copy. Without the scope, submissions become client drafts in the web approval queue.
+- Drafts: the Drafts mailbox lists open drafts from `GET /v1/drafts` as synthetic messages (a new UID per draft version, keyword `bot-draft` for agent, AI, and rule drafts). APPEND to Drafts creates a client draft; delete discards it.
+- New mail: during IDLE the bridge checks the newest 25 messages every `newMailSeconds` (15) and does a full resync every `pollSeconds` (60).
 
 JMAP (RFC 8620 / 8621) remains a possible later facade; the store is already shaped like it.
 
