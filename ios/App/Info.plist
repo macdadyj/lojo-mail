@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>LOJO Mail</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>LOJO Mail can ask for Face ID before it shows your mail.</string>
+	<!--
+	Background app refresh is an Info.plist capability, so it works with a free Apple ID.
+	Push (APNs) needs the aps-environment entitlement, which free provisioning profiles do not grant.
+	-->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.lojo.Mail.refresh</string>
+	</array>
+	<!-- No NSAppTransportSecurity exceptions: the API is HTTPS only. -->
+	<key>UIFileSharingEnabled</key>
+	<false/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<false/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+</dict>
+</plist>

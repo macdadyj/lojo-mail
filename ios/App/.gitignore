@@ -1,0 +1,9 @@
+.DS_Store
+/.build
+/Packages
+/xtool
+/.sourcekit-lsp
+xcuserdata/
+DerivedData/
+.swiftpm/
+.netrc
