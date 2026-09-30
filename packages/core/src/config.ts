@@ -39,6 +39,20 @@ function defaultEmbedProvider(llm: LlmProviderName): EmbedProviderName {
   }
 }
 
+const SEND_FROM_ADDRESS = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
+
+/** The mailbox, then each comma-separated LOJO_SEND_FROM address once. */
+export function sendFromList(mailbox: string, raw: string | undefined): string[] {
+  const out = [mailbox];
+  for (const part of (raw ?? "").split(",")) {
+    const address = part.trim().toLowerCase();
+    if (!address) continue;
+    if (!SEND_FROM_ADDRESS.test(address)) throw new Error(`LOJO_SEND_FROM entry ${address} is not an email address`);
+    if (!out.includes(address)) out.push(address);
+  }
+  return out;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): LojoConfig {
   const domain = (env.LOJO_DOMAIN ?? "cyberphysical.us").trim().toLowerCase();
   const localPart = (env.LOJO_LOCAL_PART ?? "lojo").trim().toLowerCase();
@@ -61,6 +75,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): LojoConfig {
     localPart,
     region: env.LOJO_REGION ?? "us-east-1",
     mailbox: `${localPart}@${domain}`,
+    sendFrom: sendFromList(`${localPart}@${domain}`, env.LOJO_SEND_FROM),
     dmarcMailbox: `${dmarcLocalPart}@${domain}`,
     llmProvider: provider,
     dailyTokenBudget: intEnv(env, "LOJO_DAILY_TOKEN_BUDGET", 100_000),

@@ -69,6 +69,11 @@ export interface RulesDocument {
   paused: boolean;
   /** Auto-send is off and replies fall back to drafts. A token may engage it; only Jon can release it. */
   killSwitch: boolean;
+  /**
+   * Nothing leaves the mailbox: no Thunderbird send, no approved send, no
+   * auto-send. A token may engage it; only Jon can release it.
+   */
+  sendKillSwitch: boolean;
   /** Mail a rule trashes stays restorable at least this long. */
   trashRetentionDays: number;
   /** Across all rules, per UTC day. */

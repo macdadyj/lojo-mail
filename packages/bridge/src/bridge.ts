@@ -33,6 +33,7 @@ export async function checkToken(api: ApiClient, logger: Logger = silentLogger):
   if (missing.length > 0) throw new ScopeError(`The bridge token is missing the ${missing.join(", ")} scope`);
   if (!session.scopes.includes("compose")) logger.warn("token.no_compose", { detail: "SMTP drafts can only go to known correspondents" });
   if (!session.scopes.includes("trash")) logger.info("token.no_trash", { detail: "Thunderbird delete archives with a hidden label" });
+  if (!session.scopes.includes("client-send")) logger.info("token.no_client_send", { detail: "Send in Thunderbird queues drafts for approval in the web app" });
   return session;
 }
 
@@ -70,13 +71,25 @@ export async function startBridge(options: BridgeOptions): Promise<RunningBridge
   const canTrash = config.deleteToTrash && session.scopes.includes("trash");
   const store = new MailStore(api, state, options.privateJwk, logger, {
     folderLimit: config.folderLimit,
+    address: config.address,
     canTrash,
     ...(options.cacheBytes ? { cacheBytes: options.cacheBytes } : {}),
   });
   const guard = new LoginGuard(config.address, config.appPasswordHash, options.guard);
-  const imap = new ImapServer({ store, guard, logger, pollSeconds: config.pollSeconds, version: BRIDGE_VERSION });
+  const imap = new ImapServer({ store, guard, logger, pollSeconds: config.pollSeconds, newMailSeconds: config.newMailSeconds, version: BRIDGE_VERSION });
   const notify = options.notify === undefined ? (config.notify ? desktopNotifier : null) : options.notify;
-  const smtp = new SubmissionServer({ api, guard, logger, address: config.address, notify, ...(config.webUrl ? { webUrl: config.webUrl } : {}) });
+  const mode = session.scopes.includes("client-send") ? "send" : "queue";
+  const smtp = new SubmissionServer({
+    api,
+    guard,
+    logger,
+    address: config.address,
+    mode,
+    sendFrom: session.sendFrom ?? [config.address],
+    notify,
+    onChange: () => store.emit("changed"),
+    ...(config.webUrl ? { webUrl: config.webUrl } : {}),
+  });
   const imapPort = await imap.listen(config.imapPort, LOOPBACK);
   let smtpPort: number;
   try {
@@ -85,7 +98,7 @@ export async function startBridge(options: BridgeOptions): Promise<RunningBridge
     await imap.close();
     throw error;
   }
-  logger.info("bridge.started", { imapPort, smtpPort, host: LOOPBACK, token: session.label, scopes: session.scopes.join(","), deleteTo: canTrash ? "trash" : "archive" });
+  logger.info("bridge.started", { imapPort, smtpPort, host: LOOPBACK, token: session.label, scopes: session.scopes.join(","), deleteTo: canTrash ? "trash" : "archive", send: mode });
   return {
     imapPort,
     smtpPort,

@@ -48,7 +48,7 @@ test("the agent loop searches through the API and answers from the result", asyn
   assert.deepEqual(result.steps, [{ tool: "search_mail", arguments: { query: "lease" }, ok: true }]);
   assert.deepEqual(
     chat.seen[0]?.tools.map((tool) => tool.name).sort(),
-    ["export_mailbox", "list_inbox", "read_thread", "search_mail"],
+    ["export_mailbox", "list_drafts", "list_folder", "list_inbox", "read_thread", "search_mail"],
     "a read token is offered read tools only",
   );
   assert.equal(chat.seen[0]?.messages[0]?.content, AGENT_SYSTEM);

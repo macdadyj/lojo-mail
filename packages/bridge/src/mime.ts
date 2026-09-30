@@ -158,14 +158,16 @@ export function internalDate(date: Date): string {
  * Only headers that never change for a message: IMAP messages are immutable, and
  * RFC822.SIZE is cached. Labels and folder change, so they travel as flags.
  */
-function topHeaders(view: MessageView): string[] {
-  const lines = [`X-Lojo-Id: ${clean(view.id)}`, `Date: ${rfc5322Date(messageDate(view))}`];
+function topHeaders(view: MessageView, extra: readonly string[]): string[] {
+  const lines = [`X-Lojo-Id: ${clean(view.id)}`, ...extra.map(clean), `Date: ${rfc5322Date(messageDate(view))}`];
   const from = addressList([view.from]);
   if (from) lines.push(`From: ${from}`);
   const to = addressList(view.to);
   if (to) lines.push(`To: ${to}`);
   const cc = addressList(view.cc);
   if (cc) lines.push(`Cc: ${cc}`);
+  const bcc = view.folder === "sent" && view.bcc ? addressList(view.bcc) : null;
+  if (bcc) lines.push(`Bcc: ${bcc}`);
   const replyTo = view.replyTo ? addressList([view.replyTo]) : null;
   if (replyTo) lines.push(`Reply-To: ${replyTo}`);
   lines.push(`Subject: ${encodeHeaderText(view.subject)}`);
@@ -186,7 +188,7 @@ function utf8(text: string): Uint8Array {
 }
 
 /** Deterministic for a given message and content: the boundary comes from the id, and every part is base64. */
-export function buildMessage(view: MessageView, body: BodyContent, attachments: AttachmentContent[]): BuiltMessage {
+export function buildMessage(view: MessageView, body: BodyContent, attachments: AttachmentContent[], extraHeaders: readonly string[] = []): BuiltMessage {
   const seed = hash(`lojo-bridge:${view.id}`);
   const text = body.text || (body.html ? htmlToText(body.html) : "");
   const textNode = leaf("text", "plain", [["charset", "utf-8"]], utf8(text), null);
@@ -211,7 +213,7 @@ export function buildMessage(view: MessageView, body: BodyContent, attachments: 
     });
     root = multipart("mixed", `lojo-mix-${seed.slice(24, 48)}`, [content, ...parts]);
   }
-  const header = Buffer.from(`${[...topHeaders(view), ...root.header.toString("latin1").split(CRLF).filter(Boolean)].join(CRLF)}${CRLF}${CRLF}`, "latin1");
+  const header = Buffer.from(`${[...topHeaders(view, extraHeaders), ...root.header.toString("latin1").split(CRLF).filter(Boolean)].join(CRLF)}${CRLF}${CRLF}`, "latin1");
   const rootBody = Buffer.concat([root.body, Buffer.from(CRLF, "latin1")]);
   const top: MimeNode = { ...root, header, body: rootBody, lines: root.children.length > 0 ? 0 : countLines(rootBody) };
   return { raw: Buffer.concat([header, rootBody]), root: top, searchText: `${text}\n${body.html ? htmlToText(body.html) : ""}` };

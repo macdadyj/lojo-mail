@@ -33,7 +33,7 @@ export interface WorldOptions {
   embedder?: Embedder | null;
   config?: Partial<LojoConfig>;
   now?: () => Date;
-  deps?: Pick<MailboxDeps, "ownPgpPublicKey" | "pgpSigningKey">;
+  deps?: Pick<MailboxDeps, "ownPgpPublicKey" | "pgpSigningKey" | "clientSendLimits" | "agentTrashPerDay">;
   /** Wires `autoSender` into the rules runtime, as LOJO_AUTO_SEND=on does in the processor. */
   autoSend?: boolean;
 }

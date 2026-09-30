@@ -1,9 +1,10 @@
+import type { Folder } from "@lojo/core";
 import { knownScope, type Scope } from "./scopes.ts";
 import type { AgentFolder, DraftRequest, MailClient } from "./tools.ts";
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
-/** Talks to the API with an API token, so every call is an agent call: no approvals, no trash, no full export. */
+/** Talks to the API with an API token, so every call is an agent call: no approvals, no sends, no full export; trash only with the trash scope. */
 export class HttpMailClient implements MailClient {
   constructor(
     private readonly baseUrl: string,
@@ -90,6 +91,24 @@ export class HttpMailClient implements MailClient {
 
   move(messageId: string, folder: AgentFolder): Promise<unknown> {
     return this.request("POST", `/v1/messages/${this.id(messageId)}/move`, { folder });
+  }
+
+  async listFolder(folder: Folder, limit: number): Promise<unknown> {
+    const payload = (await this.request("GET", `/v1/folders/${this.id(folder)}/messages?limit=${limit}`)) as { messages: unknown };
+    return payload.messages;
+  }
+
+  async listDrafts(): Promise<unknown> {
+    const payload = (await this.request("GET", "/v1/drafts")) as { drafts: unknown };
+    return payload.drafts;
+  }
+
+  trash(messageId: string): Promise<unknown> {
+    return this.request("POST", `/v1/messages/${this.id(messageId)}/move`, { folder: "trash" });
+  }
+
+  restore(messageId: string): Promise<unknown> {
+    return this.request("POST", `/v1/messages/${this.id(messageId)}/restore`);
   }
 
   async actionItems(): Promise<unknown> {

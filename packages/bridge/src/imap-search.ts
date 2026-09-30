@@ -147,7 +147,7 @@ async function textMatches(target: SearchTarget, field: TextField, value: string
     case "cc":
       return contains(addressText(view.cc), value);
     case "bcc":
-      return false;
+      return contains(addressText(view.bcc ?? []), value);
     case "subject":
       return contains(view.subject, value);
     case "body":

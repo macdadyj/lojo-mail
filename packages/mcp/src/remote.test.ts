@@ -55,7 +55,7 @@ test("tools/list only advertises what the token's scopes allow", async () => {
   const api = await testApp();
   const read = await rpc(api, "read-token", "tools/list");
   const readNames = (read.json?.result?.tools ?? []).map((tool) => tool.name).sort();
-  assert.deepEqual(readNames, ["export_mailbox", "list_inbox", "read_thread", "search_mail"]);
+  assert.deepEqual(readNames, ["export_mailbox", "list_drafts", "list_folder", "list_inbox", "read_thread", "search_mail"]);
 
   const write = await rpc(api, "write-token", "tools/list");
   const writeNames = (write.json?.result?.tools ?? []).map((tool) => tool.name);
@@ -64,8 +64,8 @@ test("tools/list only advertises what the token's scopes allow", async () => {
 
   const admin = await rpc(api, "admin-token", "tools/list");
   const adminNames = admin.json?.result?.tools ?? [];
-  assert.equal(adminNames.length, 12);
-  assert.ok(adminNames.every((tool) => !/send|approve|trash/.test(tool.name)), "no tool can send, approve, or trash, whatever the scope");
+  assert.equal(adminNames.length, 15);
+  assert.ok(adminNames.every((tool) => !/send|approve|trash/.test(tool.name)), "admin does not imply trash, and no tool can send or approve");
   assert.ok(adminNames.every((tool) => tool.inputSchema.type === "object"));
 });
 

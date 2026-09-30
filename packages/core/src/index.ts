@@ -31,7 +31,9 @@ export type { Embedder, EmbedPurpose, LlmClient, LlmCompletion, LlmEmbedding, Ll
 export { APPROVAL_TTL_MS, approvalContentHash, hashApprovalToken, newApprovalToken, sameHash } from "./approval.ts";
 export { FsBlobStore, MemoryBlobStore, RULES_KEY, aiContextKey, attachmentKey, bodyKey } from "./blob/store.ts";
 export type { BlobStore } from "./blob/store.ts";
-export { EMBED_PROVIDERS, LLM_PROVIDERS, loadConfig } from "./config.ts";
+export { clientSendLimitsFromEnv, DEFAULT_CLIENT_SEND_LIMITS, sendFromClient } from "./client-send.ts";
+export type { ClientSendDeps, ClientSendInput, ClientSendLimits, ClientSendResult } from "./client-send.ts";
+export { EMBED_PROVIDERS, LLM_PROVIDERS, loadConfig, sendFromList } from "./config.ts";
 export {
   attachmentContext,
   b64ToBytes,
@@ -82,8 +84,8 @@ export type { ReplyAction, Rule, RuleAction, RuleAuthor, RuleFolder, RuleHit, Ru
 export { checkRulesFile, emptyRules, parseRulesDocument, rulesHash } from "./rules/validate.ts";
 export { isPurgeDue, ownedBlobKeys, PURGE_MAX_PER_RUN, PURGE_MIN_AGE_DAYS, purgeExpiredTrash, purgeModeFrom } from "./trash/purge.ts";
 export type { PurgeDeps, PurgeMode, PurgeResult } from "./trash/purge.ts";
-export { MemorySender } from "./send.ts";
-export type { MailSender, OutboundMessage } from "./send.ts";
+export { MemorySender, sesRfcId } from "./send.ts";
+export type { MailSender, OutboundMessage, RawOutbound } from "./send.ts";
 export { DynamoMailStore } from "./store/dynamo.ts";
 export { DYNAMO_ITEM_LIMIT_BYTES, DynamoItemTooLarge, MemoryDynamo } from "./store/memory-dynamo.ts";
 export type { MemoryDynamoDump } from "./store/memory-dynamo.ts";

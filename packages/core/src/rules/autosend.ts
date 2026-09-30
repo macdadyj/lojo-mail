@@ -63,6 +63,7 @@ export function autoSendRefusals(ctx: AutoSendContext): string[] {
   const out: string[] = [];
   if (!ctx.enabled) out.push("auto-send is disabled on this deployment");
   if (doc.killSwitch) out.push("kill switch is engaged");
+  if (doc.sendKillSwitch) out.push("global send kill switch is engaged");
   if (doc.paused) out.push("rules are paused");
   if (rule.createdBy !== "human") out.push("rule was not written by a human session");
   if (action.allowSenders.length === 0 || !senderMatches(from, action.allowSenders)) out.push("sender is not on the rule's allowlist");

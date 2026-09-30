@@ -16,7 +16,9 @@ test("tool definitions carry inline JSON Schema and honest annotations", () => {
   assert.equal(JSON.stringify(defs).includes("$ref"), false);
   assert.equal(search?.annotations.readOnlyHint, true);
   assert.equal(defs.find((tool) => tool.name === "read_thread")?.annotations.readOnlyHint, false, "reading clears unread flags");
-  assert.ok(defs.every((tool) => tool.annotations.destructiveHint === false));
+  assert.ok(defs.every((tool) => tool.annotations.destructiveHint === false), "nothing without trash is destructive");
+  const trash = toolDefinitions(["read", "write", "trash"]).find((tool) => tool.name === "trash_message");
+  assert.equal(trash?.annotations.destructiveHint, true, "trash_message is the one soft delete");
   const move = defs.find((tool) => tool.name === "move_message");
   assert.deepEqual((move?.inputSchema.properties as { folder: { enum: string[] } }).folder.enum, ["inbox", "archive", "spam"]);
 });
