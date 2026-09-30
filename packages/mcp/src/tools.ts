@@ -95,7 +95,7 @@ export const tools = [
     name: "search_mail",
     annotations: READ_ONLY,
     scopes: ["read"],
-    description: "Search mail by keyword, or semantically when embeddings exist. includeContext searches AI-context text and needs the body scope.",
+    description: "Search mail by keyword, or semantically when embeddings exist. Semantic mode and includeContext both need the body scope.",
     schema: searchSchema,
     run: (args: z.infer<typeof searchSchema>, ctx: ToolContext) =>
       ctx.mailbox.search(args.query, args.mode ?? "keyword", requireBody(ctx, args.includeContext)),

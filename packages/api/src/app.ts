@@ -212,6 +212,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const input = await body<{ query: string; mode: "keyword" | "semantic"; context: boolean }>(c);
     if (typeof input.query !== "string" || !input.query) throw new MailError("query is required", "invalid");
     const mode = input.mode === "semantic" ? "semantic" : "keyword";
+    // Vectors are derived from body text, so ranking by them is a body-text oracle.
+    requireBodyScope(c, mode === "semantic");
     return c.json({ messages: await mailbox.search(input.query, mode, views(c, input.context === true)) });
   });
 

@@ -62,6 +62,18 @@ test("[P2] API: a read-only token can search", async () => {
   assert.equal(res.status, 200);
 });
 
+test("[P1] API: semantic search ranks by body-derived vectors, so it needs the body scope and spends nothing when refused", async () => {
+  const t = await testApp();
+  await t.ingest(fixture("personal.eml"));
+  const spentBefore = (await t.store.listAudit()).filter((event) => event.action === "ai.embed_query").length;
+  for (const token of ["read-token", "write-token"]) {
+    const res = await t.call("/v1/search", { token, body: { query: "lease", mode: "semantic" } });
+    assert.equal(res.status, 403, token);
+  }
+  assert.equal((await t.store.listAudit()).filter((event) => event.action === "ai.embed_query").length, spentBefore);
+  assert.equal((await t.call("/v1/search", { token: "body-token", body: { query: "lease", mode: "semantic" } })).status, 200);
+});
+
 test("[P1-10] API: trash needs a human session", async () => {
   const t = await testApp();
   const { message } = await t.ingest(fixture("personal.eml"), {}, null);
