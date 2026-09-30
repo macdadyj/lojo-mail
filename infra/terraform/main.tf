@@ -47,6 +47,8 @@ locals {
     LOJO_GEMINI_KEY_PARAM       = "/lojo-mail/gemini-api-key"
     LOJO_VERTEX_SA_PARAM        = "/lojo-mail/vertex-sa-json"
     LOJO_AGENT_TOKENS_PARAM     = "/lojo-mail/agent-tokens"
+    LOJO_BRIDGE_TOKEN_PARAM     = "/lojo-mail/bridge-token"
+    LOJO_AUTO_SEND              = var.auto_send_enabled ? "on" : "off"
     LOJO_TABLE_MESSAGES         = aws_dynamodb_table.messages.name
     LOJO_TABLE_THREADS          = aws_dynamodb_table.threads.name
     LOJO_TABLE_DRAFTS           = aws_dynamodb_table.drafts.name

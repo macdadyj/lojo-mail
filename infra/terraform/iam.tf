@@ -123,10 +123,51 @@ data "aws_iam_policy_document" "processor" {
     resources = local.table_arns
   }
 
+  # Jon's mail rules. The processor can open them but cannot produce a valid
+  # sealed copy (no GenerateDataKey for this purpose), so only the API writes rules.
+  statement {
+    sid       = "ReadRules"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.mail.arn}/rules/*"]
+  }
+
+  statement {
+    sid       = "OpenRules"
+    actions   = ["kms:Decrypt"]
+    resources = [aws_kms_key.mail.arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:EncryptionContext:purpose"
+      values   = ["rules"]
+    }
+  }
+
   statement {
     sid       = "ReadConfig"
     actions   = ["ssm:GetParameter"]
     resources = concat(["${local.ssm_prefix}/envelope-public-jwk"], local.provider_key_params)
+  }
+
+  # Off by default. Only auto-send rules that pass every guard in
+  # packages/core/src/rules/autosend.ts use it; see docs/SECURITY.md.
+  dynamic "statement" {
+    for_each = var.auto_send_enabled ? [1] : []
+
+    content {
+      sid     = "RuleAutoSendAsMailbox"
+      actions = ["ses:SendEmail", "ses:SendRawEmail"]
+      resources = [
+        local.ses_identity_arn,
+        aws_sesv2_configuration_set.outbound.arn,
+      ]
+
+      condition {
+        test     = "StringEquals"
+        variable = "ses:FromAddress"
+        values   = [local.mailbox]
+      }
+    }
   }
 
   statement {
@@ -170,6 +211,24 @@ data "aws_iam_policy_document" "api" {
     sid       = "WriteSentCopies"
     actions   = ["s3:PutObject"]
     resources = ["${aws_s3_bucket.mail.arn}/objects/*"]
+  }
+
+  statement {
+    sid       = "RulesObject"
+    actions   = ["s3:GetObject", "s3:PutObject"]
+    resources = ["${aws_s3_bucket.mail.arn}/rules/*"]
+  }
+
+  statement {
+    sid       = "SealRules"
+    actions   = ["kms:GenerateDataKey", "kms:Decrypt"]
+    resources = [aws_kms_key.mail.arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:EncryptionContext:purpose"
+      values   = ["rules"]
+    }
   }
 
   statement {
@@ -223,6 +282,7 @@ data "aws_iam_policy_document" "api" {
         "api-token",
         "api-token-send",
         "agent-tokens",
+        "bridge-token",
         "session-secret",
         "human-passphrase-hash",
         "pgp-public-key",

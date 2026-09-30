@@ -339,3 +339,9 @@ variable "mta_sts_id" {
   description = "MTA-STS record id. Bump it when docs/mta-sts.txt changes."
   default     = "202609290000"
 }
+
+variable "auto_send_enabled" {
+  type        = bool
+  description = "Lets mail rules auto-send replies: grants the processor SES send as the mailbox and sets LOJO_AUTO_SEND=on. Every rule still needs Jon's opt-in, a sender allowlist, DMARC pass, loop checks and rate limits. Off means every rule reply is a draft for approval."
+  default     = false
+}

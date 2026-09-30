@@ -349,11 +349,86 @@ run "server_seal_kms_use_is_bound_to_its_purpose" {
   }
 
   assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.processor.statement :
+      alltrue([for c in s.condition : c.values == tolist(["rules"]) if c.variable == "kms:EncryptionContext:purpose"])
+      if contains(s.actions, "kms:Decrypt") && anytrue([for c in s.condition : c.variable == "kms:EncryptionContext:purpose"])
+    ])
+    error_message = "the processor seals AI-context and draft copies but must not open them; it may only open the rules"
+  }
+}
+
+run "rules_are_sealed_by_the_api_and_only_opened_by_the_processor" {
+  command = plan
+
+  assert {
     condition = !contains(flatten([
       for s in data.aws_iam_policy_document.processor.statement : s.actions
-      if anytrue([for c in s.condition : c.variable == "kms:EncryptionContext:purpose"])
-    ]), "kms:Decrypt")
-    error_message = "the processor seals AI-context and draft copies but must not open them"
+      if anytrue([for c in s.condition : c.variable == "kms:EncryptionContext:purpose" && contains(c.values, "rules")])
+    ]), "kms:GenerateDataKey")
+    error_message = "the processor must not be able to produce a sealed rules document"
+  }
+
+  assert {
+    condition = contains(flatten([
+      for s in data.aws_iam_policy_document.api.statement : s.actions
+      if anytrue([for c in s.condition : c.variable == "kms:EncryptionContext:purpose" && contains(c.values, "rules")])
+    ]), "kms:GenerateDataKey")
+    error_message = "the API seals the rules Jon saves"
+  }
+
+  assert {
+    condition     = length([for r in flatten([for s in data.aws_iam_policy_document.processor.statement : s.resources if contains(s.actions, "s3:PutObject")]) : r if endswith(r, "/rules/*")]) == 0
+    error_message = "the processor never writes rules"
+  }
+}
+
+run "auto_send_is_off_by_default" {
+  command = plan
+
+  assert {
+    condition     = aws_lambda_function.processor.environment[0].variables.LOJO_AUTO_SEND == "off"
+    error_message = "rules must not auto-send unless auto_send_enabled is set"
+  }
+
+  assert {
+    condition     = length(setintersection(toset(flatten([for s in data.aws_iam_policy_document.processor.statement : s.actions])), toset(["ses:SendEmail", "ses:SendRawEmail"]))) == 0
+    error_message = "the processor has no SES send permission by default"
+  }
+}
+
+run "auto_send_flag_grants_the_processor_ses_as_the_mailbox_only" {
+  command = plan
+
+  variables {
+    auto_send_enabled = true
+  }
+
+  assert {
+    condition     = aws_lambda_function.processor.environment[0].variables.LOJO_AUTO_SEND == "on"
+    error_message = "the flag turns auto-send on"
+  }
+
+  assert {
+    condition = length([
+      for s in data.aws_iam_policy_document.processor.statement : s
+      if s.sid == "RuleAutoSendAsMailbox" && anytrue([for c in s.condition : c.variable == "ses:FromAddress" && c.values == tolist(["lojo@cyberphysical.us"])])
+    ]) == 1
+    error_message = "auto-send may only send as the mailbox"
+  }
+}
+
+run "the_api_reads_the_bridge_token" {
+  command = plan
+
+  assert {
+    condition     = contains(flatten([for s in data.aws_iam_policy_document.api.statement : s.resources if s.sid == "ReadConfig"]), "arn:aws:ssm:us-east-1:111122223333:parameter/lojo-mail/bridge-token")
+    error_message = "the API reads the bridge token"
+  }
+
+  assert {
+    condition     = !contains(flatten([for s in data.aws_iam_policy_document.processor.statement : s.resources]), "arn:aws:ssm:us-east-1:111122223333:parameter/lojo-mail/bridge-token")
+    error_message = "the processor never needs the bridge token"
   }
 }
 
