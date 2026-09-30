@@ -109,6 +109,7 @@ async function init(): Promise<void> {
     privateKeyFile,
     privateKeyCommand: argv(values["private-key-command"], "--private-key-command"),
     pollSeconds: 60,
+    newMailSeconds: 15,
     folderLimit: 2000,
     notify: true,
     deleteToTrash: !values["no-trash"],
@@ -144,6 +145,9 @@ async function check(): Promise<void> {
   console.log(`api           ${config.apiUrl} reachable; token "${session.label}" scopes ${session.scopes.join(", ")}`);
   const toTrash = config.deleteToTrash && session.scopes.includes("trash");
   console.log(`delete        ${toTrash ? "moves to Trash (soft delete, recoverable for the retention window)" : "archives with a hidden label"}`);
+  console.log(
+    `send          ${session.scopes.includes("client-send") ? `Send in Thunderbird goes out at once, as ${(session.sendFrom ?? [config.address]).join(", ")}` : "Send in Thunderbird queues a draft for approval in the web app"}`,
+  );
   const [newest] = await api.listFolder("inbox", 1);
   if (!newest) {
     console.log("decrypt       inbox is empty; nothing to test");

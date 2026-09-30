@@ -3,6 +3,7 @@ import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { testApp } from "@lojo/api/testing";
+import { sendFromList, type ClientSendLimits } from "@lojo/core";
 import { ImapFlow } from "imapflow";
 import { hashPassword } from "./auth.ts";
 import { startBridge, type RunningBridge } from "./bridge.ts";
@@ -24,8 +25,25 @@ export interface Harness {
 }
 
 /** The bridge on ephemeral loopback ports over the in-memory API. The API is locked, as in production. */
-export async function harness(options: { token?: string; pollSeconds?: number; bridgeTrash?: boolean; deleteToTrash?: boolean } = {}): Promise<Harness> {
-  const t = await testApp({ unlocked: false, bridgeTrash: options.bridgeTrash ?? false });
+export interface HarnessOptions {
+  token?: string;
+  pollSeconds?: number;
+  newMailSeconds?: number;
+  bridgeTrash?: boolean;
+  bridgeSend?: boolean;
+  deleteToTrash?: boolean;
+  sendFrom?: string;
+  clientSendLimits?: ClientSendLimits;
+}
+
+export async function harness(options: HarnessOptions = {}): Promise<Harness> {
+  const t = await testApp({
+    unlocked: false,
+    bridgeTrash: options.bridgeTrash ?? false,
+    bridgeSend: options.bridgeSend ?? false,
+    ...(options.sendFrom ? { config: { sendFrom: sendFromList("lojo@cyberphysical.us", options.sendFrom) } } : {}),
+    ...(options.clientSendLimits ? { deps: { clientSendLimits: options.clientSendLimits } } : {}),
+  });
   const dir = mkdtempSync(join(tmpdir(), "lojo-bridge-test-"));
   const statePath = join(dir, "bridge-state.json");
   cachedHash ??= await hashPassword(APP_PASSWORD);
@@ -43,6 +61,7 @@ export async function harness(options: { token?: string; pollSeconds?: number; b
       deleteToTrash: options.deleteToTrash ?? true,
     }),
     pollSeconds: options.pollSeconds ?? 60,
+    newMailSeconds: options.newMailSeconds ?? 60,
   };
   const bridge = await startBridge({
     config,

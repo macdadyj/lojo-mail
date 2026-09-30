@@ -163,6 +163,6 @@ export interface RuleSummary {
 }
 
 export interface RulesView {
-  rules: { paused: boolean; killSwitch: boolean; trashRetentionDays: number; rules: RuleSummary[]; updatedAt: string };
+  rules: { paused: boolean; killSwitch: boolean; sendKillSwitch?: boolean; trashRetentionDays: number; rules: RuleSummary[]; updatedAt: string };
   autoSendEnabled: boolean;
 }

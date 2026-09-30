@@ -1,8 +1,9 @@
 import { EventEmitter } from "node:events";
-import { assertNever, FOLDERS, type EcPrivateJwk, type Folder, type MessageView, type SealedBody } from "@lojo/core";
+import { assertNever, FOLDERS, parseMime, type EcPrivateJwk, type Folder, type MessageView, type SealedBody } from "@lojo/core";
 import { attachmentContext, messageBodyContext, openBytes, openJson } from "@lojo/core/crypto";
 import { ApiError, type ApiClient } from "./api.ts";
 import { ByteLru } from "./cache.ts";
+import { draftEntryId, draftIdOf, draftMessageView, isOpenDraft, type DraftEntry } from "./drafts.ts";
 import { flagsFor, hasFlag, HIDDEN_LABEL, labelsFor, sameSet } from "./flags.ts";
 import { errorMessage, type Logger } from "./log.ts";
 import { buildMessage, lockedBody, type AttachmentContent, type BodyContent, type BuiltMessage } from "./mime.ts";
@@ -44,6 +45,8 @@ export function findMailbox(name: string): MailboxDef | null {
   return MAILBOXES.find((box) => box.name === wanted) ?? MAILBOXES.find((box) => box.name.toLowerCase() === name.toLowerCase()) ?? null;
 }
 
+const HEAD_SIZE = 25;
+
 /** The service cannot do what was asked (IMAP `NO [CANNOT]`). */
 export class CannotError extends Error {
   constructor(message: string) {
@@ -59,6 +62,8 @@ export interface Entry {
 
 export interface MailStoreOptions {
   folderLimit: number;
+  /** Jon's address, the From of drafts. */
+  address: string;
   /** The token holds `trash` and bridge.json allows it: delete moves to Trash. */
   canTrash?: boolean;
   cacheBytes?: number;
@@ -71,6 +76,10 @@ export interface MailStoreOptions {
  */
 export class MailStore extends EventEmitter {
   private readonly views = new Map<string, MessageView>();
+  private readonly drafts = new Map<string, DraftEntry>();
+  /** Newest ids per mailbox, for the cheap new-mail check. */
+  private readonly heads = new Map<string, Set<string>>();
+  private readonly checking = new Map<string, Promise<boolean>>();
   private readonly deleted = new Set<string>();
   private readonly listing = new Map<string, Promise<Entry[]>>();
   private readonly building = new Map<string, Promise<BuiltMessage>>();
@@ -109,21 +118,64 @@ export class MailStore extends EventEmitter {
   }
 
   private async fetchList(box: MailboxDef): Promise<Entry[]> {
-    const views = await this.api.listFolder(box.folder, this.options.folderLimit);
+    const views = box.folder === "drafts" ? await this.draftViews() : await this.api.listFolder(box.folder, this.options.folderLimit);
     const visible = box.hidesDeleted ? views.filter((view) => !view.labels.includes(HIDDEN_LABEL)) : views;
     for (const view of visible) this.views.set(view.id, view);
+    this.heads.set(box.name, new Set(visible.slice(0, HEAD_SIZE).map((view) => view.id)));
     const ordered = [...visible].reverse().map((view) => view.id);
     const uids = this.state.assign(box.name, ordered);
     return ordered.map((id) => ({ id, uid: uids.get(id) ?? 0 })).sort((a, b) => a.uid - b.uid);
+  }
+
+  /**
+   * The Drafts mailbox: drafts stored as messages (imports), then every open
+   * draft on the service, including the ones assistants and rules wrote.
+   */
+  private async draftViews(): Promise<MessageView[]> {
+    const [stored, drafts] = await Promise.all([this.api.listFolder("drafts", this.options.folderLimit), this.api.listDrafts()]);
+    const open: MessageView[] = [];
+    for (const item of drafts.filter(isOpenDraft)) {
+      const text = item.text ?? "";
+      const entryId = draftEntryId(item, text);
+      this.drafts.set(entryId, { draftId: item.draft.id, text });
+      open.push(draftMessageView(entryId, item, text, this.options.address));
+    }
+    return [...stored, ...open].sort((a, b) => b.date.localeCompare(a.date));
+  }
+
+  /**
+   * True when the newest few messages of a mailbox changed since the last
+   * listing. Much cheaper than a full listing, so IDLE can run it often.
+   */
+  hasNewMail(box: MailboxDef): Promise<boolean> {
+    const running = this.checking.get(box.name);
+    if (running) return running;
+    const next = this.checkHead(box).finally(() => this.checking.delete(box.name));
+    this.checking.set(box.name, next);
+    return next;
+  }
+
+  private async checkHead(box: MailboxDef): Promise<boolean> {
+    const known = this.heads.get(box.name);
+    if (!known || box.folder === "drafts") return true;
+    const views = await this.api.listFolder(box.folder, HEAD_SIZE);
+    const visible = box.hidesDeleted ? views.filter((view) => !view.labels.includes(HIDDEN_LABEL)) : views;
+    return visible.some((view) => !known.has(view.id)) || visible.length < Math.min(known.size, HEAD_SIZE);
   }
 
   view(id: string): MessageView | undefined {
     return this.views.get(id);
   }
 
+  isDraft(id: string): boolean {
+    return this.drafts.has(id) || draftIdOf(id) !== null;
+  }
+
   flags(id: string): string[] {
     const view = this.views.get(id);
-    return view ? flagsFor(view, this.deleted.has(id)) : [];
+    if (!view) return [];
+    const flags = flagsFor(view, this.deleted.has(id));
+    return this.isDraft(id) ? [...flags, "\\Draft"] : flags;
   }
 
   private requireView(id: string): MessageView {
@@ -134,6 +186,12 @@ export class MailStore extends EventEmitter {
 
   async setFlags(id: string, flags: readonly string[]): Promise<void> {
     const view = this.requireView(id);
+    if (this.isDraft(id)) {
+      // A draft's flags are fixed; only the pending delete is remembered, for EXPUNGE.
+      if (hasFlag(flags, "\\Deleted")) this.deleted.add(id);
+      else this.deleted.delete(id);
+      return;
+    }
     const seen = hasFlag(flags, "\\Seen");
     if (seen === view.unread) {
       await this.api.setUnread(id, !seen);
@@ -165,6 +223,13 @@ export class MailStore extends EventEmitter {
    */
   async remove(id: string, from: MailboxDef): Promise<void> {
     const view = this.requireView(id);
+    const draftId = this.drafts.get(id)?.draftId ?? draftIdOf(id);
+    if (draftId) {
+      await this.api.discardDraft(draftId);
+      this.deleted.delete(id);
+      this.emit("changed");
+      return;
+    }
     if (this.deletesToTrash && from.folder !== "trash") {
       await this.api.move(id, "trash");
       view.folder = "trash";
@@ -186,6 +251,7 @@ export class MailStore extends EventEmitter {
   }
 
   async moveTo(id: string, from: MailboxDef, to: MailboxDef): Promise<void> {
+    if (this.isDraft(id) && to.folder !== "trash") throw new CannotError("A draft can only be sent or deleted");
     switch (to.folder) {
       case "trash":
         await this.remove(id, from);
@@ -206,6 +272,27 @@ export class MailStore extends EventEmitter {
     const view = this.views.get(id);
     if (view) view.folder = to.folder;
     this.deleted.delete(id);
+    this.emit("changed");
+  }
+
+  /**
+   * Thunderbird saves drafts with APPEND to Drafts. Each save becomes a client
+   * draft on the service (so it shows in the web app too). The draft keeps
+   * Thunderbird's Message-ID, which is how Thunderbird finds it again.
+   */
+  async appendDraft(raw: Buffer): Promise<void> {
+    const parsed = await parseMime(raw);
+    if (parsed.attachments.length > 0) {
+      throw new CannotError("lojo-mail stores drafts as text only; save drafts with attachments in Local Folders, or just send the message");
+    }
+    await this.api.createDraft({
+      to: parsed.to.map((item) => item.email),
+      cc: parsed.cc.map((item) => item.email),
+      subject: parsed.subject,
+      text: parsed.text,
+      ...(parsed.inReplyTo ? { inReplyTo: parsed.inReplyTo } : {}),
+      ...(parsed.rfcMessageId.startsWith("generated.") ? {} : { clientMessageId: parsed.rfcMessageId }),
+    });
     this.emit("changed");
   }
 
@@ -273,6 +360,14 @@ export class MailStore extends EventEmitter {
   }
 
   private async build(id: string): Promise<BuiltMessage> {
+    const draft = this.drafts.get(id);
+    const draftView = this.views.get(id);
+    if (draft && draftView) {
+      const built = buildMessage(draftView, { text: draft.text, html: "" }, [], [`X-Lojo-Draft-Id: ${draft.draftId}`]);
+      this.cache.set(id, built, built.raw.length + built.searchText.length * 2);
+      this.state.setSize(id, built.raw.length);
+      return built;
+    }
     let view = this.views.get(id);
     if (!view) {
       view = await this.api.message(id);

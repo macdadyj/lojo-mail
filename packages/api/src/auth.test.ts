@@ -110,7 +110,7 @@ test("login over HTTP: 401 on a wrong passphrase, then a human principal", async
   assert.equal(wrong.status, 401);
   const token = await t.login();
   const who = await t.call("/v1/session", { token });
-  assert.deepEqual(who.json, { kind: "human", label: "jon", scopes: ["admin"] });
+  assert.deepEqual(who.json, { kind: "human", label: "jon", scopes: ["admin"], sendFrom: ["lojo@cyberphysical.us"] });
   assert.equal((await t.call("/v1/session", { token: "admin-token" })).json.kind, "token");
 });
 

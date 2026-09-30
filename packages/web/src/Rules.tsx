@@ -23,7 +23,7 @@ export function RulesPanel() {
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not load rules"));
   }, []);
 
-  const flip = async (change: { paused?: boolean; killSwitch?: boolean }) => {
+  const flip = async (change: { paused?: boolean; killSwitch?: boolean; sendKillSwitch?: boolean }) => {
     setError(null);
     try {
       const next = await api<{ rules: RulesView["rules"] }>("/v1/rules/switches", { method: "POST", body: JSON.stringify(change) });
@@ -59,7 +59,8 @@ export function RulesPanel() {
         </ul>
       ) : null}
       <p className="muted">
-        {rules.paused ? "All rules are paused." : "Rules are running."} {rules.killSwitch ? "Auto-send is stopped (kill switch on)." : ""}
+        {rules.paused ? "All rules are paused." : "Rules are running."} {rules.killSwitch ? "Auto-send is stopped (kill switch on)." : ""}{" "}
+        {rules.sendKillSwitch ? "All sending is stopped, including Thunderbird and approved drafts." : ""}
       </p>
       <div className="actions flush">
         <button className="ghost" type="button" onClick={() => void flip({ paused: !rules.paused })}>
@@ -67,6 +68,9 @@ export function RulesPanel() {
         </button>
         <button className="ghost" type="button" onClick={() => void flip({ killSwitch: !rules.killSwitch })}>
           {rules.killSwitch ? "Allow auto-send again" : "Stop auto-send"}
+        </button>
+        <button className="ghost" type="button" onClick={() => void flip({ sendKillSwitch: !rules.sendKillSwitch })}>
+          {rules.sendKillSwitch ? "Allow sending again" : "Stop all sending"}
         </button>
       </div>
     </>

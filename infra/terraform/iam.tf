@@ -325,15 +325,15 @@ data "aws_iam_policy_document" "api" {
   statement {
     sid     = "SendAsMailbox"
     actions = ["ses:SendEmail", "ses:SendRawEmail"]
-    resources = [
+    resources = distinct(concat([
       local.ses_identity_arn,
       aws_sesv2_configuration_set.outbound.arn,
-    ]
+    ], local.extra_send_identity_arns))
 
     condition {
       test     = "StringEquals"
       variable = "ses:FromAddress"
-      values   = [local.mailbox]
+      values   = distinct(concat([local.mailbox], var.send_from_addresses))
     }
   }
 

@@ -31,6 +31,7 @@ export interface SessionContext {
   guard: LoginGuard;
   logger: Logger;
   pollSeconds: number;
+  newMailSeconds: number;
   version: string;
 }
 
@@ -282,9 +283,9 @@ export class ImapSession {
       case "STORE":
         return this.store(tag, args, false);
       case "COPY":
-        return this.copy(args);
+        return this.move(tag, args, false, "COPY");
       case "MOVE":
-        return this.move(tag, args, false);
+        return this.move(tag, args, false, "MOVE");
       case "UID":
         return this.uid(tag, args);
       default:
@@ -303,9 +304,9 @@ export class ImapSession {
       case "STORE":
         return this.store(tag, rest, true);
       case "COPY":
-        return this.copy(rest);
+        return this.move(tag, rest, true, "COPY");
       case "MOVE":
-        return this.move(tag, rest, true);
+        return this.move(tag, rest, true, "MOVE");
       default:
         throw new ParseError(`Unknown UID command ${sub.slice(0, 30)}`);
     }
@@ -655,15 +656,12 @@ export class ImapSession {
     await this.write(out);
   }
 
-  private async copy(args: Token[]): Promise<void> {
-    this.requireSelected();
-    requireString(args[0], "sequence set");
-    const name = requireString(args[1], "mailbox");
-    if (!findMailbox(name)) throw new No(`No mailbox ${name.slice(0, 60)}`, "TRYCREATE");
-    throw new No("lojo-mail keeps one copy of each message; use move instead", "CANNOT");
-  }
-
-  private async move(tag: string, args: Token[], uidMode: boolean): Promise<void> {
+  /**
+   * lojo-mail keeps exactly one copy of each message, so COPY files the message
+   * in the target folder like MOVE does and reports the source copy expunged
+   * (untagged EXPUNGE is allowed during COPY). COPY within one folder is a no-op.
+   */
+  private async move(tag: string, args: Token[], uidMode: boolean, verb: "COPY" | "MOVE"): Promise<void> {
     const from = this.requireWritable();
     const setText = requireString(args[0], "sequence set");
     const name = requireString(args[1], "mailbox");
@@ -671,7 +669,7 @@ export class ImapSession {
     if (!to) throw new No(`No mailbox ${name.slice(0, 60)}`, "TRYCREATE");
     const targets = this.resolve(setText, uidMode);
     if (to.name === from.name) {
-      await this.write([`${tag} OK MOVE completed (same mailbox)\r\n`]);
+      await this.write([`${tag} OK ${verb} completed (same mailbox)\r\n`]);
       return;
     }
     if (to.folder === "sent" || to.folder === "drafts") throw new CannotError(`Messages cannot be moved into ${to.name}`);
@@ -693,14 +691,15 @@ export class ImapSession {
       this.slots.splice(index, 1);
       out.push(`* ${index + 1} EXPUNGE\r\n`);
     }
-    out.push(failure ? this.failure(tag, failure) : `${tag} OK MOVE completed\r\n`);
+    const done = verb === "COPY" ? `${tag} OK COPY completed; lojo-mail keeps one copy, so the message moved\r\n` : `${tag} OK MOVE completed\r\n`;
+    out.push(failure ? this.failure(tag, failure) : done);
     await this.write(out);
   }
 
   /**
-   * Thunderbird APPENDs a copy of each sent message to Sent and saves drafts
-   * with APPEND. The real Sent copy appears once Jon approves the draft, and
-   * drafts stay local to Thunderbird, so both are accepted and dropped.
+   * Thunderbird APPENDs a copy of each sent message to Sent: the service writes
+   * its own Sent copy (with the Message-ID SES gave it), so this one is dropped.
+   * Drafts saved with APPEND become drafts on the service.
    */
   private async append(tag: string, args: Token[]): Promise<void> {
     const name = requireString(args[0], "mailbox");
@@ -710,9 +709,13 @@ export class ImapSession {
     if (!box) throw new No(`No mailbox ${name.slice(0, 60)}`, "TRYCREATE");
     switch (box.folder) {
       case "sent":
-      case "drafts":
         this.ctx.logger.info("imap.append_dropped", { session: this.id, mailbox: box.name, bytes: last.bytes?.length ?? last.value.length });
-        await this.write([`${tag} OK APPEND completed (not stored: lojo-mail keeps its own ${box.name} copy)\r\n`]);
+        await this.write([`${tag} OK APPEND completed (not stored: lojo-mail keeps its own Sent copy)\r\n`]);
+        return;
+      case "drafts":
+        await this.ctx.store.appendDraft(last.bytes ?? Buffer.from(last.value, "latin1"));
+        this.ctx.logger.info("imap.draft_saved", { session: this.id });
+        await this.write([`${tag} OK APPEND completed\r\n`]);
         return;
       case "inbox":
       case "archive":
@@ -735,8 +738,24 @@ export class ImapSession {
         this.sync().catch((error: unknown) => this.ctx.logger.warn("imap.idle_sync_failed", { session: this.id, reason: errorMessage(error) }));
       }, 100);
     };
+    const box = this.box;
+    let checking = false;
+    const checkNew = () => {
+      if (checking || !box) return;
+      checking = true;
+      this.ctx.store
+        .hasNewMail(box)
+        .then((fresh) => {
+          if (fresh) poke();
+        })
+        .catch((error: unknown) => this.ctx.logger.warn("imap.new_mail_check_failed", { session: this.id, reason: errorMessage(error) }))
+        .finally(() => {
+          checking = false;
+        });
+    };
     this.ctx.store.on("changed", poke);
     timer = setInterval(poke, this.ctx.pollSeconds * 1000);
+    const fast = setInterval(checkNew, this.ctx.newMailSeconds * 1000);
     await this.write(["+ idling\r\n"]);
     try {
       const line = await done;
@@ -747,6 +766,7 @@ export class ImapSession {
     } finally {
       this.ctx.store.off("changed", poke);
       if (timer) clearInterval(timer);
+      clearInterval(fast);
       if (pending) clearTimeout(pending);
     }
   }

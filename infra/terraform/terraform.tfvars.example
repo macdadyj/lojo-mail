@@ -39,3 +39,10 @@ web_origins = [
   "http://127.0.0.1:5173",
   "http://localhost:5173",
 ]
+
+# Send in Thunderbird goes straight out through SES (no web approval). false
+# puts Thunderbird sends in the web approval queue instead.
+bridge_send_enabled = true
+# Extra SES-verified From addresses for Thunderbird identities.
+# send_from_addresses = ["jon@lojo.engineering"]
+# client_send_limits = { per_day = 200, per_10_minutes = 30, recipients_per_day = 500, max_recipients = 50 }

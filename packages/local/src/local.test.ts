@@ -48,7 +48,7 @@ test("the agent loop searches through the API and answers from the result", asyn
   assert.deepEqual(result.steps, [{ tool: "search_mail", arguments: { query: "lease" }, ok: true }]);
   assert.deepEqual(
     chat.seen[0]?.tools.map((tool) => tool.name).sort(),
-    ["export_mailbox", "list_inbox", "read_thread", "search_mail"],
+    ["export_mailbox", "list_drafts", "list_folder", "list_inbox", "read_thread", "search_mail"],
     "a read token is offered read tools only",
   );
   assert.equal(chat.seen[0]?.messages[0]?.content, AGENT_SYSTEM);
@@ -184,4 +184,42 @@ test("malformed arguments from a small model become an empty object, and unwrap 
   assert.deepEqual(parseArguments("{not json"), {});
   assert.deepEqual(parseArguments(undefined), {});
   assert.deepEqual(unwrap("preamble\n<untrusted-mail-content>\n{\"a\":\"\\u003cb\\u003e\"}\n</untrusted-mail-content>"), { a: "<b>" });
+});
+
+test("a local model with an agent token sorts, labels, soft-deletes and drafts, but cannot send", async () => {
+  const api = await testApp({ bridgeSend: true });
+  const client = new HttpMailClient("http://api.test", "agent-trash-token", (url, init) => Promise.resolve(api.app.request(url, init)));
+  const ctx: ToolContext = { mailbox: client, scopes: ["read", "write", "body", "trash"] };
+  const newsletter = (await api.ingest(fixture("newsletter.eml"))).message;
+  const personal = (await api.ingest(fixture("personal.eml"))).message;
+  const chat = new ScriptedChat([
+    {
+      content: "",
+      toolCalls: [
+        { id: "c1", name: "label_message", arguments: { messageId: personal.id, labels: ["todo"] } },
+        { id: "c2", name: "trash_message", arguments: { messageId: newsletter.id } },
+        { id: "c3", name: "create_draft", arguments: { to: [personal.from.email], subject: `Re: ${personal.subject}`, text: "Friday works.", threadId: personal.threadId } },
+      ],
+    },
+    { content: "Labelled, trashed the newsletter, drafted a reply.", toolCalls: [] },
+  ]);
+  const result = await runAgent({ backend: chat, ctx, question: "Tidy my inbox" });
+  assert.deepEqual(
+    result.steps.map((step) => [step.tool, step.ok]),
+    [
+      ["label_message", true],
+      ["trash_message", true],
+      ["create_draft", true],
+    ],
+  );
+  const offered = chat.seen[0]?.tools.map((tool) => tool.name) ?? [];
+  assert.ok(offered.includes("trash_message"));
+  assert.ok(!offered.some((name) => /send|approve|delete_forever|purge/.test(name)), "no send or hard delete tool exists");
+  assert.ok((await api.store.getMessage(personal.id))?.labels.includes("todo"));
+  const trashed = await api.store.getMessage(newsletter.id);
+  assert.equal(trashed?.folder, "trash");
+  assert.equal(trashed?.trashedBy, "agent:cursor");
+  const draft = (await api.store.listDrafts()).find((item) => item.subject === `Re: ${personal.subject}` && item.origin !== "ai");
+  assert.ok(draft && ["draft", "edited"].includes(draft.status), "the reply waits in Drafts for Jon");
+  assert.equal(api.sender.sent.length + api.sender.rawSent.length, 0);
 });

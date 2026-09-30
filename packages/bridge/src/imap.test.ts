@@ -180,19 +180,19 @@ describe("IMAP", () => {
     assert.ok(stored?.labels.includes("thunderbird-deleted"));
   });
 
-  it("refuses COPY and moves into Sent or Drafts", async () => {
+  it("refuses moves into Sent or Drafts and unknown folders", async () => {
     await client.mailboxOpen("INBOX");
     const raw = await h.raw();
     await raw.login(h.address);
     await raw.command("C1", "SELECT INBOX");
-    assert.match(await raw.command("C2", "COPY 1 Archive"), /^C2 NO \[CANNOT\]/m);
+    assert.match(await raw.command("C2", "COPY 1 INBOX"), /^C2 OK COPY completed \(same mailbox\)/m);
     assert.match(await raw.command("C3", "MOVE 1 Sent"), /^C3 NO \[CANNOT\]/m);
     assert.match(await raw.command("C4", "MOVE 1 Nowhere"), /^C4 NO \[TRYCREATE\]/m);
     assert.match(await raw.command("C5", "CREATE Projects"), /^C5 NO \[CANNOT\]/m);
     raw.end();
   });
 
-  it("accepts and drops APPEND to Sent and Drafts, refuses it elsewhere", async () => {
+  it("drops APPEND to Sent, saves APPEND to Drafts as a client draft, refuses it elsewhere", async () => {
     const messagesBefore = (await h.t.store.listMessages({ limit: 100 })).length;
     const draftsBefore = (await h.t.store.listDrafts()).length;
     const message = Buffer.from(`From: ${h.address}\r\nTo: someone@example.org\r\nSubject: copy\r\n\r\nhello\r\n`);
@@ -200,7 +200,9 @@ describe("IMAP", () => {
     assert.ok(await client.append("Drafts", message, ["\\Draft"]));
     await assert.rejects(() => client.append("INBOX", message));
     assert.equal((await h.t.store.listMessages({ limit: 100 })).length, messagesBefore);
-    assert.equal((await h.t.store.listDrafts()).length, draftsBefore);
+    const drafts = await h.t.store.listDrafts();
+    assert.equal(drafts.length, draftsBefore + 1);
+    assert.ok(drafts.some((draft) => draft.origin === "client" && draft.subject === "copy"));
   });
 
   it("answers malformed input with BAD and keeps the connection usable", async () => {

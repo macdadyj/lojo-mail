@@ -3,10 +3,13 @@ import type { Sessions } from "./session.ts";
 /**
  * `compose` lets Jon's own mail client (the local bridge) draft to any address;
  * other tokens may only draft to known correspondents. It never implies send.
- * `trash` lets the bridge soft-delete (move to Trash). Only the bridge token can
- * hold it, only when LOJO_BRIDGE_TRASH=on, and `admin` does not imply it.
+ * `trash` is soft delete (move to Trash, restorable for the retention window):
+ * the bridge gets it with LOJO_BRIDGE_TRASH=on, an agent token only when Jon
+ * lists it for that agent. `client-send` is Jon pressing Send in Thunderbird:
+ * only the bridge token can hold it, only with LOJO_BRIDGE_SEND=on. `admin`
+ * implies neither.
  */
-export type Scope = "read" | "write" | "send" | "body" | "compose" | "trash" | "admin";
+export type Scope = "read" | "write" | "send" | "body" | "compose" | "trash" | "client-send" | "admin";
 
 export type PrincipalKind = "token" | "human";
 
@@ -32,6 +35,7 @@ function knownScope(value: string): Scope | null {
     case "body":
     case "compose":
     case "trash":
+    case "client-send":
     case "admin":
       return value;
     default:
@@ -39,7 +43,8 @@ function knownScope(value: string): Scope | null {
   }
 }
 
-const BRIDGE_ONLY_SCOPES: readonly Scope[] = ["trash"];
+/** Never in LOJO_API_SCOPES/LOJO_SEND_SCOPES. `trash` is still open to agent tokens (AGENT_SCOPES). */
+const BRIDGE_ONLY_SCOPES: readonly Scope[] = ["trash", "client-send"];
 
 export function parseScopes(value: string | undefined, fallback: Scope[]): Scope[] {
   if (!value) return fallback;
@@ -49,7 +54,7 @@ export function parseScopes(value: string | undefined, fallback: Scope[]): Scope
     if (!token) continue;
     const scope = knownScope(token);
     if (!scope) throw new Error(`Unknown scope ${token}`);
-    if (BRIDGE_ONLY_SCOPES.includes(scope)) throw new Error(`Scope ${scope} belongs to the bridge token only`);
+    if (BRIDGE_ONLY_SCOPES.includes(scope)) throw new Error(`Scope ${scope} is not allowed in a scope list`);
     scopes.push(scope);
   }
   return scopes.length > 0 ? scopes : fallback;
@@ -58,6 +63,7 @@ export function parseScopes(value: string | undefined, fallback: Scope[]): Scope
 export function hasScope(scopes: readonly Scope[], required: Scope): boolean {
   switch (required) {
     case "trash":
+    case "client-send":
       return scopes.includes(required);
     case "read":
     case "write":
@@ -106,14 +112,15 @@ export interface AgentToken {
   scopes: Scope[];
 }
 
-const AGENT_SCOPES: readonly Scope[] = ["read", "write", "body"];
+const AGENT_SCOPES: readonly Scope[] = ["read", "write", "body", "trash"];
 const MIN_AGENT_TOKEN_CHARS = 32;
 
 /**
  * Extra tokens for assistants (Cursor, Grok, a local model), one per client so
  * each can be revoked alone. JSON: `[{ "label": "grok", "token": "...", "scopes": ["read"] }]`.
- * send and admin are refused here: sending needs Jon's approval token, and admin
- * implies send.
+ * send, client-send, compose and admin are refused here: sending needs Jon's
+ * approval token or Jon at Thunderbird, and admin implies send. `trash` is
+ * allowed (soft delete, capped per agent per day).
  */
 /**
  * A malformed agent-token list disables every agent token and keeps the API up,
@@ -179,8 +186,13 @@ export function tokenBookFromEnv(env: NodeJS.ProcessEnv, production: boolean): T
     for (const agent of parseAgentTokens(env.LOJO_AGENT_TOKENS, production)) book.add(agent.token, { label: agent.label, scopes: agent.scopes });
   }
   const bridgeToken = env.LOJO_BRIDGE_TOKEN ?? (production ? "" : "dev-bridge-change-me");
-  if (bridgeToken) addBridgeToken(book, bridgeToken, production, bridgeTrashFromEnv(env));
+  if (bridgeToken) addBridgeToken(book, bridgeToken, production, bridgeOptionsFromEnv(env));
   return book;
+}
+
+export interface BridgeOptions {
+  trash: boolean;
+  send: boolean;
 }
 
 /** Terraform's `bridge_trash_enabled` sets this. Anything but `on` keeps the bridge out of Trash. */
@@ -188,10 +200,26 @@ export function bridgeTrashFromEnv(env: NodeJS.ProcessEnv): boolean {
   return env.LOJO_BRIDGE_TRASH === "on";
 }
 
-/** The bridge token has exactly BRIDGE_SCOPES, plus `trash` when Jon enabled it: never send, never admin. */
-export function addBridgeToken(book: TokenBook, token: string, production: boolean, trash: boolean): void {
+/** Terraform's `bridge_send_enabled` sets this. Anything but `on` keeps Thunderbird sends in the approval queue. */
+export function bridgeSendFromEnv(env: NodeJS.ProcessEnv): boolean {
+  return env.LOJO_BRIDGE_SEND === "on";
+}
+
+export function bridgeOptionsFromEnv(env: NodeJS.ProcessEnv): BridgeOptions {
+  return { trash: bridgeTrashFromEnv(env), send: bridgeSendFromEnv(env) };
+}
+
+/** The bridge label is reserved: only this token is Jon's mail client. */
+export const BRIDGE_LABEL = "bridge";
+
+export function bridgeScopes(options: BridgeOptions): Scope[] {
+  return [...BRIDGE_SCOPES, ...(options.trash ? (["trash"] as const) : []), ...(options.send ? (["client-send"] as const) : [])];
+}
+
+/** The bridge token has exactly BRIDGE_SCOPES, plus `trash` and `client-send` when Jon enabled them: never `send`, never admin. */
+export function addBridgeToken(book: TokenBook, token: string, production: boolean, options: BridgeOptions): void {
   if (production && token.length < MIN_AGENT_TOKEN_CHARS) {
     throw new Error(`The bridge token must be at least ${MIN_AGENT_TOKEN_CHARS} characters`);
   }
-  book.add(token, { label: "bridge", scopes: trash ? [...BRIDGE_SCOPES, "trash"] : [...BRIDGE_SCOPES] });
+  book.add(token, { label: BRIDGE_LABEL, scopes: bridgeScopes(options) });
 }

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { memoryWorld, reviewOf, type WorldOptions } from "@lojo/core/testing";
 import { createApp, type AccessLogEntry } from "./app.ts";
-import { BRIDGE_SCOPES, TokenBook } from "./auth.ts";
+import { BRIDGE_LABEL, bridgeScopes, TokenBook } from "./auth.ts";
 import { LoginThrottle, Sessions, hashPassphrase } from "./session.ts";
 
 export const TEST_PASSPHRASE = "correct horse battery staple";
@@ -9,7 +9,7 @@ export const TEST_PASSPHRASE = "correct horse battery staple";
 let cachedHash: string | null = null;
 
 /** The API over an in-memory mailbox, with read/write/send/body tokens and human sign-in. */
-export async function testApp(opts: WorldOptions & { dev?: boolean; now?: () => Date; bridgeTrash?: boolean } = {}) {
+export async function testApp(opts: WorldOptions & { dev?: boolean; now?: () => Date; bridgeTrash?: boolean; bridgeSend?: boolean } = {}) {
   const world = await memoryWorld(opts);
   cachedHash ??= hashPassphrase(TEST_PASSPHRASE);
   const tokens = new TokenBook(!(opts.dev ?? false));
@@ -18,7 +18,9 @@ export async function testApp(opts: WorldOptions & { dev?: boolean; now?: () => 
   tokens.add("send-token", { label: "send", scopes: ["read", "write", "send"] });
   tokens.add("body-token", { label: "body", scopes: ["read", "body"] });
   tokens.add("admin-token", { label: "admin", scopes: ["admin"] });
-  tokens.add("bridge-token", { label: "bridge", scopes: opts.bridgeTrash ? [...BRIDGE_SCOPES, "trash"] : [...BRIDGE_SCOPES] });
+  tokens.add("bridge-token", { label: BRIDGE_LABEL, scopes: bridgeScopes({ trash: opts.bridgeTrash ?? false, send: opts.bridgeSend ?? false }) });
+  tokens.add("agent-token", { label: "agent:grok", scopes: ["read", "write", "body"] });
+  tokens.add("agent-trash-token", { label: "agent:cursor", scopes: ["read", "write", "body", "trash"] });
   const sessions = new Sessions({
     secret: randomBytes(32),
     passphraseHash: cachedHash,

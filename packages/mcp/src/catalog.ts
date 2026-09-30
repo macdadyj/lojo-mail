@@ -48,6 +48,6 @@ export function toolDefinitions(scopes: readonly Scope[]): ToolDefinition[] {
  * and an over-scoped token is narrowed to what was configured.
  */
 export function effectiveScopes(declared: readonly Scope[], granted: readonly Scope[]): Scope[] {
-  const all: Scope[] = ["read", "write", "send", "body", "admin"];
+  const all: Scope[] = ["read", "write", "send", "body", "trash", "admin"];
   return all.filter((scope) => scope !== "admin" && hasScope(declared, scope) && hasScope(granted, scope));
 }
