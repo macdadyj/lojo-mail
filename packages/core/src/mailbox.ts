@@ -132,6 +132,9 @@ export interface ReviewedDraft {
   attachments?: string[];
 }
 
+/** How an approved draft went out. The Sent copy is filed in the clear either way, so this is the only record. */
+export type SendEncryption = "pgp-mime" | "pgp-inline" | "none";
+
 export interface AttachmentPayload {
   meta: AttachmentMeta;
   bytes?: Uint8Array;
@@ -871,7 +874,7 @@ export class Mailbox {
    * The only path that calls MailSender. It needs a one-time approval token
    * minted by a human session for this exact content.
    */
-  async approveAndSend(draftId: string, approvalToken: string): Promise<{ messageId: string }> {
+  async approveAndSend(draftId: string, approvalToken: string): Promise<{ messageId: string; encryption: SendEncryption }> {
     const sender = this.deps.sender;
     if (!sender) throw new MailError("No sender is configured", "invalid");
     if (!approvalToken) throw new MailError("An approval token is required", "forbidden");
@@ -911,7 +914,8 @@ export class Mailbox {
       throw new MailError("SES did not accept the message. The draft is back to edited and needs a new approval.", "invalid");
     }
     await this.deps.store.putDraft({ ...claimed, status: "sent", sentMessageId: sent.messageId, updatedAt: this.now().toISOString() });
-    await this.audit("send.approved", "sent", { messageId: draftId, detail: sent.messageId });
+    const encryption: SendEncryption = outbound.pgpMime ? "pgp-mime" : outbound.armored ? "pgp-inline" : "none";
+    await this.audit("send.approved", "sent", { messageId: draftId, detail: `${sent.messageId} encryption:${encryption}` });
     const copy = buildRawMessage(
       { ...outbound, armored: undefined, pgpMime: undefined },
       { messageId: sesRfcId(sent.messageId, this.deps.config.region), date: this.now() },
@@ -921,7 +925,7 @@ export class Mailbox {
       const failed = await deleteDraftAttachments(this.deps.blobs, draftId, draft.attachments);
       if (failed > 0) await this.audit("draft.attachment_cleanup", "failed", { messageId: draftId, detail: `${failed} left` });
     }
-    return sent;
+    return { messageId: sent.messageId, encryption };
   }
 
   /** Jon pressing Send in his own mail client (the bridge token's `client-send` scope). No approval token: see client-send.ts. */

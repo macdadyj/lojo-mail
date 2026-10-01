@@ -180,6 +180,7 @@ Every request carries a bearer credential. The API resolves it to a principal wi
    - every file opens under its own context and still hashes to the SHA-256 the approval covers. A file swapped in storage is refused before the draft is claimed.
 4. The draft is claimed with a conditional write (`MailStore.claimDraftForSend`). Two concurrent sends with the same token cannot both win. A replay fails.
 5. If SES rejects the message, the draft goes back to `edited`, the approval is cleared, and Jon must approve again.
+6. The response is `{ messageId, encryption }` with `encryption` one of `pgp-mime`, `pgp-inline` or `none`, and the `send.approved` audit event records it. The copy filed in Sent is stored in the clear either way, so this is the only record of how the message went out.
 
 The web app mints and sends in one click, so for Jon the flow is still one button.
 

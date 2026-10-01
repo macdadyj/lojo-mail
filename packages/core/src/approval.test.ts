@@ -25,6 +25,7 @@ test("an approved draft sends once and files Jon's copy in sent", async () => {
   assert.equal(JSON.stringify(stored).includes(approvalToken), false, "only the hash is stored");
 
   const sent = await w.mailbox.approveAndSend(w.draft.id, approvalToken);
+  assert.equal(sent.encryption, "none");
   assert.equal(w.sender.sent.length, 1);
   assert.equal(w.sender.sent[0]?.text, "Signed copy attached.");
   const after = await w.store.getDraft(w.draft.id);
@@ -34,7 +35,7 @@ test("an approved draft sends once and files Jon's copy in sent", async () => {
   assert.equal(copy?.origin, "sent");
   assert.equal(copy?.deliveryId, `sent:${sent.messageId}`);
   assert.equal(copy?.unread, false);
-  assert.ok((await w.store.listAudit()).some((event) => event.action === "send.approved" && event.detail === sent.messageId));
+  assert.ok((await w.store.listAudit()).some((event) => event.action === "send.approved" && event.detail === `${sent.messageId} encryption:none`));
 });
 
 test("an agent cannot mint an approval", async () => {
