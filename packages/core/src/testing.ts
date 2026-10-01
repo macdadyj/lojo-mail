@@ -98,5 +98,6 @@ export async function reviewOf(mailbox: Mailbox, draftId: string): Promise<Revie
     subject: draft.subject,
     text: text ?? "",
     pgp: draft.pgp,
+    ...(draft.attachments && draft.attachments.length > 0 ? { attachments: draft.attachments.map((file) => file.sha256) } : {}),
   };
 }

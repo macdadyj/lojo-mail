@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
-import { parseMime } from "@lojo/core";
+import { draftAttachmentKey, parseMime } from "@lojo/core";
 import { fixture } from "@lojo/core/testing";
 import type { ImapFlow } from "imapflow";
 import { createTransport } from "nodemailer";
-import { BOT_DRAFT_LABEL } from "./drafts.ts";
+import { BOT_DRAFT_LABEL, SERVER_FILES_LABEL } from "./drafts.ts";
 import { APP_PASSWORD, harness, type Harness, type HarnessOptions } from "./testkit.ts";
 
 const LIMITS = { maxBytes: 4_000_000, maxRecipients: 50, perDay: 200, recipientsPerDay: 500, perTenMinutes: 30 };
@@ -177,6 +178,27 @@ describe("Thunderbird as the mail client: Drafts and bot drafts", () => {
     }
     throw new Error(`draft ${draftId} is not in Drafts`);
   }
+
+  it("a draft with files attached through the API is tagged, and sending it without them is not 'unchanged'", () =>
+    withHarness({}, async (h) => {
+      const draftId = await botDraft(h);
+      const bytes = Buffer.from("quarterly numbers");
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      const added = await h.t.call(`/v1/drafts/${draftId}/attachments`, {
+        token: "agent-token",
+        body: { filename: "numbers.csv", contentType: "text/csv", sha256, data: bytes.toString("base64") },
+      });
+      assert.equal(added.status, 200, added.text);
+      const client = await h.imap();
+      const uid = await draftUid(client, draftId);
+      const meta = await client.fetchOne(String(uid), { flags: true }, { uid: true });
+      assert.ok(meta && meta.flags?.has(SERVER_FILES_LABEL));
+      await transport(h).sendMail({ envelope: { from: h.address, to: ["mina@example.com"] }, raw: await source(client, uid) });
+      const draft = await h.t.store.getDraft(draftId);
+      assert.equal(draft?.status, "sent");
+      assert.equal(draft?.clientSent?.unchanged, false);
+      assert.equal(h.t.blobs.objects.has(draftAttachmentKey(draftId, draft?.attachments?.[0]?.id ?? "")), false, "the sealed file is cleaned up");
+    }));
 
   it("a bot draft appears in Drafts, and sending it unchanged from Thunderbird is the approval", () =>
     withHarness({}, async (h) => {

@@ -35,7 +35,7 @@ type Requirement = Scope | "human";
 
 const PUBLIC_PATHS = new Set(["/v1/health", "/v1/session/login"]);
 
-function statusFor(error: MailError): 400 | 403 | 404 | 409 | 423 | 429 | 502 | 503 {
+function statusFor(error: MailError): 400 | 403 | 404 | 409 | 413 | 423 | 429 | 502 | 503 {
   switch (error.code) {
     case "not_found":
       return 404;
@@ -51,6 +51,8 @@ function statusFor(error: MailError): 400 | 403 | 404 | 409 | 423 | 429 | 502 | 
       return 503;
     case "rate_limited":
       return 429;
+    case "too_large":
+      return 413;
     case "invalid":
     case "budget":
       return 400;
@@ -108,6 +110,16 @@ function isMcpScope(scope: Scope): scope is Exclude<Scope, "client-send"> {
 }
 
 const MAX_CLIENT_SEND_BASE64 = 6_000_000;
+/** One file per request, base64 in JSON, inside Lambda's 6 MB synchronous payload limit. */
+const MAX_ATTACHMENT_BASE64 = 5_600_000;
+const SHA256_HEX = /^[0-9a-fA-F]{64}$/;
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+function sha256List(value: unknown): string[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string" && SHA256_HEX.test(item))) return null;
+  return value as string[];
+}
 
 /** Only Jon's own mail client (the `compose` scope) may draft to people the mailbox has never written to. */
 function draftOriginOf(principal: Principal): "human" | "agent" | "client" {
@@ -346,15 +358,43 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const draft = await mailbox.discardDraft(c.req.param("id"));
     return c.json(await mailbox.getDraft(draft.id));
   });
+  /** Bots may attach too (`write`); only Jon's approval, which names every file by hash, can send them. */
+  app.post("/v1/drafts/:id/attachments", need("write"), async (c) => {
+    const input = await body<{ filename: string; contentType: string; sha256: string; data: string }>(c);
+    if (typeof input.filename !== "string" || typeof input.data !== "string" || typeof input.sha256 !== "string" || !SHA256_HEX.test(input.sha256)) {
+      throw new MailError("filename, sha256 (hex), and data (base64) are required", "invalid");
+    }
+    if (input.data.length > MAX_ATTACHMENT_BASE64) throw new MailError("The file is too large for one message", "too_large");
+    const data = input.data.replace(/\s+/g, "");
+    if (!BASE64.test(data)) throw new MailError("data must be base64", "invalid");
+    const principal = c.get("principal");
+    const draft = await mailbox.addDraftAttachment(
+      c.req.param("id"),
+      {
+        filename: input.filename,
+        contentType: typeof input.contentType === "string" ? input.contentType : "",
+        sha256: input.sha256,
+        data: new Uint8Array(Buffer.from(data, "base64")),
+      },
+      actorOf(principal),
+    );
+    return c.json(await mailbox.getDraft(draft.id, { withText: canReadText(principal) }));
+  });
+  app.post("/v1/drafts/:id/attachments/:attId/remove", need("write"), async (c) => {
+    const principal = c.get("principal");
+    const draft = await mailbox.removeDraftAttachment(c.req.param("id"), c.req.param("attId"), actorOf(principal));
+    return c.json(await mailbox.getDraft(draft.id, { withText: canReadText(principal) }));
+  });
   app.post("/v1/drafts/:id/approval", need("human"), async (c) => {
     const input = await body<ReviewedDraft>(c);
     const to = strings(input.to, "to");
     const cc = strings(input.cc, "cc");
     const pgp = pgpMode(input.pgp);
-    if (!to || !cc || !pgp || typeof input.subject !== "string" || typeof input.text !== "string") {
-      throw new MailError("Send the reviewed to, cc, subject, text, and pgp", "invalid");
+    const attachments = sha256List(input.attachments);
+    if (!to || !cc || !pgp || !attachments || typeof input.subject !== "string" || typeof input.text !== "string") {
+      throw new MailError("Send the reviewed to, cc, subject, text, and pgp, and attachments as a list of SHA-256 hashes", "invalid");
     }
-    const reviewed: ReviewedDraft = { to, cc, subject: input.subject, text: input.text, pgp };
+    const reviewed: ReviewedDraft = { to, cc, subject: input.subject, text: input.text, pgp, attachments };
     return c.json(await mailbox.mintApproval(c.req.param("id"), actorOf(c.get("principal")), reviewed));
   });
   app.post("/v1/drafts/:id/approve-and-send", need("send"), async (c) => {
@@ -432,6 +472,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       budgetUsed: await mailbox.store.getBudget(day),
       unlocked: mailbox.unlocked,
       envelopeKeyFingerprint: await keyFingerprint(mailbox.publicJwk),
+      draftAttachments: mailbox.draftAttachmentLimits,
       dev: deps.dev,
       principal: c.get("principal").kind,
     });
