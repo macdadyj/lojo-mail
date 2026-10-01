@@ -9,8 +9,9 @@ import type { Sessions } from "./session.ts";
  * lists it for that agent. `client-send` is Jon pressing Send in Thunderbird:
  * only the bridge token can hold it, only with LOJO_BRIDGE_SEND=on. `rules`
  * (bot-authored rules), `test-send` (mail to lojo-test only), `send-approved`
- * (replies Jon approved in chat) and `send-new` (those replies to new
- * recipients) exist only on bot credentials (bots.ts). `admin` implies none of these.
+ * (replies Jon approved in chat) and `send-new` (a new message to anyone,
+ * off unless Jon grants it, plus those replies to new recipients) exist only
+ * on bot credentials (bots.ts). `admin` implies none of these.
  */
 export type Scope =
   | "read"

@@ -13,6 +13,8 @@ export interface ApprovalContent {
   inReplyTo?: string;
   pgp: PgpMode;
   attachments?: Pick<DraftAttachment, "sha256" | "filename" | "contentType">[];
+  /** Blind recipients. Omitted from the hash when empty, so older approvals still match. */
+  bcc?: Address[];
 }
 
 /**
@@ -31,6 +33,8 @@ export function approvalContentHash(content: ApprovalContent): string {
   ];
   const files = content.attachments ?? [];
   if (files.length > 0) fields.push(files.map((file) => [file.sha256.toLowerCase(), file.filename, file.contentType]));
+  const bcc = content.bcc ?? [];
+  if (bcc.length > 0) fields.push(bcc.map((address) => address.email.toLowerCase()));
   return sha256(JSON.stringify(fields));
 }
 

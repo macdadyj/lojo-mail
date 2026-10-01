@@ -167,6 +167,9 @@ export function buildRawMessage(message: OutboundMessage, extra: RawHeaders = {}
   if (message.autoReplied) {
     lines.push("Auto-Submitted: auto-replied");
     lines.push("X-Auto-Response-Suppress: All");
+  } else if (message.botSendNew) {
+    lines.push("X-Lojo-Bot: send-new");
+    lines.push("X-Auto-Response-Suppress: All");
   }
   lines.push("MIME-Version: 1.0");
   lines.push(...messageBody(message));

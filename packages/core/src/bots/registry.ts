@@ -4,12 +4,14 @@ import { sha256 } from "../ids.ts";
 import type { EcPublicJwk } from "../types.ts";
 
 import type { ChatSendLimits } from "./chat-send.ts";
+import type { BotSendGrant } from "./grant.ts";
 
 /**
  * What a bot credential can hold. Never send, compose, client-send or admin:
  * a bot's drafts wait for Jon unless he grants `send-approved` (replies he
  * approved in chat, bots/chat-send.ts), and `test-send` only ever reaches
- * LOJO_TEST_RECIPIENT. `send-new` widens `send-approved` to new recipients.
+ * LOJO_TEST_RECIPIENT. `send-new` lets `send_new` start a message to anyone
+ * (off unless Jon grants it) and also widens `send-approved` to new recipients.
  */
 export type BotScope = "read" | "write" | "body" | "trash" | "rules" | "test-send" | "send-approved" | "send-new";
 
@@ -27,8 +29,10 @@ export interface BotRecord {
   createdAt: string;
   rotatedAt?: string;
   revokedAt?: string;
-  /** Chat-approved send limits Jon set; DEFAULT_CHAT_SEND_LIMITS when absent. */
+  /** Chat-approved and send-new limits Jon set; DEFAULT_CHAT_SEND_LIMITS when absent. */
   sendLimits?: ChatSendLimits;
+  /** Time-boxed caps and whether send-new needs a chat approval. Cleared when it expires. */
+  sendGrant?: BotSendGrant;
 }
 
 /** The public half of the bot's envelope key. The private half stays on Santa with the bot. */

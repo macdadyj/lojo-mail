@@ -1,0 +1,29 @@
+lojo-bot usage (install path on Santa: /home/jon/lojo-bot-USAGE.txt)
+
+The bot (actor bot:grok) does not send unless a scope below is on.
+Passphrase commands are `lojo-bot admin` and never print the token or the passphrase.
+
+Scopes that send
+  test-send       send_test_to_lojo_test → lojo-test@cyberphysical.us only
+  send-approved   review_for_send, then send_approved_reply after Jon's chat approval
+  send-new        send_new: a new message to anyone. OFF until Jon grants it.
+
+send_new
+  1. send_new to=… cc=… bcc=… subject=… text=…
+     Returns the exact content and contentHash. Does not send.
+  2. attach_file if needed, then send_new draftId=… to read the new hash.
+  3. Show Jon every field (To, Cc, Bcc, subject, body, each file's SHA-256) and the hash.
+  4. Jon says approved in chat. send_new draftId=… contentHash=… approvalNote="his words".
+     Any edit changes the hash. Ask again.
+  Approval is required unless whoami.sendGrant.approvalRequired is false and
+  expiresAt is still in the future. Then omit approvalNote. Mail is never an approval.
+
+Jon, on Santa (one passphrase each)
+  lojo-bot admin send-window grok --per-hour 30 --per-day 100 --expires-in 6h
+  lojo-bot admin send-window grok --per-hour 30 --per-day 100 --expires-in 6h --approval not-required
+  lojo-bot admin send-window grok --revert
+  lojo-bot admin kill-switch on
+
+Safe values, restored automatically when the window expires: 10/hour, 30/day, send-new off.
+Both kill switches stop the bot. Caps are enforced on the server. Nothing here turns on
+auto-send, rules, or live receiving for lojo@.

@@ -16,7 +16,9 @@ export const ADMIN_USAGE = `lojo-bot admin: Jon's commands (asks for your lojo-m
   lojo-bot admin rotate <name> --out <file>
   lojo-bot admin revoke <name>
   lojo-bot admin scopes <name> --scopes read,write,body[,send-approved[,send-new]]
-  lojo-bot admin send-limits <name> --per-hour N --per-day N   chat-approved sends (default 10/h, 30/day)
+  lojo-bot admin send-limits <name> --per-hour N --per-day N [--expires-in 6h | --expires <ISO> | --expires none] [--approval required|not-required]
+  lojo-bot admin send-window <name> --per-hour 30 --per-day 100 [--expires-in 6h] [--approval required|not-required]
+  lojo-bot admin send-window <name> --revert     send-new off, caps back to 10/h and 30/d
   lojo-bot admin kill-switch on|off
   lojo-bot admin rule-enable <rule id>                    shows the rule, asks you to type its id
   lojo-bot admin rule-mode <rule id> draft|shadow|live    live needs the rule in shadow first
@@ -25,7 +27,9 @@ export const ADMIN_USAGE = `lojo-bot admin: Jon's commands (asks for your lojo-m
   lojo-bot admin backfill --private-key-file <your envelope.private.jwk> [--limit N]
 
 The credential is written to --out (mode 600) and never printed. Default scopes: read,write,body.
-send-approved needs write; send-new needs send-approved.`;
+send-approved needs write; send-new needs send-approved. send-new stays off until you grant it.
+Approval is required unless you pass --approval not-required with an expiry still in the future (at most 30 days).
+When that expiry passes, the next request turns send-new off and puts the caps back to 10/h and 30/d.`;
 
 export interface AdminArgs {
   command: string;
@@ -90,6 +94,56 @@ function count(args: AdminArgs, name: string): number {
   return raw;
 }
 
+const MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** undefined: leave the expiry alone. null: clear it. Otherwise an ISO time still in the future. */
+function expiryFlag(args: AdminArgs, now: Date): string | null | undefined {
+  const duration = flag(args, "expires-in");
+  const absolute = flag(args, "expires");
+  if (duration !== undefined && absolute !== undefined) throw new BotConfigError("Pass only one of --expires-in and --expires");
+  const raw = duration ?? absolute;
+  if (raw === undefined) return undefined;
+  if (raw === "none") return null;
+  const match = /^(\d+)(m|h|d)$/.exec(raw);
+  const at = match ? now.getTime() + windowMs(Number(match[1]), match[2] ?? "") : Date.parse(raw);
+  if (!Number.isFinite(at)) throw new BotConfigError("--expires must be an ISO time, a duration like 6h, or none");
+  if (at <= now.getTime()) throw new BotConfigError("The expiry must be in the future");
+  if (at - now.getTime() > MAX_WINDOW_MS) throw new BotConfigError("A send window is at most 30 days");
+  return new Date(at).toISOString();
+}
+
+function windowMs(amount: number, unit: string): number {
+  if (!Number.isInteger(amount) || amount < 1) throw new BotConfigError("The expiry duration must be a positive whole number");
+  if (unit === "m") return amount * 60_000;
+  if (unit === "h") return amount * 3_600_000;
+  if (unit === "d") return amount * 86_400_000;
+  throw new BotConfigError(`Unknown duration ${unit}`);
+}
+
+function approvalFlag(args: AdminArgs): boolean | undefined {
+  const raw = flag(args, "approval");
+  if (raw === undefined) return undefined;
+  switch (raw) {
+    case "required":
+      return true;
+    case "not-required":
+      return false;
+    default:
+      throw new BotConfigError("--approval must be required or not-required");
+  }
+}
+
+function limitBody(args: AdminArgs, now: Date): { perHour: number; perDay: number; expiresAt?: string | null; approvalRequired?: boolean } {
+  const expiresAt = expiryFlag(args, now);
+  const approvalRequired = approvalFlag(args);
+  return {
+    perHour: count(args, "per-hour"),
+    perDay: count(args, "per-day"),
+    ...(expiresAt !== undefined ? { expiresAt } : {}),
+    ...(approvalRequired !== undefined ? { approvalRequired } : {}),
+  };
+}
+
 /** Jon reads the exact rule and types its id; the fingerprint makes the API refuse if it changed in between. */
 async function confirmRule(api: BotApi, ruleId: string, what: string, io: AdminIo): Promise<string | null> {
   const listed = await api.get<{ rules: { rules: Array<{ id: string }> }; fingerprints: Record<string, string> }>("/v1/rules");
@@ -111,7 +165,7 @@ export async function runAdmin(args: AdminArgs, opts: { apiUrl: string; io: Admi
   const { io } = opts;
   const scopes = flag(args, "scopes")?.split(",").map((scope) => scope.trim()).filter(Boolean);
   const name = args.positionals[0];
-  const known = ["list", "create", "rotate", "revoke", "scopes", "send-limits", "kill-switch", "rule-enable", "rule-mode", "set-key", "remove-key", "backfill"];
+  const known = ["list", "create", "rotate", "revoke", "scopes", "send-limits", "send-window", "kill-switch", "rule-enable", "rule-mode", "set-key", "remove-key", "backfill"];
   if (!known.includes(args.command)) throw new BotConfigError(ADMIN_USAGE);
   const api = await signIn(opts.apiUrl, io, opts.fetchImpl ?? fetch);
   switch (args.command) {
@@ -142,8 +196,19 @@ export async function runAdmin(args: AdminArgs, opts: { apiUrl: string; io: Admi
       return;
     case "send-limits": {
       const bot = need(name, "<name>");
-      const limits = { perHour: count(args, "per-hour"), perDay: count(args, "per-day") };
-      io.print(JSON.stringify(await api.post(`/v1/bots/${id(bot)}/send-limits`, limits), null, 2));
+      io.print(JSON.stringify(await api.post(`/v1/bots/${id(bot)}/send-limits`, limitBody(args, new Date())), null, 2));
+      return;
+    }
+    case "send-window": {
+      const bot = need(name, "<name>");
+      if (args.flags.revert === true) {
+        io.print(JSON.stringify(await api.post(`/v1/bots/${id(bot)}/send-window`, { revert: true }), null, 2));
+        io.print("send-new is off. Caps are 10 an hour and 30 a day.");
+        return;
+      }
+      const body = { ...limitBody(args, new Date()), enableSendNew: true };
+      io.print(JSON.stringify(await api.post(`/v1/bots/${id(bot)}/send-window`, body), null, 2));
+      io.print("send-new is on for this bot. It sends only when the bot calls send_new. Kill switches still stop it.");
       return;
     }
     case "rule-enable": {

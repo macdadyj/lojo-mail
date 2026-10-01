@@ -29,8 +29,9 @@ Environment
   LOJO_BOT_STATE_DIR    default ~/.local/state/lojo-bot (the digest cursor)
   LOJO_BOT_ATTACH_DIR   default ~/lojo-bot-files (the only place attach_file reads)
 
-Nothing here sends mail except send_test_to_lojo_test, which reaches lojo-test@cyberphysical.us only.
-Drafts wait for Jon in Thunderbird and the web app.`;
+Nothing here sends mail except send_test_to_lojo_test (lojo-test@cyberphysical.us only),
+send_approved_reply (a reply Jon approved in chat), and send_new (a new message,
+only when Jon has granted send-new). Other drafts wait for Jon.`;
 
 async function ask(question: string, hidden: boolean): Promise<string> {
   if (!process.stdin.isTTY) throw new BotConfigError("lojo-bot admin asks for your passphrase on a terminal");

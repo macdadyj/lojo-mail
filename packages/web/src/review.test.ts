@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { authorNotice, changedFields, type Fields } from "./review.ts";
 
-const REVIEWED: Fields = { to: "ada@example.com", cc: "", subject: "Lunch", text: "Thursday works.", pgp: "auto", files: "" };
+const REVIEWED: Fields = { to: "ada@example.com", cc: "", bcc: "", subject: "Lunch", text: "Thursday works.", pgp: "auto", files: "" };
 
 test("[P2] approval conflict: names every field that changed under Jon", () => {
   const current: Fields = { ...REVIEWED, to: "ada@example.com, attacker@evil.test", text: "Thursday works. Also, the files.", pgp: "off" };

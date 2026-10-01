@@ -32,6 +32,17 @@ export { APPROVAL_TTL_MS, approvalContentHash, hashApprovalToken, newApprovalTok
 export { FsBlobStore, MemoryBlobStore, RULES_KEY, aiContextKey, attachmentKey, bodyKey, botCopyKey, draftAttachmentKey } from "./blob/store.ts";
 export { BotAdmin, botScopes } from "./bots/admin.ts";
 export {
+  applySendGrantExpiry,
+  applySendWindow,
+  grantExpired,
+  MAX_SEND_GRANT_MS,
+  parseGrantExpiry,
+  persistExpiredSendGrants,
+  sendNewApprovalRequired,
+  TEST_WINDOW_SEND_LIMITS,
+} from "./bots/grant.ts";
+export type { BotSendGrant, SendWindowInput } from "./bots/grant.ts";
+export {
   approvalNoteRefusals,
   CHAT_APPROVAL_SOURCE,
   chatSendLimits,

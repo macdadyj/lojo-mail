@@ -48,7 +48,17 @@ function excerptOf(text: string): string {
 }
 
 /** What sent, or would have sent, on Jon's behalf: unsubscribes, shadow and live rule replies, chat-approved and test sends. */
-const AUTOMATION_ACTIONS = new Set(["rule.unsubscribe", "rule.shadow", "rule.autosend", "send.chat_approved", "send.chat_refused", "bot.test_send"]);
+const AUTOMATION_ACTIONS = new Set([
+  "rule.unsubscribe",
+  "rule.shadow",
+  "rule.autosend",
+  "send.chat_approved",
+  "send.chat_refused",
+  "bot.send_new",
+  "bot.send_new_refused",
+  "bot.send_grant_expired",
+  "bot.test_send",
+]);
 const AUDIT_SCAN = 500;
 
 interface AuditRow {

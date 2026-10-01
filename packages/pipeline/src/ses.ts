@@ -8,6 +8,7 @@ export function sesInput(message: OutboundMessage, configurationSet?: string): S
     Destination: {
       ToAddresses: message.to.map((item) => item.email),
       CcAddresses: message.cc.map((item) => item.email),
+      ...((message.bcc ?? []).length > 0 ? { BccAddresses: (message.bcc ?? []).map((item) => item.email) } : {}),
     },
     ConfigurationSetName: configurationSet,
     Content: { Raw: { Data: new TextEncoder().encode(buildRawMessage(message)) } },

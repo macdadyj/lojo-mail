@@ -93,6 +93,8 @@ test("the approval names every file: a missing, extra, or swapped file is a conf
 test("a draft without files hashes exactly as before", () => {
   const content = { from: "lojo@cyberphysical.us", to: [{ email: "a@example.com" }], cc: [], subject: "s", text: "t", pgp: "auto" as const };
   assert.equal(approvalContentHash({ ...content, attachments: [] }), approvalContentHash(content));
+  assert.equal(approvalContentHash({ ...content, bcc: [] }), approvalContentHash(content));
+  assert.notEqual(approvalContentHash({ ...content, bcc: [{ email: "hidden@example.com" }] }), approvalContentHash(content));
   const file = { sha256: sha256(PHOTO), filename: "a.jpg", contentType: "image/jpeg" };
   assert.notEqual(approvalContentHash({ ...content, attachments: [file] }), approvalContentHash(content));
   assert.notEqual(approvalContentHash({ ...content, attachments: [file] }), approvalContentHash({ ...content, attachments: [{ ...file, filename: "b.jpg" }] }));

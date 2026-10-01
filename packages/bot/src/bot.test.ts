@@ -260,11 +260,11 @@ test("the MCP server advertises only the tools the credential may call, results 
 
 test("every op name required by the plan exists", () => {
   const names = ops.map((item) => item.name);
-  for (const required of ["list_inbox", "read_message", "search", "digest", "draft_reply", "create_draft", "attach_file", "list_drafts", "discard_draft", "move_message", "trash_message", "list_rules", "upsert_rule", "delete_rule", "health", "audit_log", "settings", "send_test_to_lojo_test"]) {
+  for (const required of ["list_inbox", "read_message", "search", "digest", "draft_reply", "create_draft", "attach_file", "list_drafts", "discard_draft", "move_message", "trash_message", "list_rules", "upsert_rule", "delete_rule", "health", "audit_log", "settings", "send_test_to_lojo_test", "send_new"]) {
     assert.ok(names.includes(required), required);
   }
   assert.equal(
-    ops.some((item) => item.scopes.some((scope) => !["read", "write", "body", "trash", "rules", "test-send", "send-approved"].includes(scope))),
+    ops.some((item) => item.scopes.some((scope) => !["read", "write", "body", "trash", "rules", "test-send", "send-approved", "send-new"].includes(scope))),
     false,
   );
 });
@@ -359,4 +359,33 @@ test("admin send-limits, and rule-enable / rule-mode only after Jon types the ru
   const action = (await rule())?.actions[0];
   assert.equal(action?.type === "reply" ? action.reply.mode : null, "autoSend");
   await assert.rejects(runAdmin({ command: "rule-mode", positionals: ["ack", "loud"], flags: {} }, { apiUrl: API, io: answers("ack"), fetchImpl: fetchFor(app) }), /draft\|shadow\|live/);
+});
+
+test("send_new is hidden until Jon opens a window, then composes without sending until the hash and his words come back", async () => {
+  const app = await testApp();
+  const plain = await setUp(app, "read,write,body,send-approved", false);
+  assert.equal(allowedOps(plain.ctx.scopes).some((item) => item.name === "send_new"), false);
+  await assert.rejects(runOp("send_new", { to: ["ada@elsewhere.example"], subject: "Hi", text: "Hello from the dock." }, plain.ctx), /send-new scope/);
+
+  const opened = await admin(app, "send-window", ["grok"], { "per-hour": "30", "per-day": "100", "expires-in": "6h", approval: "required" });
+  assert.match(opened.join("\n"), /send-new/);
+  const ctx = await botContext(plain.santa.env, fetchFor(app));
+  assert.ok(allowedOps(ctx.scopes).some((item) => item.name === "send_new"));
+  const drafted = (await runOp("send_new", { to: ["ada@elsewhere.example"], bcc: ["hidden@elsewhere.example"], subject: "Harbor", text: "Friday at the dock." }, ctx)) as {
+    sent: boolean;
+    draftId: string;
+    contentHash: string;
+    bcc: string[];
+  };
+  assert.equal(drafted.sent, false);
+  assert.deepEqual(drafted.bcc, ["hidden@elsewhere.example"]);
+  assert.equal(app.sender.sent.length, 0);
+  const sent = (await runOp("send_new", { draftId: drafted.draftId, contentHash: drafted.contentHash, approvalNote: "Jon: yes, send the new one" }, ctx)) as { approval: string };
+  assert.equal(sent.approval, "chat");
+  assert.equal(app.sender.sent.length, 1);
+
+  const rolled = await admin(app, "send-window", ["grok"], { revert: true });
+  assert.match(rolled.join("\n"), /send-new is off/);
+  const after = await botContext(plain.santa.env, fetchFor(app));
+  assert.equal(after.scopes.includes("send-new"), false);
 });

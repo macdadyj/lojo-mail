@@ -44,10 +44,14 @@ export function BotsPanel() {
                   {scope}
                 </span>
               ))}
-              {bot.scopes.includes("send-approved") ? (
+              {bot.scopes.includes("send-approved") || bot.scopes.includes("send-new") ? (
                 <span className="muted">
                   {" "}
-                  chat-approved sends: {bot.sendLimits?.perHour ?? 10}/hour, {bot.sendLimits?.perDay ?? 30}/day
+                  sends: {bot.sendLimits?.perHour ?? 10}/hour, {bot.sendLimits?.perDay ?? 30}/day
+                  {bot.scopes.includes("send-new")
+                    ? `, new mail approval ${bot.sendGrant?.approvalRequired === false ? "not required" : "required"}`
+                    : ""}
+                  {bot.sendGrant?.expiresAt ? `, window ends ${bot.sendGrant.expiresAt}` : ""}
                 </span>
               ) : null}
             </li>

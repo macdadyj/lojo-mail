@@ -10,7 +10,7 @@ class DraftConflict extends Error {
   }
 }
 
-const EMPTY: Fields = { to: "", cc: "", subject: "", text: "", pgp: "auto", files: "" };
+const EMPTY: Fields = { to: "", cc: "", bcc: "", subject: "", text: "", pgp: "auto", files: "" };
 
 function list(value: string): string[] {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
@@ -20,6 +20,7 @@ function fieldsOf(view: DraftView): Fields {
   return {
     to: view.draft.to.map((item) => item.email).join(", "),
     cc: view.draft.cc.map((item) => item.email).join(", "),
+    bcc: (view.draft.bcc ?? []).map((item) => item.email).join(", "),
     subject: view.draft.subject,
     text: view.text ?? "",
     pgp: view.draft.pgp,
@@ -32,17 +33,18 @@ function filesOf(draft: Draft): string {
 }
 
 function same(a: Fields, b: Fields): boolean {
-  return a.to === b.to && a.cc === b.cc && a.subject === b.subject && a.text === b.text && a.pgp === b.pgp;
+  return a.to === b.to && a.cc === b.cc && a.bcc === b.bcc && a.subject === b.subject && a.text === b.text && a.pgp === b.pgp;
 }
 
 function payloadOf(fields: Fields) {
-  return { to: list(fields.to), cc: list(fields.cc), subject: fields.subject, text: fields.text, pgp: fields.pgp };
+  return { to: list(fields.to), cc: list(fields.cc), bcc: list(fields.bcc), subject: fields.subject, text: fields.text, pgp: fields.pgp };
 }
 
 /** What Jon reviewed, including every file by hash; `attachments` is left out when there are none, as servers before files expect. */
 function approvalOf(fields: Fields) {
   const files = list(fields.files);
-  return { ...payloadOf(fields), ...(files.length > 0 ? { attachments: files } : {}) };
+  const bcc = list(fields.bcc);
+  return { ...payloadOf(fields), ...(bcc.length > 0 ? { bcc } : {}), ...(files.length > 0 ? { attachments: files } : {}) };
 }
 
 function size(bytes: number): string {
@@ -218,6 +220,8 @@ export function Compose({ draftId }: { draftId?: string }) {
       <input id="to" value={fields.to} disabled={closed} onChange={(event) => set("to", event.target.value)} placeholder="ada@example.com" />
       <label htmlFor="cc">Cc</label>
       <input id="cc" value={fields.cc} disabled={closed} onChange={(event) => set("cc", event.target.value)} />
+      <label htmlFor="bcc">Bcc</label>
+      <input id="bcc" value={fields.bcc} disabled={closed} onChange={(event) => set("bcc", event.target.value)} placeholder="Hidden from the other recipients" />
       <label htmlFor="subject">Subject</label>
       <input id="subject" value={fields.subject} disabled={closed} onChange={(event) => set("subject", event.target.value)} />
       <label htmlFor="body">Message</label>
