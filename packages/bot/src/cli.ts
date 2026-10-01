@@ -1,4 +1,5 @@
 #!/usr/bin/env -S npx tsx
+import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { Writable } from "node:stream";
 import { keyFingerprint } from "@lojo/core";
@@ -15,6 +16,7 @@ const USAGE = `lojo-bot: Jon's bot on lojo-mail (Grok Bot, or any shell agent on
   lojo-bot ops [--all]                 operations this credential may run
   lojo-bot <operation> [--arg value]   one operation; JSON on stdout
   lojo-bot <operation> --json '{...}'
+  lojo-bot <operation> --json -        arguments as JSON on stdin (for ssh, where quoting is lost)
   lojo-bot digest [--peek]             new mail since the last digest, summary-ready JSON
   lojo-bot mcp                         stdio MCP server with the same operations
   lojo-bot key generate [--force]      bot envelope key (run as the bot user); prints the public half for Jon
@@ -71,6 +73,7 @@ async function key(sub: string | undefined, force: boolean): Promise<void> {
 async function main(argv: string[]): Promise<void> {
   const [command, ...rest] = argv;
   const parsed = parseArgv(rest);
+  if (parsed.flags.json === "-") parsed.flags.json = readFileSync(0, "utf8");
   switch (command) {
     case undefined:
     case "help":
