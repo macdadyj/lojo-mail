@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, apiUrl, apiUrlOverride, builtApiUrl, setApiUrlOverride, signOut } from "./api.ts";
+import { BotsPanel } from "./Bots.tsx";
 import { KeyPanel } from "./KeyPanel.tsx";
 import { RulesPanel } from "./Rules.tsx";
 import type { Settings as SettingsInfo } from "./types.ts";
@@ -35,6 +36,8 @@ export function Settings() {
       <KeyPanel info={info} />
       <h3>Mail rules</h3>
       <RulesPanel />
+      <h3>Bots</h3>
+      <BotsPanel />
       <h3>API</h3>
       <ApiUrlField />
       <div className="actions flush">
