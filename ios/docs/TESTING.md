@@ -37,11 +37,42 @@ only choose what is on screen; none of them sends or changes mail.
 | `LOJO_DRAFT` | a draft ID (default: first open draft) |
 | `LOJO_SEARCH` | a search query |
 | `LOJO_COMPOSE_TO` | prefilled recipient |
+| `LOJO_COMPOSE_SAMPLES` | `1`: Compose opens with a generated photo and a text file attached (memory only) |
+
+Several iPhones on USB: every phone script needs `LOJO_PHONE` (`"14 Pro Max"`, `"11"`) or `LOJO_UDID`, and lists the
+attached models if it is missing. `ios/scripts/retake-screenshots.sh [01 08 …]` retakes the README screenshots from
+the installed build (launch only).
 
 Verified on the iPhone 11 (iOS 26.6.2) by screenshot: sign-in, Inbox from the live API, a thread with its body
 decrypted on the phone, an image attachment decrypted and shown in Quick Look, server search, Sent and Trash, a
 trashed thread with "Trashed by you", compose, the send confirmation, the review queue, a queued draft, AI Rules with
 both kill switches, Settings, and key setup.
+
+## Tester pass for attachments and the interface (2026-09-30)
+
+Built with `deploy-phone.sh --build`, core tests and `--live-write` green against the deployed API (the approval body
+is unchanged when a draft has no files). **Not installed on a phone** (Jon installs), so the new screens were checked
+by reading every view and flow, not on a device. Sign-in and key setup were retaken from the 14 Pro Max's installed
+build, whose screens match this code. Defects found and fixed:
+
+- With two iPhones attached, `deploy-phone.sh` installed on whichever USB listed first and `phone-shot.sh` let
+  pymobiledevice3 choose; they now require `LOJO_PHONE` / `LOJO_UDID` when there is more than one.
+- `phone-shot.sh` captured a black screen on a cold launch (6 s wait); the default is now 10 s.
+- The 14 Pro Max writes 16-bit 1290 px PNGs; screenshots are now converted to 8-bit 828 px to match the rest.
+- Teal text was 3.8:1 on dark grouped cards (under 4.5:1); the accent now has light and dark variants.
+- Chip rows (thread, list, rules) clipped at large text sizes; they wrap now. The avatar and lock icon didn't scale.
+  List rows at accessibility sizes now put the date under the sender.
+- The thread stretched edge to edge on iPad landscape; it now has a readable width. iPad allows all orientations.
+- Review: swipe to discard ignored failures silently; a draft without recipients showed a bare "To:".
+- Settings: a changed server URL only applied from the keyboard's Return key; there's now a button. Settings also
+  shows whether the server accepts attachments from the app.
+- Compose: an attachment error appeared at the bottom of the form, far from the paperclip. Closing with "Save draft"
+  silently dropped files the server can't store; the dialog now says so. A disabled Approve button didn't say why.
+- Cancelling Save to Files could surface a "user cancelled" error.
+
+Still to check on the phone after installing: the three pickers (the camera asks for permission the first time), the
+size meter and the "too big" message with a large file, Share… and Save to Files on a received attachment, the
+interface at the largest Dynamic Type size and with VoiceOver, and an iPad if one is handy.
 
 ## Not tested yet
 
@@ -60,5 +91,6 @@ both kill switches, Settings, and key setup.
 - **Reply/forward into real threads** (`threadId`/`inReplyTo`), **AI reply** and **AI rewrite** against the live
   LLM, and **PGP** modes other than auto.
 - **HTML mail** renders as text (the app converts HTML to plain text when a message has no text part).
-- **Large attachments** (only a 70 KB vector and the one real image), and attachment types Quick Look can't show.
-- Dynamic Type at the largest accessibility sizes, and VoiceOver end to end.
+- **Large received attachments** (only a 70 KB vector and the one real image), and types Quick Look can't show.
+- **Sending attachments** end to end: needs the server change in API-ATTACHMENTS.md first.
+- Dynamic Type at the largest accessibility sizes, and VoiceOver end to end, on a device.

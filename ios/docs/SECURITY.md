@@ -35,8 +35,14 @@ The web app's threat model (`docs/SECURITY.md`) still applies. This covers what 
 - **Decrypted bodies live in memory only** and are dropped on sign-out.
 - **Metadata cache** (from, subject, snippet, flags; no bodies, no AI text) in Application Support with
   `completeUntilFirstUserAuthentication` file protection, excluded from backup. Cleared on sign-out.
-- **Attachments** are decrypted to a temp file with `complete` file protection, shown in Quick Look, deleted on
-  close, and the temp directory is purged on launch.
+- **Received attachments** are decrypted to a temp file with `complete` file protection for Quick Look, Share… or
+  Save to Files, deleted when that closes (Save to Files moves the file out), and the temp directory is purged on
+  launch and sign-out.
+- **Attachments you add in Compose** are held in memory only, never written to the phone's disk. Photos are
+  re-encoded as JPEG, which drops EXIF location. Files from Files are sent as they are. On a server with draft
+  attachments, each file is uploaded with its SHA-256 and the approval names those hashes, so a bot can't swap a file
+  after Jon reviewed it ([API-ATTACHMENTS.md](API-ATTACHMENTS.md)). The camera permission is only asked when you tap
+  Take Photo.
 - Optional **Face ID lock** covers the UI when the app returns from the background.
 
 ## Sending

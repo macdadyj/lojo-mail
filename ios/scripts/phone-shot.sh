@@ -4,7 +4,7 @@
 # Keys are the QA launch variables in ios/docs/TESTING.md, e.g.
 #   ios/scripts/phone-shot.sh ios/docs/screenshots/01-inbox.png LOJO_SCREEN=inbox
 #   ios/scripts/phone-shot.sh /tmp/thread.png LOJO_SCREEN=thread
-# Wait time before the capture: LOJO_SHOT_WAIT (seconds, default 6). Several iPhones attached: set LOJO_PHONE.
+# Wait time before the capture: LOJO_SHOT_WAIT (seconds, default 10; a cold launch takes longer than 6). Several iPhones attached: set LOJO_PHONE.
 set -euo pipefail
 
 OUT="$1"; shift
@@ -13,7 +13,7 @@ IOS="$(cd "$(dirname "$0")/.." && pwd)"
 source "$IOS/scripts/phone-lib.sh"
 lojo_pick_phone || exit 1
 BUNDLE="${LOJO_BUNDLE:-XTL-HG9HAYXW44.com.lojo.Mail}"
-WAIT="${LOJO_SHOT_WAIT:-6}"
+WAIT="${LOJO_SHOT_WAIT:-10}"
 
 args=()
 for kv in "$@"; do args+=(--env "$kv"); done

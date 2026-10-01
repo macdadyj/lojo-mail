@@ -21,11 +21,20 @@ signed with a free Apple ID and installed over USB, the same way as
   (filters the loaded list as you type, searches the server on Return); swipe to mark read, star, archive, trash
   (soft delete, restorable for the retention period) and restore; Move to any folder from the context menu.
 - **Reading**: bodies decrypted on the phone ("Sealed to your key"), links detected, AI summary and phishing warning,
-  sender verdicts, attachments decrypted and opened in Quick Look (temporary file, deleted when closed).
+  sender verdicts. Attachments are decrypted on tap: preview in Quick Look, or from the row's menu (or a long press)
+  **Share…** or **Save to Files**. The decrypted copy is a temporary file, deleted when the preview or sheet closes.
 - **Writing**: compose, reply, reply all, forward, and "AI reply". Save a draft, put it in the approval queue, ask the
   AI to rewrite it, or **Approve and send** behind a confirmation that names the recipients and the From address. The
   approval is bound to the exact reviewed content; if a bot changed the draft meanwhile, the app shows what changed and
   makes you look before it will send.
+- **Attachments in Compose**: the paperclip (toolbar or the Attachments section) adds photos from the library, a new
+  photo from the camera, or any file from Files. Each shows its name, size and a remove button, with a meter against
+  the **4 MB message limit** (the same limit as Thunderbird's direct send, counted after base64 encoding: about
+  2.9 MB of files). Photos go out as JPEG without location data, shrunk if they wouldn't fit. Files stay in memory.
+  **The deployed API can't take attachments on drafts yet**, so on today's server the app shows the files but won't
+  send or queue a draft that has any; it says so in Compose and Settings. The change the server needs is written up
+  in [docs/API-ATTACHMENTS.md](docs/API-ATTACHMENTS.md); the app already speaks it and switches on by itself when
+  `/v1/settings` advertises `draftAttachments`. Forwarding re-attaches the original's files once that is live.
 - **Review**: drafts waiting for approval, drafts written by the AI, bots or Thunderbird, and your own drafts; open one
   to edit and send, swipe to discard.
 - **AI Rules**: status of the rules engine and every rule; a big **Stop all autonomous sending** button (the rules
@@ -37,7 +46,9 @@ signed with a free Apple ID and installed over USB, the same way as
   whenever iOS decides to run background refresh, which can be hours apart.
 - **Settings**: session expiry, key fingerprint / replace / remove (with import instructions), send test mode, notifications, Face ID lock,
   server URL, sign out.
-- Dark mode, Dynamic Type, VoiceOver labels, empty / error / offline / missing-key states throughout.
+- Dark mode (the teal is adjusted per mode for 4.5:1 text contrast), Dynamic Type (chips wrap, list rows stack at
+  accessibility sizes, icons scale), VoiceOver labels, empty / error / offline / missing-key states throughout. iPad
+  runs in every orientation with readable line lengths.
 
 ## Build and install
 
@@ -50,7 +61,8 @@ ios/scripts/deploy-phone.sh             # build, sign with the free Apple ID, in
 ios/scripts/provision-phone.sh          # hand the app a fresh session + the envelope key over USB (optional)
 ```
 
-The phone's UDID is read from USB at run time (or `LOJO_UDID`); it is never written to the repo. The installed bundle
+With more than one iPhone on USB the scripts refuse to guess: pick one with `LOJO_PHONE="14 Pro Max"` (or `"11"`;
+the error lists what is attached), or `LOJO_UDID`. The UDID is read from USB at run time and never written to the repo. The installed bundle
 ID is `XTL-HG9HAYXW44.com.lojo.Mail` (xtool prefixes the team ID).
 
 ### Signing in on the phone
@@ -100,7 +112,11 @@ ios/scripts/test-core.sh --live        # + read-only checks against the deployed
 ios/scripts/test-core.sh --live-write  # + mail actions, kill switches, and one real send to lojo-test@cyberphysical.us
 ```
 
-## Screenshots (iPhone 11, iOS 26.6.2, dark mode)
+## Screenshots (dark mode)
+
+iPhone 11 (iOS 26.6.2), except sign-in and key setup from the iPhone 14 Pro Max (iOS 26.6.1). After installing a
+build, `LOJO_PHONE="14 Pro Max" ios/scripts/retake-screenshots.sh` retakes them all, plus `15-compose-attachments.png`
+(Compose with two generated sample files); it only launches the app.
 
 | | | |
 | --- | --- | --- |

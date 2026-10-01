@@ -60,6 +60,23 @@ enum AttachmentImport {
         return OutgoingAttachment(filename: name, contentType: type, data: data)
     }
 
+    /// QA only (`LOJO_COMPOSE_SAMPLES=1`): a generated photo and a short note, made in memory.
+    static func samples() -> [OutgoingAttachment] {
+        let size = CGSize(width: 1_600, height: 1_200)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            let colors = [UIColor.systemTeal.cgColor, UIColor.systemIndigo.cgColor] as CFArray
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
+                context.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
+            }
+        }
+        var files: [OutgoingAttachment] = []
+        if let photo = try? photo(image, name: photoName(1), room: 1_000_000) { files.append(photo) }
+        files.append(OutgoingAttachment(filename: "Gate schedule.txt", contentType: "text/plain", data: Data("North gate: Mon/Wed/Fri 7-9\n".utf8)))
+        return files
+    }
+
     static func photoName(_ index: Int) -> String {
         let stamp = Date.now.formatted(.iso8601.year().month().day())
         return "Photo \(stamp) \(index).jpg"

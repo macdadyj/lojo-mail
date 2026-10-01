@@ -33,6 +33,9 @@ struct ComposeView: View {
         }
         .onAppear {
             if model == nil { model = ComposeModel(model: app, request: request) }
+            if app.launch.composeSamples, let model, !model.hasAttachments, case .new = request {
+                for sample in AttachmentImport.samples() { model.attach(sample) }
+            }
             if app.launch.screen == .sendconfirm, let model, !model.fields.toList.isEmpty {
                 if model.fields.subject.isEmpty { model.fields.subject = "LOJO Mail iOS test" }
                 confirmSend = true
