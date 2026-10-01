@@ -16,6 +16,9 @@ KEYFILE="${LOJO_KEY_FILE:-$HOME/.config/lojo-mail/keys/envelope.private.jwk}"
 # shellcheck disable=SC1091
 source "$HOME/.config/ios-dev/env"
 export PATH="$SWIFT_ROOT/usr/bin:$HOME/.local/bin:$PATH"
+# shellcheck source=phone-lib.sh
+source "$IOS/scripts/phone-lib.sh"
+lojo_pick_phone || exit 1
 
 WORK="$(mktemp -d "${XTL_TMPDIR:-/tmp}/lojo-mail-provision.XXXXXX")"
 chmod 700 "$WORK"
