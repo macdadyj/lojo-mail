@@ -488,6 +488,33 @@ run "rules_readers_can_list_the_rules_prefix_and_nothing_else" {
   }
 }
 
+run "draft_files_are_the_apis_only_deletes_and_reuse_the_draft_purpose" {
+  command = plan
+
+  assert {
+    condition = toset(flatten([
+      for s in data.aws_iam_policy_document.api.statement : s.resources if contains(s.actions, "s3:DeleteObject")
+    ])) == toset(["${aws_s3_bucket.mail.arn}/drafts/*"])
+    error_message = "the API may delete draft files (drafts/) and nothing else in the bucket"
+  }
+
+  assert {
+    condition = length([
+      for s in data.aws_iam_policy_document.processor.statement : s
+      if length([for r in s.resources : r if endswith(r, "/drafts/*")]) > 0
+    ]) == 0
+    error_message = "the processor never touches draft files"
+  }
+
+  assert {
+    condition = toset(flatten([
+      for s in data.aws_iam_policy_document.api.statement : [for c in s.condition : c.values if c.variable == "kms:EncryptionContext:purpose"]
+      if contains(s.actions, "kms:GenerateDataKey")
+    ])) == toset(["rules", "draft"])
+    error_message = "draft files are sealed under the existing draft purpose; no new KMS purpose is granted"
+  }
+}
+
 run "auto_send_is_off_by_default" {
   command = plan
 

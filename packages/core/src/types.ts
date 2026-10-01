@@ -34,6 +34,11 @@ export interface AttachmentMeta {
   size: number;
 }
 
+export interface DraftAttachment extends AttachmentMeta {
+  /** Hex SHA-256 of the bytes. The approval names files by it. */
+  sha256: string;
+}
+
 export interface StoredAttachment extends AttachmentMeta {
   blobKey: string;
 }
@@ -195,6 +200,8 @@ export interface Draft {
   pgp: PgpMode;
   /** Draft text, sealed with a KMS data key under `{ purpose: "draft", draftId }`. */
   sealed: ServerSealedBlob;
+  /** Files to send with the draft, in order. The bytes are sealed in the blob store (`draftAttachmentKey`). */
+  attachments?: DraftAttachment[];
   createdAt: string;
   updatedAt: string;
   sentMessageId?: string;

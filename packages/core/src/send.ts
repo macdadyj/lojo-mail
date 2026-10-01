@@ -11,8 +11,21 @@ export interface OutboundMessage {
   references?: string[];
   /** Set when the body was OpenPGP-encrypted before handoff to SES. */
   armored?: string;
+  /** Files sent as `multipart/mixed` after the text part. */
+  attachments?: OutboundAttachment[];
+  /**
+   * PGP/MIME (RFC 3156): the whole MIME body, text and files, encrypted. When set, the message is
+   * `multipart/encrypted` and `text`, `armored` and `attachments` are not sent in the clear.
+   */
+  pgpMime?: string;
   /** RFC 3834 `Auto-Submitted: auto-replied`, set on everything a rule sends. */
   autoReplied?: boolean;
+}
+
+export interface OutboundAttachment {
+  filename: string;
+  contentType: string;
+  data: Uint8Array;
 }
 
 /** A finished RFC 5322 message from Jon's own client, with its SMTP envelope. Bcc is already stripped from `raw`. */

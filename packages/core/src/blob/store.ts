@@ -18,6 +18,11 @@ export function attachmentKey(messageId: string, attachmentId: string): string {
   return `objects/${messageId}/${attachmentId}.bin`;
 }
 
+/** A file on a draft, KMS-sealed under `draftAttachmentContext`. Deleted when the draft is sent or discarded. */
+export function draftAttachmentKey(draftId: string, attachmentId: string): string {
+  return `drafts/${draftId}/${attachmentId}.bin`;
+}
+
 export function aiContextKey(messageId: string): string {
   return `ai-context/${messageId}.bin`;
 }

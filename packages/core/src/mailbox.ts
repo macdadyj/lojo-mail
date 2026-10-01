@@ -19,15 +19,26 @@ import {
   openJson,
 } from "./crypto/envelope.ts";
 import { aiContextContext, draftContext, serverOpen, serverSeal, type KeyWrapper } from "./crypto/server-seal.ts";
+import {
+  DRAFT_ATTACHMENT_LIMITS,
+  approvalFiles,
+  assertFits,
+  deleteDraftAttachments,
+  openDraftAttachments,
+  sameFiles,
+  sealDraftAttachment,
+  type DraftAttachmentLimits,
+  type NewDraftAttachment,
+} from "./draft-attachments.ts";
 import { MailError } from "./errors.ts";
 import { embedForStorage, embeddingInput, ingestRaw, refreshThread } from "./ingest.ts";
 import { newId, normalizeMessageId, sha256, utcDay } from "./ids.ts";
-import { buildRawMessage, cleanEmail, cleanHeaderValue } from "./mime/compose.ts";
-import { encryptText, type PgpSigningKey } from "./openpgp/mail.ts";
+import { buildMimeEntity, buildRawMessage, cleanEmail, cleanHeaderValue } from "./mime/compose.ts";
+import { encryptMimeEntity, encryptText, type PgpSigningKey } from "./openpgp/mail.ts";
 import { dryRunRules, loadRules, saveRules, type DryRun } from "./rules/engine.ts";
 import type { RuleAuthor, RulesDocument } from "./rules/types.ts";
 import { emptyRules, parseRulesDocument, rulesHash } from "./rules/validate.ts";
-import { sesRfcId, type MailSender, type OutboundMessage } from "./send.ts";
+import { sesRfcId, type MailSender, type OutboundAttachment, type OutboundMessage } from "./send.ts";
 import type { MailStore } from "./store/types.ts";
 import type {
   ActionItem,
@@ -68,6 +79,7 @@ export interface MailboxDeps {
   /** Whether the processor may auto-send (LOJO_AUTO_SEND=on). The API never sends for a rule itself. */
   autoSendEnabled?: boolean;
   clientSendLimits?: ClientSendLimits;
+  draftAttachmentLimits?: DraftAttachmentLimits;
   /** How many messages one agent token may move to Trash per UTC day. */
   agentTrashPerDay?: number;
   styleGuide: string;
@@ -116,6 +128,8 @@ export interface ReviewedDraft {
   subject: string;
   text: string;
   pgp: PgpMode;
+  /** SHA-256 of each file Jon saw, in draft order. Absent means none. */
+  attachments?: string[];
 }
 
 export interface AttachmentPayload {
@@ -208,6 +222,10 @@ export class Mailbox {
 
   get config(): LojoConfig {
     return this.deps.config;
+  }
+
+  get draftAttachmentLimits(): DraftAttachmentLimits {
+    return this.deps.draftAttachmentLimits ?? DRAFT_ATTACHMENT_LIMITS;
   }
 
   get unlocked(): boolean {
@@ -586,6 +604,47 @@ export class Mailbox {
     return updated;
   }
 
+  /**
+   * One file per call. Like any edit it records who changed the draft and clears a pending
+   * approval, because the files are part of what will be sent.
+   */
+  async addDraftAttachment(id: string, input: NewDraftAttachment, actor: Actor = "agent"): Promise<Draft> {
+    const draft = await this.requireDraft(id);
+    if (!EDITABLE.has(draft.status)) throw new MailError(`Draft is ${draft.status}`, "invalid");
+    const existing = draft.attachments ?? [];
+    assertFits(await this.readDraftText(draft), [...existing, { size: input.data.byteLength }], this.draftAttachmentLimits);
+    const file = await sealDraftAttachment(this.deps, id, newId("datt"), input);
+    const updated: Draft = {
+      ...withoutApproval(draft),
+      attachments: [...existing, file],
+      status: "edited",
+      lastEditedBy: actor,
+      updatedAt: this.now().toISOString(),
+    };
+    await this.deps.store.putDraft(updated);
+    await this.audit("draft.attachment_added", "ok", { messageId: id, detail: `${file.id} ${file.size} bytes sha256:${file.sha256.slice(0, 16)} by:${actor}` });
+    return updated;
+  }
+
+  async removeDraftAttachment(id: string, attachmentId: string, actor: Actor = "agent"): Promise<Draft> {
+    const draft = await this.requireDraft(id);
+    if (!EDITABLE.has(draft.status)) throw new MailError(`Draft is ${draft.status}`, "invalid");
+    const existing = draft.attachments ?? [];
+    const file = existing.find((item) => item.id === attachmentId);
+    if (!file) throw new MailError("No such file on this draft", "not_found");
+    const updated: Draft = {
+      ...withoutApproval(draft),
+      attachments: existing.filter((item) => item.id !== attachmentId),
+      status: "edited",
+      lastEditedBy: actor,
+      updatedAt: this.now().toISOString(),
+    };
+    await this.deps.store.putDraft(updated);
+    await deleteDraftAttachments(this.deps.blobs, id, [file]);
+    await this.audit("draft.attachment_removed", "ok", { messageId: id, detail: `${file.id} by:${actor}` });
+    return updated;
+  }
+
   /** What an agent does instead of sending: park the draft in Jon's approval queue. */
   async submitForApproval(id: string): Promise<Draft> {
     const draft = await this.requireDraft(id);
@@ -605,6 +664,7 @@ export class Mailbox {
     if (!EDITABLE.has(draft.status)) throw new MailError(`Draft is ${draft.status}`, "invalid");
     const updated: Draft = { ...withoutApproval(draft), status: "discarded", updatedAt: this.now().toISOString() };
     await this.deps.store.putDraft(updated);
+    await deleteDraftAttachments(this.deps.blobs, id, draft.attachments);
     return updated;
   }
 
@@ -722,8 +782,9 @@ export class Mailbox {
     return { draft: updated, text };
   }
 
-  private contentHash(draft: Pick<Draft, "to" | "cc" | "subject" | "inReplyTo" | "pgp">, text: string): string {
+  private contentHash(draft: Pick<Draft, "to" | "cc" | "subject" | "inReplyTo" | "pgp" | "attachments">, text: string): string {
     return approvalContentHash({
+      attachments: approvalFiles(draft.attachments),
       from: this.deps.config.mailbox,
       to: draft.to,
       cc: draft.cc,
@@ -745,9 +806,12 @@ export class Mailbox {
     const draft = await this.requireDraft(draftId);
     if (!EDITABLE.has(draft.status)) throw new MailError(`Draft is ${draft.status}`, "invalid");
     if (draft.to.length === 0) throw new MailError("Add a recipient before approving", "invalid");
-    const stored = this.contentHash(draft, await this.readDraftText(draft));
+    const text = await this.readDraftText(draft);
+    const stored = this.contentHash(draft, text);
+    const filesSeen = sameFiles(reviewed.attachments ?? [], draft.attachments ?? []);
     const seen = this.contentHash(
       {
+        attachments: draft.attachments ?? [],
         to: addresses(reviewed.to),
         cc: addresses(reviewed.cc),
         subject: cleanHeaderValue(reviewed.subject),
@@ -756,10 +820,11 @@ export class Mailbox {
       },
       reviewed.text,
     );
-    if (!sameHash(stored, seen)) {
+    if (!filesSeen || !sameHash(stored, seen)) {
       await this.audit("send.approval_refused", "content_changed", { messageId: draftId });
       throw new MailError("The draft changed since you reviewed it. Check the current version and approve again.", "conflict");
     }
+    if ((draft.attachments ?? []).length > 0) assertFits(text, draft.attachments ?? [], this.draftAttachmentLimits);
     const token = newApprovalToken();
     const expiresAt = new Date(this.now().getTime() + APPROVAL_TTL_MS).toISOString();
     await this.deps.store.putDraft({
@@ -772,7 +837,7 @@ export class Mailbox {
     return { approvalToken: token, expiresAt };
   }
 
-  private async outboundFor(draft: Draft, text: string): Promise<OutboundMessage> {
+  private async outboundFor(draft: Draft, text: string, files: OutboundAttachment[]): Promise<OutboundMessage> {
     const outbound: OutboundMessage = {
       from: { email: this.deps.config.mailbox, name: "Jon Hebert" },
       to: draft.to,
@@ -780,6 +845,7 @@ export class Mailbox {
       subject: cleanHeaderValue(draft.subject),
       text,
     };
+    if (files.length > 0) outbound.attachments = files;
     if (draft.inReplyTo) outbound.inReplyTo = draft.inReplyTo;
     const references = draft.references ?? (draft.inReplyTo ? [draft.inReplyTo] : []);
     if (references.length > 0) outbound.references = references;
@@ -796,7 +862,8 @@ export class Mailbox {
       );
     }
     const encryptTo = this.deps.ownPgpPublicKey ? [...present, this.deps.ownPgpPublicKey] : present;
-    outbound.armored = await encryptText(text, encryptTo, this.deps.pgpSigningKey);
+    if (files.length > 0) outbound.pgpMime = await encryptMimeEntity(buildMimeEntity(outbound), encryptTo, this.deps.pgpSigningKey);
+    else outbound.armored = await encryptText(text, encryptTo, this.deps.pgpSigningKey);
     return outbound;
   }
 
@@ -829,7 +896,8 @@ export class Mailbox {
       await this.audit("send.refused", "content_changed", { messageId: draftId });
       throw new MailError("The draft changed after it was approved. Approve again.", "forbidden");
     }
-    const outbound = await this.outboundFor(draft, text);
+    const files = await openDraftAttachments(this.deps, draftId, draft.attachments);
+    const outbound = await this.outboundFor(draft, text, files);
     const at = this.now().toISOString();
     const claimed = await this.deps.store.claimDraftForSend(draftId, tokenHash, at);
     if (!claimed) throw new MailError("Approval token was already used", "forbidden");
@@ -844,8 +912,15 @@ export class Mailbox {
     }
     await this.deps.store.putDraft({ ...claimed, status: "sent", sentMessageId: sent.messageId, updatedAt: this.now().toISOString() });
     await this.audit("send.approved", "sent", { messageId: draftId, detail: sent.messageId });
-    const copy = buildRawMessage({ ...outbound, armored: undefined }, { messageId: sesRfcId(sent.messageId, this.deps.config.region), date: this.now() });
+    const copy = buildRawMessage(
+      { ...outbound, armored: undefined, pgpMime: undefined },
+      { messageId: sesRfcId(sent.messageId, this.deps.config.region), date: this.now() },
+    );
     await ingestRaw(copy, { ...this.deps, llm: null, now: this.now() }, { origin: "sent", deliveryId: `sent:${sent.messageId}` });
+    if (files.length > 0) {
+      const failed = await deleteDraftAttachments(this.deps.blobs, draftId, draft.attachments);
+      if (failed > 0) await this.audit("draft.attachment_cleanup", "failed", { messageId: draftId, detail: `${failed} left` });
+    }
     return sent;
   }
 
