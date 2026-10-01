@@ -11,6 +11,8 @@ Thunderbird Drafts ◀── bridge (IMAP) ◀───────────�
 bridge (SMTP, client-send) ──▶ API ──▶ SES        draft marked sent, "unchanged" or "edited" recorded
 ```
 
+For Jon's own Grok Bot running on Santa Computa, prefer [BOT.md](BOT.md): a bot credential Jon creates and revokes from the CLI (effective on the next request, global kill switch), an opt-in bot envelope key for bodies, and a stdio MCP server and CLI (`lojo-bot`). The agent tokens below remain for remote-MCP clients.
+
 ## What a bot can and cannot do
 
 | | Agent token (any bot) | Thunderbird bridge (Jon) | Jon's web session |
