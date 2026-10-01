@@ -6,6 +6,8 @@ export interface Fields {
   subject: string;
   text: string;
   pgp: Draft["pgp"];
+  /** SHA-256 of each attached file, comma-separated, in draft order. */
+  files: string;
 }
 
 /** How long the send button stays disabled after a conflict, so a reflexive second click can't approve the new version. */
@@ -17,6 +19,7 @@ const LABELS: Record<keyof Fields, string> = {
   subject: "subject",
   text: "message text",
   pgp: "encryption",
+  files: "attached files",
 };
 
 function normalized(fields: Fields, name: keyof Fields): string {

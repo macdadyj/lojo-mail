@@ -101,6 +101,16 @@ export interface Draft {
   createdAt: string;
   updatedAt: string;
   sentMessageId?: string;
+  /** Files sent with the draft, in order. The approval names each by SHA-256. */
+  attachments?: DraftAttachment[];
+}
+
+export interface DraftAttachment {
+  id: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  sha256: string;
 }
 
 export interface DraftView {

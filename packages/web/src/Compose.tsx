@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "./api.ts";
 import { RECHECK_DELAY_MS, authorNotice, changedFields, type Fields } from "./review.ts";
-import { statusLabel, type Draft, type DraftView, type Message } from "./types.ts";
+import { statusLabel, type Draft, type DraftAttachment, type DraftView, type Message } from "./types.ts";
 import { openMessage } from "./unlock.ts";
 
 class DraftConflict extends Error {
@@ -10,7 +10,7 @@ class DraftConflict extends Error {
   }
 }
 
-const EMPTY: Fields = { to: "", cc: "", subject: "", text: "", pgp: "auto" };
+const EMPTY: Fields = { to: "", cc: "", subject: "", text: "", pgp: "auto", files: "" };
 
 function list(value: string): string[] {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
@@ -23,7 +23,12 @@ function fieldsOf(view: DraftView): Fields {
     subject: view.draft.subject,
     text: view.text ?? "",
     pgp: view.draft.pgp,
+    files: filesOf(view.draft),
   };
+}
+
+function filesOf(draft: Draft): string {
+  return (draft.attachments ?? []).map((file) => file.sha256).join(",");
 }
 
 function same(a: Fields, b: Fields): boolean {
@@ -32,6 +37,18 @@ function same(a: Fields, b: Fields): boolean {
 
 function payloadOf(fields: Fields) {
   return { to: list(fields.to), cc: list(fields.cc), subject: fields.subject, text: fields.text, pgp: fields.pgp };
+}
+
+/** What Jon reviewed, including every file by hash; `attachments` is left out when there are none, as servers before files expect. */
+function approvalOf(fields: Fields) {
+  const files = list(fields.files);
+  return { ...payloadOf(fields), ...(files.length > 0 ? { attachments: files } : {}) };
+}
+
+function size(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function Compose({ draftId }: { draftId?: string }) {
@@ -120,7 +137,7 @@ export function Compose({ draftId }: { draftId?: string }) {
 
   async function approve(id: string, reviewed: Fields): Promise<string> {
     try {
-      const minted = await api<{ approvalToken: string }>(`/v1/drafts/${id}/approval`, { method: "POST", body: JSON.stringify(payloadOf(reviewed)) });
+      const minted = await api<{ approvalToken: string }>(`/v1/drafts/${id}/approval`, { method: "POST", body: JSON.stringify(approvalOf(reviewed)) });
       return minted.approvalToken;
     } catch (err) {
       if (!(err instanceof ApiError) || err.status !== 409) throw err;
@@ -149,6 +166,18 @@ export function Compose({ draftId }: { draftId?: string }) {
       });
       show(await api<DraftView>(`/v1/drafts/${id}?text=1`));
       setStatus(`Sent (${sent.messageId}).`);
+    });
+
+  /** Only the file list changes: unsaved edits to the text stay on screen. */
+  const removeFile = (file: DraftAttachment) =>
+    run("Remove file", async () => {
+      if (!draft) return;
+      const view = await api<DraftView>(`/v1/drafts/${draft.id}/attachments/${encodeURIComponent(file.id)}/remove`, { method: "POST" });
+      const files = filesOf(view.draft);
+      setDraft(view.draft);
+      setFields((current) => ({ ...current, files }));
+      setSaved((current) => (current ? { ...current, files } : current));
+      setStatus(`Removed ${file.filename}.`);
     });
 
   const discard = () =>
@@ -193,6 +222,25 @@ export function Compose({ draftId }: { draftId?: string }) {
       <input id="subject" value={fields.subject} disabled={closed} onChange={(event) => set("subject", event.target.value)} />
       <label htmlFor="body">Message</label>
       <textarea id="body" value={fields.text} disabled={closed} onChange={(event) => set("text", event.target.value)} />
+      {draft?.attachments && draft.attachments.length > 0 ? (
+        <>
+          <h3 className="group">Attached files</h3>
+          <ul className="attachments">
+            {draft.attachments.map((file) => (
+              <li key={file.id}>
+                <span>{file.filename}</span>
+                <span className="muted">
+                  {size(file.size)} · {file.contentType}
+                </span>
+                <button className="ghost" type="button" disabled={busy || closed} onClick={() => void removeFile(file)}>
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="muted">Files are added from the iOS app or by an assistant. Approve and send sends exactly these files.</p>
+        </>
+      ) : null}
       <label htmlFor="pgp">Encryption</label>
       <select id="pgp" value={fields.pgp} disabled={closed} onChange={(event) => set("pgp", event.target.value === "off" ? "off" : "auto")}>
         <option value="auto">OpenPGP when every recipient has a key</option>
@@ -215,7 +263,7 @@ export function Compose({ draftId }: { draftId?: string }) {
       </div>
       <p className="muted">
         Approve and send saves this draft and asks the API for a one-time approval bound to exactly the recipients,
-        subject, text, and encryption shown here, then sends. If anything changed since you opened the draft, nothing is
+        subject, text, attached files, and encryption shown here, then sends. If anything changed since you opened the draft, nothing is
         approved and the current version is shown instead. Assistants can't do this step.
       </p>
       {status ? <p className="muted">{status}</p> : null}
