@@ -107,7 +107,7 @@ export async function handler(event: S3Notification | SweepEvent): Promise<{ pro
       const blobs = new S3BlobStore(s3, loaded.bucket ?? bucket);
       const { autoSender, ...ingestDeps } = loaded;
       const rules = ingestDeps.keys ? rulesRuntime(blobs, ingestDeps.keys, autoSender) : null;
-      await ingestRaw(bytes, { ...ingestDeps, blobs, rules }, { origin: "inbound", deliveryId });
+      await ingestRaw(bytes, { ...ingestDeps, blobs, rules, botCopies: true }, { origin: "inbound", deliveryId });
     },
   });
 

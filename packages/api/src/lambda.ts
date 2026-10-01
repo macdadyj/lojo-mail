@@ -18,6 +18,7 @@ import { getConnInfo, handle } from "hono/aws-lambda";
 import styleGuide from "../../../config/style-guide.md";
 import { createApp } from "./app.ts";
 import { TokenBook, addBridgeToken, agentTokensOrNone, bridgeOptionsFromEnv, parseScopes } from "./auth.ts";
+import { auditActorFromRequest } from "./bots.ts";
 import { LoginThrottle, Sessions } from "./session.ts";
 import { SesSender } from "./ses.ts";
 
@@ -104,6 +105,8 @@ async function buildApp() {
     sender: SesSender.fromEnv(),
     autoSendEnabled: process.env.LOJO_AUTO_SEND === "on",
     clientSendLimits: clientSendLimitsFromEnv(process.env),
+    botCopies: true,
+    auditActor: auditActorFromRequest,
     styleGuide: process.env.LOJO_STYLE_GUIDE ?? styleGuide,
     ...(ownPgpPublicKey ? { ownPgpPublicKey } : {}),
     ...(signingKey ? { pgpSigningKey: { armoredKey: signingKey, ...(signingPassphrase ? { passphrase: signingPassphrase } : {}) } } : {}),

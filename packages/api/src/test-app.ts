@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { memoryWorld, reviewOf, type WorldOptions } from "@lojo/core/testing";
 import { createApp, type AccessLogEntry } from "./app.ts";
 import { BRIDGE_LABEL, bridgeScopes, TokenBook } from "./auth.ts";
+import { auditActorFromRequest } from "./bots.ts";
 import { LoginThrottle, Sessions, hashPassphrase } from "./session.ts";
 
 export const TEST_PASSPHRASE = "correct horse battery staple";
@@ -10,7 +11,7 @@ let cachedHash: string | null = null;
 
 /** The API over an in-memory mailbox, with read/write/send/body tokens and human sign-in. */
 export async function testApp(opts: WorldOptions & { dev?: boolean; now?: () => Date; bridgeTrash?: boolean; bridgeSend?: boolean } = {}) {
-  const world = await memoryWorld(opts);
+  const world = await memoryWorld({ ...opts, deps: { auditActor: auditActorFromRequest, ...opts.deps } });
   cachedHash ??= hashPassphrase(TEST_PASSPHRASE);
   const tokens = new TokenBook(!(opts.dev ?? false));
   tokens.add("read-token", { label: "read", scopes: ["read"] });

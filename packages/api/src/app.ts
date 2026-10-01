@@ -5,6 +5,7 @@ import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
 import { BRIDGE_LABEL, hasScope, type Principal, type Scope, type TokenBook } from "./auth.ts";
+import { actorLabel, auditBotRequest, BOT_LABEL_PREFIX, botPrincipal, isBot, isBotBearer, registerBotRoutes, requestActor } from "./bots.ts";
 import { LoginRateLimited, sourceKey, type LoginThrottle, type Sessions } from "./session.ts";
 
 interface AppDeps {
@@ -96,6 +97,7 @@ function trashActorOf(principal: Principal): TrashActor {
   if (hasScope(principal.scopes, "trash")) {
     if (principal.label === BRIDGE_LABEL) return "bridge";
     if (principal.label.startsWith("agent:")) return `agent:${principal.label.slice("agent:".length)}`;
+    if (isBot(principal)) return `bot:${principal.label.slice(BOT_LABEL_PREFIX.length)}`;
   }
   throw new MailError("Moving mail to trash needs a signed-in human or a token with the trash scope", "forbidden");
 }
@@ -105,8 +107,8 @@ function isBridge(principal: Principal): boolean {
   return principal.label === BRIDGE_LABEL || principal.scopes.includes("client-send");
 }
 
-function isMcpScope(scope: Scope): scope is Exclude<Scope, "client-send"> {
-  return scope !== "client-send";
+function isMcpScope(scope: Scope): scope is Exclude<Scope, "client-send" | "rules" | "test-send"> {
+  return scope !== "client-send" && scope !== "rules" && scope !== "test-send";
 }
 
 const MAX_CLIENT_SEND_BASE64 = 6_000_000;
@@ -219,6 +221,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const authorization = c.req.header("authorization");
     const token = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length).trim() : "";
     if (token.startsWith("hs_")) return c.json({ error: "MCP takes an API token, not a web session" }, 403);
+    if (isBotBearer(authorization)) return c.json({ error: "Bot credentials use the lojo-bot MCP server on Santa, not remote MCP" }, 403);
     const principal = deps.tokens.principal(authorization, null);
     if (!principal) return c.json({ error: "unauthorized" }, 401, MCP_CHALLENGE);
     if (isBridge(principal)) return c.json({ error: "The Thunderbird bridge token cannot be used for MCP" }, 403);
@@ -231,11 +234,20 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.use("/v1/*", async (c, next) => {
     if (PUBLIC_PATHS.has(c.req.path)) return next();
-    const principal = deps.tokens.principal(c.req.header("authorization"), deps.sessions);
+    const authorization = c.req.header("authorization");
+    let principal: Principal | null;
+    if (isBotBearer(authorization)) {
+      const bot = await botPrincipal(mailbox, authorization);
+      if ("error" in bot) return c.json({ error: bot.error }, 401);
+      principal = bot.principal;
+    } else {
+      principal = deps.tokens.principal(authorization, deps.sessions);
+    }
     if (!principal) return c.json({ error: "unauthorized" }, 401);
     c.set("principal", principal);
-    await next();
+    await requestActor.run(actorLabel(principal), next);
     deps.accessLog?.({ principal: principal.label, method: c.req.method, path: c.req.path, status: c.res.status });
+    if (isBot(principal)) await auditBotRequest(mailbox, principal, c.req.method, c.req.path, c.res.status);
   });
 
   app.get("/v1/session", (c) => {
@@ -489,6 +501,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
     mailbox.lock();
     return c.json({ unlocked: false });
   });
+
+  registerBotRoutes(app, { mailbox, need, body });
 
   app.onError((error, c) => {
     if (error instanceof MailError) return c.json({ error: error.message, code: error.code }, statusFor(error));

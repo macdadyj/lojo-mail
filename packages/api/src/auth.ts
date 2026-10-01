@@ -1,3 +1,4 @@
+import { BOT_TOKEN_PREFIX } from "@lojo/core";
 import type { Sessions } from "./session.ts";
 
 /**
@@ -6,10 +7,11 @@ import type { Sessions } from "./session.ts";
  * `trash` is soft delete (move to Trash, restorable for the retention window):
  * the bridge gets it with LOJO_BRIDGE_TRASH=on, an agent token only when Jon
  * lists it for that agent. `client-send` is Jon pressing Send in Thunderbird:
- * only the bridge token can hold it, only with LOJO_BRIDGE_SEND=on. `admin`
- * implies neither.
+ * only the bridge token can hold it, only with LOJO_BRIDGE_SEND=on. `rules`
+ * (bot-authored rules) and `test-send` (mail to lojo-test only) exist only on
+ * bot credentials (bots.ts). `admin` implies none of these.
  */
-export type Scope = "read" | "write" | "send" | "body" | "compose" | "trash" | "client-send" | "admin";
+export type Scope = "read" | "write" | "send" | "body" | "compose" | "trash" | "client-send" | "rules" | "test-send" | "admin";
 
 export type PrincipalKind = "token" | "human";
 
@@ -24,8 +26,8 @@ export const DEV_TOKEN_VALUES = ["dev-only-change-me", "dev-read-only", "dev-sen
 /** The Thunderbird bridge: reads and decrypts locally, syncs flags and moves, and turns SMTP submissions into drafts. */
 export const BRIDGE_SCOPES: readonly Scope[] = ["read", "write", "body", "compose"];
 
-/** Prefixes reserved for human sessions and approval tokens. An API token can never look like either. */
-const RESERVED_PREFIXES = ["hs_", "apv_"] as const;
+/** Prefixes reserved for human sessions, approval tokens and bot credentials. A static API token can never look like one. */
+const RESERVED_PREFIXES = ["hs_", "apv_", BOT_TOKEN_PREFIX] as const;
 
 function knownScope(value: string): Scope | null {
   switch (value) {
@@ -36,6 +38,8 @@ function knownScope(value: string): Scope | null {
     case "compose":
     case "trash":
     case "client-send":
+    case "rules":
+    case "test-send":
     case "admin":
       return value;
     default:
@@ -43,8 +47,8 @@ function knownScope(value: string): Scope | null {
   }
 }
 
-/** Never in LOJO_API_SCOPES/LOJO_SEND_SCOPES. `trash` is still open to agent tokens (AGENT_SCOPES). */
-const BRIDGE_ONLY_SCOPES: readonly Scope[] = ["trash", "client-send"];
+/** Never in LOJO_API_SCOPES/LOJO_SEND_SCOPES. `trash` is still open to agent tokens (AGENT_SCOPES); `rules` and `test-send` to bots. */
+const BRIDGE_ONLY_SCOPES: readonly Scope[] = ["trash", "client-send", "rules", "test-send"];
 
 export function parseScopes(value: string | undefined, fallback: Scope[]): Scope[] {
   if (!value) return fallback;
@@ -64,6 +68,8 @@ export function hasScope(scopes: readonly Scope[], required: Scope): boolean {
   switch (required) {
     case "trash":
     case "client-send":
+    case "rules":
+    case "test-send":
       return scopes.includes(required);
     case "read":
     case "write":

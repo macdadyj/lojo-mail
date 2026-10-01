@@ -21,6 +21,7 @@ import {
 } from "@lojo/core";
 import { createApp } from "./app.ts";
 import { tokenBookFromEnv } from "./auth.ts";
+import { auditActorFromRequest } from "./bots.ts";
 import { seedDemo } from "./seed.ts";
 import { DEV_PASSPHRASE, LoginThrottle, devSessions } from "./session.ts";
 
@@ -72,6 +73,8 @@ const mailbox = new Mailbox({
   embedder,
   sender: new MemorySender(),
   styleGuide,
+  botCopies: true,
+  auditActor: auditActorFromRequest,
 });
 const app = createApp({
   mailbox,
