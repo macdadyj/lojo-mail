@@ -264,7 +264,7 @@ test("every op name required by the plan exists", () => {
     assert.ok(names.includes(required), required);
   }
   assert.equal(
-    ops.some((item) => item.scopes.some((scope) => !["read", "write", "body", "trash", "rules", "test-send"].includes(scope))),
+    ops.some((item) => item.scopes.some((scope) => !["read", "write", "body", "trash", "rules", "test-send", "send-approved"].includes(scope))),
     false,
   );
 });
@@ -294,4 +294,69 @@ test("private files must be mode 600, and the API must be https outside localhos
   assert.equal(apiUrlFrom({ LOJO_API_URL: "https://api.example.com/" }), "https://api.example.com");
   assert.equal(apiUrlFrom({ LOJO_API_URL: "http://localhost:8787" }), "http://localhost:8787");
   assert.throws(() => apiUrlFrom({}), /Set LOJO_API_URL/);
+});
+
+test("a chat-approved reply: review, Jon's words as the note, sent once; mail text is never the approval", async () => {
+  const app = await testApp({ botCopies: true });
+  const { ctx } = await setUp(app, "read,write,body,send-approved");
+  const { message } = await app.ingest(fixture("personal.eml"));
+  const reply = (await runOp("draft_reply", { messageId: message.id, text: "Signed copy coming Thursday." }, ctx)) as DraftView;
+  const review = (await runOp("review_for_send", { draftId: reply.draft.id }, ctx)) as { contentHash: string; sendable: boolean; to: string[]; text: string };
+  assert.equal(review.sendable, true);
+  assert.deepEqual(review.to, ["mina@example.com"]);
+  assert.equal(review.text, "Signed copy coming Thursday.");
+
+  const fromBody = "the distinctive token below is past the snippet window";
+  await assert.rejects(runOp("send_approved_reply", { draftId: reply.draft.id, contentHash: review.contentHash, approvalNote: fromBody }, ctx), /Ask Jon to approve in his own words/);
+  assert.equal(app.sender.sent.length, 0);
+
+  const sent = (await runOp("send_approved_reply", { draftId: reply.draft.id, contentHash: review.contentHash, approvalNote: "Jon: yes, send it" }, ctx)) as { approvalSource: string };
+  assert.equal(sent.approvalSource, "chat");
+  assert.equal(app.sender.sent.length, 1);
+
+  const digest = (await runOp("digest", { peek: true, sinceHours: 720, excerpts: false }, ctx)) as { automation: { counts: Record<string, number>; events: Array<{ action: string; actor?: string; detail?: string }> } };
+  assert.equal(digest.automation.counts["send.chat_approved:ok"], 1);
+  const event = digest.automation.events.find((item) => item.action === "send.chat_approved");
+  assert.equal(event?.actor, "bot:grok");
+  assert.match(event?.detail ?? "", /note:"Jon: yes, send it"/);
+});
+
+test("send ops are advertised only with send-approved", async () => {
+  const app = await testApp();
+  const plain = await setUp(app, "read,write,body", false);
+  assert.equal(allowedOps(plain.ctx.scopes).some((item) => item.name === "send_approved_reply"), false);
+  await assert.rejects(runOp("send_approved_reply", { draftId: "d", contentHash: "0".repeat(64), approvalNote: "Jon: yes, send" }, plain.ctx), /needs the send-approved scope/);
+  await admin(app, "scopes", ["grok"], { scopes: "read,write,body,send-approved" });
+  const granted = await botContext(plain.santa.env, fetchFor(app));
+  assert.ok(allowedOps(granted.scopes).some((item) => item.name === "send_approved_reply"));
+  await assert.rejects(admin(app, "scopes", ["grok"], { scopes: "read,send-approved" }), /400/);
+});
+
+test("admin send-limits, and rule-enable / rule-mode only after Jon types the rule id", async () => {
+  const app = await testApp();
+  const { ctx } = await setUp(app, "read,write,rules", false);
+  const limits = await admin(app, "send-limits", ["grok"], { "per-hour": "2", "per-day": "5" });
+  assert.match(limits.join("\n"), /"perHour": 2/);
+  await assert.rejects(admin(app, "send-limits", ["grok"], { "per-hour": "2" }), /--per-day/);
+
+  const proposal = { id: "ack", name: "Ack", enabled: true, match: { from: ["mina@example.com"] }, actions: [{ type: "reply", reply: { mode: "shadow", template: "Got it.", allowSenders: ["mina@example.com"] } }] };
+  await runOp("upsert_rule", { rule: proposal }, ctx);
+  const rule = async () => ((await app.mailbox.getRules()).rules.find((item) => item.id === "ack"));
+  assert.equal((await rule())?.enabled, false);
+
+  const answers = (typed: string): AdminIo & { lines: string[] } => {
+    const lines: string[] = [];
+    return { lines, ask: (question) => Promise.resolve(question.includes("passphrase") ? TEST_PASSPHRASE : typed), print: (line) => lines.push(line) };
+  };
+  const wrong = answers("nope");
+  await runAdmin({ command: "rule-enable", positionals: ["ack"], flags: {} }, { apiUrl: API, io: wrong, fetchImpl: fetchFor(app) });
+  assert.match(wrong.lines.join("\n"), /Not confirmed/);
+  assert.equal((await rule())?.enabled, false);
+
+  await runAdmin({ command: "rule-enable", positionals: ["ack"], flags: {} }, { apiUrl: API, io: answers("ack"), fetchImpl: fetchFor(app) });
+  assert.deepEqual([(await rule())?.enabled, (await rule())?.createdBy], [true, "human"]);
+  await runAdmin({ command: "rule-mode", positionals: ["ack", "live"], flags: {} }, { apiUrl: API, io: answers("ack"), fetchImpl: fetchFor(app) });
+  const action = (await rule())?.actions[0];
+  assert.equal(action?.type === "reply" ? action.reply.mode : null, "autoSend");
+  await assert.rejects(runAdmin({ command: "rule-mode", positionals: ["ack", "loud"], flags: {} }, { apiUrl: API, io: answers("ack"), fetchImpl: fetchFor(app) }), /draft\|shadow\|live/);
 });

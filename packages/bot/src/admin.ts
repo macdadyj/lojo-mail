@@ -15,13 +15,17 @@ export const ADMIN_USAGE = `lojo-bot admin: Jon's commands (asks for your lojo-m
   lojo-bot admin create <name> --out <file> [--scopes read,write,body,trash,rules,test-send]
   lojo-bot admin rotate <name> --out <file>
   lojo-bot admin revoke <name>
-  lojo-bot admin scopes <name> --scopes read,write,body
+  lojo-bot admin scopes <name> --scopes read,write,body[,send-approved[,send-new]]
+  lojo-bot admin send-limits <name> --per-hour N --per-day N   chat-approved sends (default 10/h, 30/day)
   lojo-bot admin kill-switch on|off
+  lojo-bot admin rule-enable <rule id>                    shows the rule, asks you to type its id
+  lojo-bot admin rule-mode <rule id> draft|shadow|live    live needs the rule in shadow first
   lojo-bot admin set-key <bot public JWK file>        from: lojo-bot key generate (run as the bot user)
   lojo-bot admin remove-key
   lojo-bot admin backfill --private-key-file <your envelope.private.jwk> [--limit N]
 
-The credential is written to --out (mode 600) and never printed. Default scopes: read,write,body.`;
+The credential is written to --out (mode 600) and never printed. Default scopes: read,write,body.
+send-approved needs write; send-new needs send-approved.`;
 
 export interface AdminArgs {
   command: string;
@@ -80,11 +84,34 @@ async function backfill(api: BotApi, args: AdminArgs, io: AdminIo): Promise<void
   io.print(`Backfill for bot key ${envelopeKey.keyId}: ${sealed} sealed, ${failed} failed, of ${messageIds.length} without a copy.`);
 }
 
+function count(args: AdminArgs, name: string): number {
+  const raw = Number(need(flag(args, name), `--${name} <N>`));
+  if (!Number.isInteger(raw)) throw new BotConfigError(`--${name} must be a whole number`);
+  return raw;
+}
+
+/** Jon reads the exact rule and types its id; the fingerprint makes the API refuse if it changed in between. */
+async function confirmRule(api: BotApi, ruleId: string, what: string, io: AdminIo): Promise<string | null> {
+  const listed = await api.get<{ rules: { rules: Array<{ id: string }> }; fingerprints: Record<string, string> }>("/v1/rules");
+  const rule = listed.rules.rules.find((item) => item.id === ruleId);
+  const sha256 = listed.fingerprints[ruleId];
+  if (!rule || !sha256) throw new BotConfigError(`No rule ${ruleId}`);
+  io.print(JSON.stringify(rule, null, 2));
+  const typed = (await io.ask(`Type the rule id to ${what}: `, false)).trim();
+  if (typed !== ruleId) {
+    io.print("Not confirmed. Nothing changed.");
+    return null;
+  }
+  return sha256;
+}
+
+const RULE_MODES = ["draft", "shadow", "live"] as const;
+
 export async function runAdmin(args: AdminArgs, opts: { apiUrl: string; io: AdminIo; fetchImpl?: FetchLike }): Promise<void> {
   const { io } = opts;
   const scopes = flag(args, "scopes")?.split(",").map((scope) => scope.trim()).filter(Boolean);
   const name = args.positionals[0];
-  const known = ["list", "create", "rotate", "revoke", "scopes", "kill-switch", "set-key", "remove-key", "backfill"];
+  const known = ["list", "create", "rotate", "revoke", "scopes", "send-limits", "kill-switch", "rule-enable", "rule-mode", "set-key", "remove-key", "backfill"];
   if (!known.includes(args.command)) throw new BotConfigError(ADMIN_USAGE);
   const api = await signIn(opts.apiUrl, io, opts.fetchImpl ?? fetch);
   switch (args.command) {
@@ -113,6 +140,30 @@ export async function runAdmin(args: AdminArgs, opts: { apiUrl: string; io: Admi
     case "scopes":
       io.print(JSON.stringify(await api.post(`/v1/bots/${id(need(name, "<name>"))}/scopes`, { scopes: scopes ?? [] }), null, 2));
       return;
+    case "send-limits": {
+      const bot = need(name, "<name>");
+      const limits = { perHour: count(args, "per-hour"), perDay: count(args, "per-day") };
+      io.print(JSON.stringify(await api.post(`/v1/bots/${id(bot)}/send-limits`, limits), null, 2));
+      return;
+    }
+    case "rule-enable": {
+      const ruleId = need(name, "<rule id>");
+      const sha256 = await confirmRule(api, ruleId, "enable it", io);
+      if (!sha256) return;
+      await api.post(`/v1/rules/${id(ruleId)}/enable`, { sha256 });
+      io.print(`Rule ${ruleId} is enabled and is now yours: the bot can no longer edit it.`);
+      return;
+    }
+    case "rule-mode": {
+      const ruleId = need(name, "<rule id>");
+      const mode = args.positionals[1];
+      if (!RULE_MODES.some((item) => item === mode)) throw new BotConfigError("rule-mode <rule id> draft|shadow|live");
+      const sha256 = await confirmRule(api, ruleId, `set it to ${mode}`, io);
+      if (!sha256) return;
+      await api.post(`/v1/rules/${id(ruleId)}/automation`, { mode, sha256 });
+      io.print(`Rule ${ruleId} is now ${mode}.${mode === "live" ? " It sends only where LOJO_AUTO_SEND=on (Terraform auto_send_enabled)." : ""}`);
+      return;
+    }
     case "kill-switch": {
       if (name !== "on" && name !== "off") throw new BotConfigError("kill-switch on|off");
       const view = await api.post<{ killSwitch: boolean }>("/v1/bots/kill-switch", { on: name === "on" });

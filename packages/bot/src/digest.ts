@@ -47,6 +47,38 @@ function excerptOf(text: string): string {
   return flat.length > EXCERPT_CHARS ? `${flat.slice(0, EXCERPT_CHARS)}…` : flat;
 }
 
+/** What sent, or would have sent, on Jon's behalf: unsubscribes, shadow and live rule replies, chat-approved and test sends. */
+const AUTOMATION_ACTIONS = new Set(["rule.unsubscribe", "rule.shadow", "rule.autosend", "send.chat_approved", "send.chat_refused", "bot.test_send"]);
+const AUDIT_SCAN = 500;
+
+interface AuditRow {
+  at: string;
+  action: string;
+  outcome: string;
+  messageId?: string;
+  detail?: string;
+  actor?: string;
+}
+
+async function automationSince(ctx: OpContext, since: string) {
+  const { events } = await ctx.api.get<{ events: AuditRow[] }>(`/v1/audit?limit=${AUDIT_SCAN}`);
+  const rows = events.filter((event) => AUTOMATION_ACTIONS.has(event.action) && event.at > since);
+  const counts: Record<string, number> = {};
+  for (const row of rows) counts[`${row.action}:${row.outcome}`] = (counts[`${row.action}:${row.outcome}`] ?? 0) + 1;
+  return {
+    counts,
+    events: rows.slice(0, 50).map((row) => ({
+      at: row.at,
+      action: row.action,
+      outcome: row.outcome,
+      ...(row.messageId ? { messageId: row.messageId } : {}),
+      ...(row.actor ? { actor: row.actor } : {}),
+      ...(row.detail ? { detail: row.detail } : {}),
+    })),
+    truncated: rows.length > 50 || events.length >= AUDIT_SCAN,
+  };
+}
+
 export async function runDigest(ctx: OpContext, opts: DigestOptions = {}) {
   const now = ctx.now();
   const path = digestStatePath(ctx.paths.stateDir);
@@ -87,10 +119,12 @@ export async function runDigest(ctx: OpContext, opts: DigestOptions = {}) {
   }
 
   const { drafts } = await ctx.api.get<{ drafts: Array<{ draft: { status: string } }> }>("/v1/drafts");
+  const since = state?.lastRunAt ?? new Date(cutoff).toISOString();
+  const automation = await automationSince(ctx, since);
   const result = {
     note: UNTRUSTED_PREAMBLE,
     generatedAt: now.toISOString(),
-    since: state?.lastRunAt ?? new Date(cutoff).toISOString(),
+    since,
     peek: opts.peek === true,
     counts: {
       new: fresh.length,
@@ -103,6 +137,7 @@ export async function runDigest(ctx: OpContext, opts: DigestOptions = {}) {
     },
     truncated: fresh.length > reported.length,
     messages,
+    automation,
   };
 
   if (!opts.peek) {
