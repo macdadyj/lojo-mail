@@ -284,5 +284,5 @@ test("the template placeholder only ever inserts a plain first name", () => {
 
 test("config/rules.example.json is a valid rules file", () => {
   const example: unknown = JSON.parse(readFileSync(new URL("../../../../config/rules.example.json", import.meta.url), "utf8"));
-  assert.deepEqual(checkRulesFile(example), { ok: true, rules: 5 });
+  assert.deepEqual(checkRulesFile(example), { ok: true, rules: 6 });
 });

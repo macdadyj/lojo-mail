@@ -45,17 +45,30 @@ async function call(url: string, init: RequestInit): Promise<Record<string, unkn
   return body;
 }
 
+interface DescribedAction {
+  type: string;
+  reply?: { mode?: string; allowSenders?: string[]; allowCategories?: string[] };
+  unsubscribe?: { mode?: string; allowSenders?: string[] };
+}
+
+function describeAction(id: string, action: DescribedAction): string | null {
+  const who = (senders: string[] | undefined, categories?: string[]) =>
+    senders && senders.length > 0 ? senders.join(", ") : categories && categories.length > 0 ? `category ${categories.join(", ")}` : "any list sender";
+  if (action.type === "trash") return `  ${id}: moves matching mail to trash (restorable)`;
+  if (action.type === "reply" && action.reply?.mode === "autoSend") return `  ${id}: AUTO-SENDS replies to ${who(action.reply.allowSenders, action.reply.allowCategories)}`;
+  if (action.type === "reply" && action.reply?.mode === "shadow") return `  ${id}: shadow reply (logs only) to ${who(action.reply.allowSenders, action.reply.allowCategories)}`;
+  if (action.type === "unsubscribe" && action.unsubscribe?.mode === "auto") return `  ${id}: UNSUBSCRIBES from lists from ${who(action.unsubscribe.allowSenders)}`;
+  if (action.type === "unsubscribe") return `  ${id}: shadow unsubscribe (logs only) from ${who(action.unsubscribe?.allowSenders)}`;
+  return null;
+}
+
 function describe(input: unknown): string[] {
-  const rules =
-    (input as { rules?: Array<{ id: string; enabled?: boolean; actions: Array<{ type: string; reply?: { mode?: string; allowSenders?: string[] } }> }> }).rules ?? [];
+  const rules = (input as { rules?: Array<{ id: string; enabled?: boolean; actions: DescribedAction[] }> }).rules ?? [];
   return rules.flatMap((rule) =>
-    rule.actions
-      .filter((action) => action.type === "trash" || (action.type === "reply" && action.reply?.mode === "autoSend"))
-      .map((action) =>
-        action.type === "trash"
-          ? `  ${rule.id}: moves matching mail to trash (restorable)${rule.enabled === false ? " [disabled]" : ""}`
-          : `  ${rule.id}: AUTO-SENDS replies to ${(action.reply?.allowSenders ?? []).join(", ")}${rule.enabled === false ? " [disabled]" : ""}`,
-      ),
+    rule.actions.flatMap((action) => {
+      const line = describeAction(rule.id, action);
+      return line ? [`${line}${rule.enabled === false ? " [disabled]" : ""}`] : [];
+    }),
   );
 }
 

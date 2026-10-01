@@ -37,14 +37,14 @@
     },
     {
       "id": "travel-autoreply",
-      "name": "While travelling, tell two known people I will answer next week",
+      "name": "Travelling: tell two known people I answer next week (shadow first, then Go live in the web app)",
       "enabled": false,
       "match": { "from": ["mina@example.com", "@harbor.example"] },
       "actions": [
         {
           "type": "reply",
           "reply": {
-            "mode": "autoSend",
+            "mode": "shadow",
             "template": "Hi {{first_name}},\n\nI am travelling this week and will answer when I am back.\n\nJon",
             "allowSenders": ["mina@example.com", "@harbor.example"],
             "allowCategories": ["personal"],
@@ -53,6 +53,13 @@
           }
         }
       ]
+    },
+    {
+      "id": "unsubscribe-deals",
+      "name": "Unsubscribe from deal lists (shadow first)",
+      "enabled": false,
+      "match": { "from": ["@deals.example"], "bulk": true },
+      "actions": [{ "type": "unsubscribe", "unsubscribe": { "mode": "shadow", "allowSenders": ["@deals.example"], "perDay": 10 } }]
     }
   ]
 }
