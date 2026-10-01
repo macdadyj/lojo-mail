@@ -33,8 +33,9 @@ public struct OutgoingAttachment: Sendable, Hashable, Identifiable {
     }
 }
 
-/// How much fits in one message. The server's limit is on the whole encoded message (the bridge's
-/// `DEFAULT_CLIENT_SEND_LIMITS.maxBytes`), so attachments are counted as base64 with line breaks, plus headers.
+/// How much fits in one message. The server's limit is on the whole encoded message, so attachments are counted as
+/// base64 with line breaks, plus headers: the same arithmetic as `estimatedMessageBytes` in
+/// `packages/core/src/draft-attachments.ts`, so a file the app says fits is one the server accepts.
 public struct AttachmentBudget: Sendable, Hashable {
     public static let defaultMaxMessageBytes = 4_000_000
     public static let defaultMaxFiles = 10
@@ -91,5 +92,13 @@ public enum ByteSize {
         if bytes < 1_000_000 { return "\(Int((Double(bytes) / 1_000).rounded())) KB" }
         let mb = Double(bytes) / 1_000_000
         return mb < 10 ? String(format: "%.1f MB", mb) : "\(Int(mb.rounded())) MB"
+    }
+}
+
+extension DraftFields {
+    /// The files the approval names: those already on the draft, then the ones about to be uploaded, in upload order.
+    /// The server appends uploads, so this is its order once they land; any other order is a 409.
+    public static func reviewedAttachments(onDraft: [DraftAttachment], pending: [OutgoingAttachment]) -> [String] {
+        onDraft.map(\.sha256) + pending.map(\.sha256)
     }
 }

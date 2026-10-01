@@ -182,7 +182,7 @@ public enum DraftAuthor: String, Codable, Sendable {
         case .human: nil
         case .agent: "An assistant"
         case .ai: "The AI"
-        case .client: "Thunderbird (through the local bridge)"
+        case .client: "Your desktop mail client"
         case .rule: "One of your mail rules"
         }
     }
@@ -192,7 +192,7 @@ public enum DraftAuthor: String, Codable, Sendable {
         case .human: "You"
         case .agent: "Assistant"
         case .ai: "AI"
-        case .client: "Thunderbird"
+        case .client: "Mail client"
         case .rule: "Rule"
         }
     }
@@ -224,7 +224,7 @@ public struct Draft: Codable, Sendable, Hashable, Identifiable {
     public var createdAt: String
     public var updatedAt: String
     public var sentMessageId: String?
-    /// Files on the draft. Only servers with `ServerSettings.draftAttachments` send this; see ios/docs/API-ATTACHMENTS.md.
+    /// Files on the draft, in the order they will be sent (`packages/core/src/draft-attachments.ts`).
     public var attachments: [DraftAttachment]?
 
     /// Same wording as `authorNotice` in `packages/web/src/review.ts`: depends on who wrote the content, never on status.
@@ -249,9 +249,9 @@ public struct DraftAttachment: Codable, Sendable, Hashable, Identifiable {
     public var sha256: String
 }
 
-/// Advertised in `/v1/settings` by a server that accepts attachments on drafts (proposed, ios/docs/API-ATTACHMENTS.md).
+/// `/v1/settings` → `draftAttachments`: the server accepts files on drafts, within these limits.
 public struct DraftAttachmentSupport: Codable, Sendable, Hashable {
-    /// The whole encoded message, like the bridge's `DEFAULT_CLIENT_SEND_LIMITS.maxBytes` (4,000,000).
+    /// The whole encoded message (4,000,000 on the deployed server).
     public var maxMessageBytes: Int
     public var maxFiles: Int?
 }

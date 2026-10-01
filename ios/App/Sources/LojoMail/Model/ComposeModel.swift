@@ -38,7 +38,6 @@ final class ComposeModel {
     var conflictArmed = true
     var sentMessageId: String?
     var preparing = false
-    private var attachmentsNotForwarded: [AttachmentMeta] = []
     /// Picked in Compose and not on the server yet. Memory only.
     private(set) var attachments: [OutgoingAttachment] = []
     private(set) var thumbnails: [UUID: UIImage] = [:]
@@ -69,10 +68,8 @@ final class ComposeModel {
         case .forward(let message):
             fields.subject = MailText.forwardSubject(message.subject)
             fields.text = MailText.forwarded(model.bodyText(message) ?? "(The original text is sealed; load your envelope key to include it.)", message: message)
-            if model.draftAttachmentSupport != nil, !message.attachments.isEmpty {
+            if !message.attachments.isEmpty {
                 Task { await self.forwardAttachments(of: message) }
-            } else {
-                attachmentsNotForwarded = message.attachments
             }
         case .aiReply(let message):
             preparing = true
@@ -86,10 +83,6 @@ final class ComposeModel {
         !attachments.isEmpty || (saved.map { $0 != fields } ?? !(fields.to.isEmpty && fields.subject.isEmpty && fields.text.isEmpty))
     }
     var closed: Bool { draft.map { !$0.status.editable } ?? false }
-    var forwardWarning: String? {
-        guard !attachmentsNotForwarded.isEmpty else { return nil }
-        return "The original's attachments (\(attachmentsNotForwarded.map(\.filename).joined(separator: ", "))) aren't forwarded: this server can't take files on drafts yet."
-    }
 
     // MARK: Attachments
 
@@ -102,8 +95,6 @@ final class ComposeModel {
     var attachedBytes: Int { attachmentSizes.reduce(0, +) }
     var budgetUsage: Double { budget.usage(textBytes: textBytes, attachmentSizes: attachmentSizes) }
     var overBudget: Bool { hasAttachments && !budget.fits(textBytes: textBytes, attachmentSizes: attachmentSizes) }
-    /// Files are attached but this server can't carry them on a draft, so sending or queueing would drop them.
-    var attachmentsUnsendable: Bool { support == nil && hasAttachments }
     var roomLeft: Int { budget.remainingRawBytes(textBytes: textBytes, attachmentSizes: attachmentSizes) }
 
     /// Adds a file if it fits; otherwise says why. Photos may already have been shrunk by the caller.
@@ -139,10 +130,16 @@ final class ComposeModel {
         thumbnails[file.id] = nil
     }
 
+    /// Removes a file that is already on the draft (`POST /v1/drafts/:id/attachments/:attId/remove`).
     func detach(_ file: DraftAttachment) async {
         guard let id = draft?.id else { return }
-        await run {
+        busy = true
+        defer { busy = false }
+        do {
             show(try await model.call { try await $0.removeDraftAttachment(id, attachmentId: file.id) })
+            attachmentNotice = nil
+        } catch {
+            attachmentNotice = "Couldn't remove \(file.filename): \(error.localizedDescription)"
         }
     }
 
@@ -164,14 +161,28 @@ final class ComposeModel {
         }
     }
 
-    /// Uploads files picked here to the saved draft, one request each, then shows the server's list.
+    /// Uploads files picked here to the saved draft, one request each, in order, then shows the server's list.
+    /// A file that fails stays here (with the ones after it) so Jon can remove it or retry.
     private func uploadAttachments(to id: String) async throws {
         while let file = attachments.first {
-            let view = try await model.call { try await $0.addDraftAttachment(id, file) }
+            let view: DraftView
+            do {
+                view = try await model.call { try await $0.addDraftAttachment(id, file) }
+            } catch let failure as APIError where failure == .unauthorized || failure.isOffline {
+                throw failure
+            } catch {
+                attachmentNotice = "\(file.filename) wasn't attached: \(error.localizedDescription)"
+                throw error
+            }
             attachments.removeFirst()
             thumbnails[file.id] = nil
             show(view)
         }
+    }
+
+    /// Re-reads `/v1/settings` so the file limits are the server's current ones, never a stale answer.
+    func refreshCapabilities() async {
+        await model.refreshSettings()
     }
 
     /// Recipients outside the test address while test mode is on.
@@ -207,10 +218,16 @@ final class ComposeModel {
         }
     }
 
-    /// Saves the text, then (on a server that takes them) the attachments. On an older server the files stay here.
+    /// Saves the text, then uploads any new attachments to the draft.
     @discardableResult
     func save() async throws -> String {
         guard !fields.toList.isEmpty else { throw APIError.invalid("Add at least one recipient.") }
+        if !attachments.isEmpty {
+            await model.refreshSettings()
+            guard support != nil else {
+                throw APIError.invalid("The mail server at \(model.apiBase.host() ?? "this address") doesn't accept attachments on drafts (its /v1/settings has no draftAttachments). Check the server URL in Settings.")
+            }
+        }
         guard !overBudget else { throw APIError.invalid("The attachments don't fit in one message (\(ByteSize.format(budget.maxMessageBytes))). Remove one.") }
         let id: String
         if let draft, let saved, saved == fields {
@@ -228,7 +245,7 @@ final class ComposeModel {
             show(view)
             id = view.draft.id
         }
-        if support != nil { try await uploadAttachments(to: id) }
+        try await uploadAttachments(to: id)
         return id
     }
 
@@ -249,19 +266,11 @@ final class ComposeModel {
     func saveDraft() async {
         await run {
             try await save()
-            status = attachmentsUnsendable
-                ? "Text saved as a draft. The attachments stay on this screen only: the server can't store them yet."
-                : "Saved as a draft. Nothing is sent until you approve it."
+            status = "Saved as a draft. Nothing is sent until you approve it."
         }
     }
 
-    static let unsendableAttachments = "This server can't send attachments from the app yet, so they would be dropped. Remove them to send, or send this one from Thunderbird."
-
     func saveToApprovalQueue() async {
-        guard !attachmentsUnsendable else {
-            error = ComposeModel.unsendableAttachments
-            return
-        }
         await run {
             let id = try await save()
             let view = try await model.call { try await $0.submitForApproval(id) }
@@ -297,14 +306,10 @@ final class ComposeModel {
             error = "Test mode is on: only \(AppModel.testAddress) can receive mail from this app. Turn it off in Settings."
             return
         }
-        guard !attachmentsUnsendable else {
-            error = ComposeModel.unsendableAttachments
-            return
-        }
         guard conflictArmed else { return }
         await run {
             var shown = fields
-            shown.attachments = serverAttachments.map(\.sha256) + attachments.map(\.sha256)
+            shown.attachments = DraftFields.reviewedAttachments(onDraft: serverAttachments, pending: attachments)
             let reviewed = shown
             let id = try await save()
             let token: String

@@ -1,7 +1,7 @@
 import LojoMailCore
 import SwiftUI
 
-/// The approval queue: drafts from the AI, assistants, rules and Thunderbird, plus Jon's own.
+/// The approval queue: drafts from the AI, assistants, rules and Jon's desktop mail client, plus his own.
 struct ReviewView: View {
     @Environment(AppModel.self) private var model
     @State private var path = NavigationPath()
@@ -49,7 +49,7 @@ struct ReviewView: View {
                         StateView(
                             title: "Nothing to review",
                             systemImage: "checkmark.seal",
-                            message: "Drafts the AI, your assistants, your mail rules or Thunderbird write land here. Nothing they write is sent until you open it here and tap Approve and send."
+                            message: "Drafts the AI, your assistants or your mail rules write land here. Nothing they write is sent until you open it here and tap Approve and send."
                         )
                     }
                 }
@@ -146,7 +146,7 @@ struct RulesView: View {
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                     Section { sendKillSwitchRow(doc) } footer: {
-                        Text("Blocks every send, including mail you approve here and Thunderbird. Anyone with a token can engage it; only your signed-in session can release it.")
+                        Text("Blocks every send from the mailbox, including mail you approve here. Anyone with a token can engage it; only your signed-in session can release it.")
                     }
                     Section {
                         Toggle(isOn: Binding(get: { !doc.paused }, set: { on in
@@ -208,7 +208,7 @@ struct RulesView: View {
             .confirmationDialog("Allow sending again?", isPresented: $confirmSendRelease, titleVisibility: .visible) {
                 Button("Allow sending", role: .destructive) { Task { await model.setSendKillSwitch(false) } }
             } message: {
-                Text("Approved drafts and Thunderbird can send mail again. The autonomous kill switch above is separate.")
+                Text("Approved drafts can be sent again. The autonomous kill switch above is separate.")
             }
             .confirmationDialog("Resume all rules?", isPresented: $confirmResume, titleVisibility: .visible) {
                 Button("Resume rules") { Task { await model.setPaused(false) } }

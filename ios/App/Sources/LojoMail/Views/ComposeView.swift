@@ -2,7 +2,7 @@ import LojoMailCore
 import PhotosUI
 import SwiftUI
 
-/// Compose, reply, forward, and review of any draft (Jon's, the AI's, an assistant's, a rule's or Thunderbird's).
+/// Compose, reply, forward, and review of any draft (Jon's, the AI's, an assistant's, a rule's, or one saved by his desktop mail client).
 struct ComposeView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -33,6 +33,7 @@ struct ComposeView: View {
         }
         .onAppear {
             if model == nil { model = ComposeModel(model: app, request: request) }
+            if let model { Task { await model.refreshCapabilities() } }
             if app.launch.composeSamples, let model, !model.hasAttachments, case .new = request {
                 for sample in AttachmentImport.samples() { model.attach(sample) }
             }
@@ -104,8 +105,6 @@ struct ComposeView: View {
                     .frame(minHeight: 260)
                     .accessibilityLabel("Message")
                     .disabled(model.closed)
-            } footer: {
-                if let warning = model.forwardWarning { Text(warning) }
             }
             if !model.closed || model.hasAttachments {
                 ComposeAttachmentsSection(model: model, photos: openPhotos, camera: openCamera, files: openFiles)
@@ -157,12 +156,10 @@ struct ComposeView: View {
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                 } footer: {
-                    if model.attachmentsUnsendable {
-                        Text("Remove the attachments to send: this server can't send them from the app yet.").foregroundStyle(.orange)
-                    } else if model.overBudget {
+                    if model.overBudget {
                         Text("Remove an attachment to send: the message is over \(ByteSize.format(model.budget.maxMessageBytes)).").foregroundStyle(.red)
                     } else {
-                        Text("Sending asks the server for a one-time approval bound to exactly the recipients, subject, text\(model.hasAttachments ? ", attachments" : "") and encryption shown here. Bots and Thunderbird can't do this step.")
+                        Text("Sending asks the server for a one-time approval bound to exactly the recipients, subject, text\(model.hasAttachments ? ", attachments" : "") and encryption shown here. Only you can do this step; bots and other clients can't.")
                     }
                 }
             }
@@ -209,14 +206,12 @@ struct ComposeView: View {
         }
         .confirmationDialog("Keep this draft?", isPresented: $confirmClose, titleVisibility: .visible) {
             Button("Save draft") { Task { await model.saveDraft(); if model.error == nil { dismiss() } } }
-            if !model.attachmentsUnsendable {
-                Button("Save to approval queue") { Task { await model.saveToApprovalQueue(); if model.error == nil { dismiss() } } }
-            }
+            Button("Save to approval queue") { Task { await model.saveToApprovalQueue(); if model.error == nil { dismiss() } } }
             Button("Close without saving", role: .destructive) { dismiss() }
             Button("Keep editing", role: .cancel) {}
         } message: {
-            if model.attachmentsUnsendable {
-                Text("Only the text is saved. This server can't store attachments yet, so they are dropped when you close.")
+            if model.hasAttachments {
+                Text("Saving uploads the attachments to the draft with the text.")
             }
         }
         .confirmationDialog("Discard this draft?", isPresented: $confirmDiscard, titleVisibility: .visible) {
@@ -272,7 +267,6 @@ struct ComposeView: View {
                 Menu {
                     Button { Task { await model.saveDraft() } } label: { Label("Save draft", systemImage: "square.and.arrow.down") }
                     Button { Task { await model.saveToApprovalQueue() } } label: { Label("Save to approval queue", systemImage: "tray.and.arrow.down") }
-                        .disabled(model.attachmentsUnsendable)
                     Menu {
                         ForEach(["Make it shorter.", "Make it friendlier.", "Make it more formal.", "Fix grammar and spelling only."], id: \.self) { instruction in
                             Button(instruction) { Task { await model.rewrite(instruction) } }
@@ -295,7 +289,7 @@ struct ComposeView: View {
 
     private func canSend(_ model: ComposeModel) -> Bool {
         !model.busy && !model.fields.toList.isEmpty && model.conflictArmed && model.blockedByTestMode.isEmpty
-            && !model.attachmentsUnsendable && !model.overBudget && model.loadingAttachments == 0
+            && !model.overBudget && model.loadingAttachments == 0
     }
 
     private func attachmentSummary(_ model: ComposeModel) -> String {

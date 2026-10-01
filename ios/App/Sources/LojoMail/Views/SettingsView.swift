@@ -112,7 +112,7 @@ struct SettingsView: View {
                         LabeledContent("AI provider", value: settings.llmProvider)
                         LabeledContent("AI budget today", value: "\(settings.budgetUsed.formatted()) / \(settings.dailyTokenBudget.formatted()) tokens")
                         LabeledContent("Attachments from the app") {
-                            Text(settings.draftAttachments.map { "Up to \(ByteSize.format($0.maxMessageBytes)) per message" } ?? "Not on this server yet")
+                            Text(settings.draftAttachments.map { "Up to \($0.maxFiles ?? AttachmentBudget.defaultMaxFiles) files, \(ByteSize.format($0.maxMessageBytes)) per message" } ?? "Not supported by this server")
                                 .foregroundStyle(settings.draftAttachments == nil ? .orange : .secondary)
                         }
                         if settings.dev { LabeledContent("Server", value: "local dev") }
@@ -149,7 +149,7 @@ struct SettingsView: View {
             .task {
                 apiText = model.apiBase.absoluteString
                 await refreshNotificationStatus()
-                if model.serverSettings == nil { model.serverSettings = try? await model.call { try await $0.settings() } }
+                await model.refreshSettings()
             }
         }
     }

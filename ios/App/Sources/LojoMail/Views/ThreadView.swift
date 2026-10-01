@@ -28,7 +28,7 @@ struct ThreadView: View {
     private var trashedByText: String {
         switch messages.compactMap(\.trashedBy).first {
         case "human": "Trashed by you"
-        case "bridge": "Trashed from Thunderbird"
+        case "bridge": "Trashed from your mail client"
         case let actor? where actor.hasPrefix("agent:"): "Trashed by agent \(actor.dropFirst(6))"
         default: "In Trash"
         }

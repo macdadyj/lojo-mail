@@ -322,8 +322,18 @@ final class AppModel {
         async let drafts: Void = refreshDrafts()
         async let rules: Void = refreshRules()
         _ = await (inbox, drafts, rules)
-        if serverSettings == nil { serverSettings = try? await call { try await $0.settings() } }
-        if let mailbox = serverSettings?.mailbox { self.mailbox = mailbox }
+        await refreshSettings()
+    }
+
+    /// Always asks the server: capabilities such as draft attachments change when the server is updated, so a value
+    /// from earlier in the session is never trusted to mean "not supported". On failure the last answer is kept.
+    @discardableResult
+    func refreshSettings() async -> ServerSettings? {
+        if let fresh = try? await call({ try await $0.settings() }) {
+            serverSettings = fresh
+            mailbox = fresh.mailbox
+        }
+        return serverSettings
     }
 
     /// Foreground poll every 60 s while the app is active.
@@ -438,7 +448,7 @@ final class AppModel {
         return bytes
     }
 
-    /// `nil` until `/v1/settings` says the server accepts files on drafts (ios/docs/API-ATTACHMENTS.md).
+    /// From the latest `/v1/settings`; `nil` if the server does not accept files on drafts.
     var draftAttachmentSupport: DraftAttachmentSupport? { serverSettings?.draftAttachments }
 
     // MARK: Mail actions (optimistic, rolled back on failure)

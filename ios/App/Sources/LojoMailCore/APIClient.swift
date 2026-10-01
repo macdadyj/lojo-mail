@@ -11,6 +11,8 @@ public enum APIError: Error, LocalizedError, Equatable {
     case conflict(String)
     case notFound(String)
     case invalid(String)
+    /// 413: over the message size limit (4 MB including encoding) or the per-file upload limit.
+    case tooLarge(String)
     case server(Int, String)
     case offline
     case network(String)
@@ -23,6 +25,7 @@ public enum APIError: Error, LocalizedError, Equatable {
         case .rateLimited(let after):
             if let after { "Too many failed sign-ins. Try again in \(max(1, after / 60)) min." } else { "Too many requests. Try again shortly." }
         case .forbidden(let message), .conflict(let message), .notFound(let message), .invalid(let message): message
+        case .tooLarge(let message): "Too large to send: \(message). Remove a file or send a smaller one."
         case .server(let status, let message): "The mail server returned \(status): \(message)"
         case .offline: "You're offline. Showing what was last loaded."
         case .network(let message): "Couldn't reach the mail server (\(message))."
@@ -221,8 +224,8 @@ public struct APIClient: Sendable {
         return minted.approvalToken
     }
 
-    /// Proposed (ios/docs/API-ATTACHMENTS.md): one file per request, base64 in JSON, so a 4 MB message stays under
-    /// API Gateway's and Lambda's request limits.
+    /// One file per request, base64 in JSON, so a 4 MB message stays under Lambda's 6 MB request limit. 413 when the
+    /// message would go over `maxMessageBytes`, 400 past `maxFiles` or on a hash mismatch.
     public func addDraftAttachment(_ id: String, _ file: OutgoingAttachment) async throws -> DraftView {
         try await send("POST", "/v1/drafts/\(escaped(id))/attachments", json: [
             "filename": file.filename,
@@ -329,6 +332,7 @@ public struct APIClient: Sendable {
         case 404: throw APIError.notFound(message)
         case 409: throw APIError.conflict(message)
         case 400, 422, 423: throw APIError.invalid(message)
+        case 413: throw APIError.tooLarge(message)
         case 429: throw APIError.rateLimited(retryAfter: http.value(forHTTPHeaderField: "retry-after").flatMap(Int.init))
         default: throw APIError.server(http.statusCode, message)
         }
@@ -380,7 +384,7 @@ public struct DraftFields: Sendable, Hashable {
         ["to": toList, "cc": ccList, "subject": subject, "text": text, "pgp": pgp.rawValue]
     }
 
-    /// Servers without draft attachments reject unknown members, so `attachments` is only sent when there are some.
+    /// `attachments` is only sent when there are some, so an approval without files is the same body as before.
     var approvalPayload: [String: Any] {
         var body = payload
         if !attachments.isEmpty { body["attachments"] = attachments }

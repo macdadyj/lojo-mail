@@ -25,15 +25,6 @@ struct ComposeAttachmentsSection: View {
 
     var body: some View {
         Section {
-            if model.attachmentsUnsendable {
-                Label {
-                    Text("This server can't send attachments from the app yet. Remove them to send, or send this message from Thunderbird.")
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                }
-                .font(.footnote)
-                .foregroundStyle(.orange)
-            }
             ForEach(model.serverAttachments) { file in
                 AttachmentRow(
                     filename: file.filename, size: file.size, contentType: file.contentType,
@@ -45,7 +36,7 @@ struct ComposeAttachmentsSection: View {
                 AttachmentRow(
                     filename: file.filename, size: file.size, contentType: file.contentType,
                     thumbnail: model.thumbnails[file.id],
-                    detail: model.support == nil ? "Not sendable yet" : "Uploads when you save or send",
+                    detail: "Uploads when you save or send",
                     remove: { model.detach(file) }
                 )
             }
