@@ -5,6 +5,7 @@ import {
   botBackfillCandidates,
   botScopes,
   checkBotToken,
+  DEFAULT_CHAT_SEND_LIMITS,
   MailError,
   newId,
   readBotCopy,
@@ -14,7 +15,7 @@ import {
   type Mailbox,
 } from "@lojo/core";
 import type { Context, Hono, MiddlewareHandler } from "hono";
-import type { Principal, Scope } from "./auth.ts";
+import { hasScope, type Principal, type Scope } from "./auth.ts";
 
 /** Every bot principal's label starts with this; nothing else may. */
 export const BOT_LABEL_PREFIX = "bot:";
@@ -163,6 +164,33 @@ export function registerBotRoutes(app: Hono<Env>, deps: BotRouteDeps): void {
   app.post("/v1/rules/bot-rules/:id/delete", need("rules"), async (c) => {
     requireBot(c);
     return c.json({ rules: await mailbox.deleteBotRule(c.req.param("id")) });
+  });
+  app.post("/v1/bots/:name/send-limits", need("human"), async (c) => c.json(await admin.setSendLimits(c.req.param("name"), await body<unknown>(c))));
+
+  /**
+   * Chat-approved replies (`send-approved`). The server cannot see the chat:
+   * it checks the content hash, recipients, note and rate, and the approval
+   * itself is the bot's attestation (docs/BOT.md).
+   */
+  app.get("/v1/bot/drafts/:id/review", need("send-approved"), async (c) => {
+    requireBot(c);
+    return c.json(await mailbox.chatSendReview(c.req.param("id"), hasScope(c.get("principal").scopes, "send-new")));
+  });
+  app.post("/v1/bot/drafts/:id/send-approved", need("send-approved"), async (c) => {
+    const bot = requireBot(c);
+    const input = await body<{ contentHash: string; approvalSource: string; approvalNote: string }>(c);
+    const record = (await mailbox.store.getBotRegistry())?.bots.find((item) => `${BOT_LABEL_PREFIX}${item.name}` === bot);
+    return c.json(
+      await mailbox.botChatSend({
+        bot,
+        draftId: c.req.param("id"),
+        contentHash: input.contentHash,
+        approvalSource: input.approvalSource,
+        approvalNote: input.approvalNote,
+        allowNew: hasScope(c.get("principal").scopes, "send-new"),
+        limits: record?.sendLimits ?? DEFAULT_CHAT_SEND_LIMITS,
+      }),
+    );
   });
   app.post("/v1/bot/test-send", need("test-send"), async (c) => {
     const bot = requireBot(c);

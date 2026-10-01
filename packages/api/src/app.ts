@@ -1,4 +1,4 @@
-import { FOLDERS, keyFingerprint, MailError, type Actor, type Folder, type Mailbox, type PgpMode, type ReviewedDraft, type TrashActor, type ViewOptions } from "@lojo/core";
+import { FOLDERS, isAutomationMode, keyFingerprint, MailError, ruleFingerprints, type Actor, type Folder, type Mailbox, type PgpMode, type ReviewedDraft, type TrashActor, type ViewOptions } from "@lojo/core";
 import { HttpMailClient } from "@lojo/mcp/http";
 import { handleMcpPost, mcpMethodNotAllowed, type McpHttpReply } from "@lojo/mcp/remote";
 import { Hono, type Context } from "hono";
@@ -107,8 +107,11 @@ function isBridge(principal: Principal): boolean {
   return principal.label === BRIDGE_LABEL || principal.scopes.includes("client-send");
 }
 
-function isMcpScope(scope: Scope): scope is Exclude<Scope, "client-send" | "rules" | "test-send"> {
-  return scope !== "client-send" && scope !== "rules" && scope !== "test-send";
+type BotOnlyScope = "client-send" | "rules" | "test-send" | "send-approved" | "send-new";
+const NON_MCP_SCOPES: readonly Scope[] = ["client-send", "rules", "test-send", "send-approved", "send-new"] satisfies BotOnlyScope[];
+
+function isMcpScope(scope: Scope): scope is Exclude<Scope, BotOnlyScope> {
+  return !NON_MCP_SCOPES.includes(scope);
 }
 
 const MAX_CLIENT_SEND_BASE64 = 6_000_000;
@@ -443,7 +446,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/v1/messages/:id/archive", need("write"), async (c) => c.json(await mailbox.archive(c.req.param("id"))));
   app.post("/v1/messages/:id/restore", need("write"), async (c) => c.json(await mailbox.restore(c.req.param("id"))));
 
-  app.get("/v1/rules", need("read"), async (c) => c.json({ rules: await mailbox.getRules(), autoSendEnabled: deps.info.autoSendEnabled ?? false }));
+  app.get("/v1/rules", need("read"), async (c) => {
+    const rules = await mailbox.getRules();
+    return c.json({ rules, fingerprints: ruleFingerprints(rules), autoSendEnabled: deps.info.autoSendEnabled ?? false });
+  });
   /** Replaces the whole document. Human sessions only; tokens can only make rules safer (below). */
   app.put("/v1/rules", need("human"), async (c) => c.json({ rules: await mailbox.putRules(await body<unknown>(c), actorOf(c.get("principal"))) }));
   app.post("/v1/rules/switches", need("write"), async (c) => {
@@ -456,6 +462,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ rules: await mailbox.setRuleSwitches(switches, actorOf(c.get("principal"))) });
   });
   app.post("/v1/rules/:id/disable", need("write"), async (c) => c.json({ rules: await mailbox.disableRule(c.req.param("id"), actorOf(c.get("principal"))) }));
+  /** Jon only. `sha256` is the fingerprint from GET /v1/rules, so he enables exactly the rule he read. */
+  app.post("/v1/rules/:id/enable", need("human"), async (c) => {
+    const input = await body<{ sha256: string }>(c);
+    return c.json({ rules: await mailbox.enableRule(c.req.param("id"), input.sha256, actorOf(c.get("principal"))) });
+  });
+  /** Jon only: draft, shadow (log what it would send) or live. Live needs the same action in shadow first. */
+  app.post("/v1/rules/:id/automation", need("human"), async (c) => {
+    const input = await body<{ mode: string; sha256: string }>(c);
+    if (!isAutomationMode(input.mode)) throw new MailError("mode must be draft, shadow or live", "invalid");
+    return c.json({ rules: await mailbox.setRuleAutomation(c.req.param("id"), input.mode, input.sha256, actorOf(c.get("principal"))) });
+  });
   app.post("/v1/rules/test", need("read"), async (c) => {
     const input = await body<{ messageId: string }>(c);
     if (typeof input.messageId !== "string" || !input.messageId) throw new MailError("messageId is required", "invalid");
@@ -471,7 +488,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.get("/v1/action-items", need("read"), need("body"), async (c) => c.json({ items: await mailbox.actionItems() }));
   app.get("/v1/export/index", need("read"), async (c) => c.json(await mailbox.exportIndex()));
   app.get("/v1/export", need("human"), async (c) => c.body(await mailbox.exportAll(), 200, { "content-type": "application/json" }));
-  app.get("/v1/audit", need("read"), async (c) => c.json({ events: await mailbox.listAudit() }));
+  /** Newest first, `limit` 1-500 (default 50). */
+  app.get("/v1/audit", need("read"), async (c) => {
+    const raw = Number(c.req.query("limit") ?? "50");
+    const limit = Number.isInteger(raw) ? Math.min(Math.max(raw, 1), 500) : 50;
+    return c.json({ events: await mailbox.listAudit(limit) });
+  });
   app.get("/v1/labels", need("read"), async (c) => c.json({ labels: await mailbox.labels() }));
   app.get("/v1/settings", need("read"), async (c) => {
     const day = new Date().toISOString().slice(0, 10);

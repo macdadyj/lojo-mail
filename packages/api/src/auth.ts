@@ -8,10 +8,23 @@ import type { Sessions } from "./session.ts";
  * the bridge gets it with LOJO_BRIDGE_TRASH=on, an agent token only when Jon
  * lists it for that agent. `client-send` is Jon pressing Send in Thunderbird:
  * only the bridge token can hold it, only with LOJO_BRIDGE_SEND=on. `rules`
- * (bot-authored rules) and `test-send` (mail to lojo-test only) exist only on
- * bot credentials (bots.ts). `admin` implies none of these.
+ * (bot-authored rules), `test-send` (mail to lojo-test only), `send-approved`
+ * (replies Jon approved in chat) and `send-new` (those replies to new
+ * recipients) exist only on bot credentials (bots.ts). `admin` implies none of these.
  */
-export type Scope = "read" | "write" | "send" | "body" | "compose" | "trash" | "client-send" | "rules" | "test-send" | "admin";
+export type Scope =
+  | "read"
+  | "write"
+  | "send"
+  | "body"
+  | "compose"
+  | "trash"
+  | "client-send"
+  | "rules"
+  | "test-send"
+  | "send-approved"
+  | "send-new"
+  | "admin";
 
 export type PrincipalKind = "token" | "human";
 
@@ -40,6 +53,8 @@ function knownScope(value: string): Scope | null {
     case "client-send":
     case "rules":
     case "test-send":
+    case "send-approved":
+    case "send-new":
     case "admin":
       return value;
     default:
@@ -47,8 +62,8 @@ function knownScope(value: string): Scope | null {
   }
 }
 
-/** Never in LOJO_API_SCOPES/LOJO_SEND_SCOPES. `trash` is still open to agent tokens (AGENT_SCOPES); `rules` and `test-send` to bots. */
-const BRIDGE_ONLY_SCOPES: readonly Scope[] = ["trash", "client-send", "rules", "test-send"];
+/** Never in LOJO_API_SCOPES/LOJO_SEND_SCOPES. `trash` is still open to agent tokens (AGENT_SCOPES); `rules`, `test-send`, `send-approved` and `send-new` to bots. */
+const BRIDGE_ONLY_SCOPES: readonly Scope[] = ["trash", "client-send", "rules", "test-send", "send-approved", "send-new"];
 
 export function parseScopes(value: string | undefined, fallback: Scope[]): Scope[] {
   if (!value) return fallback;
@@ -70,6 +85,8 @@ export function hasScope(scopes: readonly Scope[], required: Scope): boolean {
     case "client-send":
     case "rules":
     case "test-send":
+    case "send-approved":
+    case "send-new":
       return scopes.includes(required);
     case "read":
     case "write":

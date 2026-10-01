@@ -191,3 +191,49 @@ test("a bot with trash moves mail to Trash as bot:<name>, restorable", async () 
   assert.equal(moved.json.trashedBy, "bot:sorter");
   assert.equal((await app.call(`/v1/messages/${message.id}/restore`, { token: trasher, body: {} })).status, 200);
 });
+
+test("a bot proposes automation disabled; only Jon enables it, by fingerprint, shadow before live", async () => {
+  const app = await testApp();
+  const session = await app.login();
+  const ruler = String((await app.call("/v1/bots", { token: session, body: { name: "ruler", scopes: ["read", "write", "rules"] } })).json.token);
+  const proposal = {
+    name: "Ack receipts",
+    enabled: true,
+    match: { from: ["@shop.example"] },
+    actions: [{ type: "reply", reply: { mode: "shadow", template: "Thanks, received.", allowSenders: ["@shop.example"] } }],
+  };
+  const saved = await app.call("/v1/rules/bot-rules/ack", { method: "PUT", token: ruler, body: proposal });
+  assert.equal(saved.status, 200, saved.text);
+  const listed = await app.call("/v1/rules", { token: session });
+  const rule = (listed.json.rules as { rules: Array<{ id: string; enabled: boolean; createdBy: string }> }).rules.find((item) => item.id === "ack");
+  assert.equal(rule?.enabled, false, "a proposal is always saved disabled");
+  const sha256 = (listed.json.fingerprints as Record<string, string>).ack;
+  assert.match(sha256 ?? "", /^[0-9a-f]{64}$/);
+
+  assert.equal((await app.call("/v1/rules/ack/enable", { token: ruler, body: { sha256 } })).status, 403);
+  assert.equal((await app.call("/v1/rules/ack/enable", { token: "admin-token", body: { sha256 } })).status, 403);
+  assert.equal((await app.call("/v1/rules/ack/enable", { token: session, body: { sha256: "0".repeat(64) } })).status, 409);
+  const enabled = await app.call("/v1/rules/ack/enable", { token: session, body: { sha256 } });
+  assert.equal(enabled.status, 200, enabled.text);
+  const after = (enabled.json.rules as { rules: Array<{ id: string; enabled: boolean; createdBy: string }> }).rules.find((item) => item.id === "ack");
+  assert.deepEqual([after?.enabled, after?.createdBy], [true, "human"]);
+  assert.equal((await app.call("/v1/rules/bot-rules/ack", { method: "PUT", token: ruler, body: proposal })).status, 403, "Jon's rule now");
+
+  const fresh = String(((await app.call("/v1/rules", { token: session })).json.fingerprints as Record<string, string>).ack);
+  assert.equal((await app.call("/v1/rules/ack/automation", { token: ruler, body: { mode: "live", sha256: fresh } })).status, 403);
+  assert.equal((await app.call("/v1/rules/ack/automation", { token: session, body: { mode: "loud", sha256: fresh } })).status, 400);
+  const live = await app.call("/v1/rules/ack/automation", { token: session, body: { mode: "live", sha256: fresh } });
+  assert.equal(live.status, 200, live.text);
+  assert.match(JSON.stringify(live.json), /"mode":"autoSend"/);
+  const actions = (await app.store.listAudit(200)).map((event) => event.action);
+  for (const action of ["rules.bot_upsert", "rules.enabled", "rules.automation"]) assert.ok(actions.includes(action), action);
+});
+
+test("the audit list takes a limit up to 500, for the digest", async () => {
+  const app = await testApp();
+  for (const name of ["personal.eml", "reply.eml", "newsletter.eml"]) await app.ingest(fixture(name));
+  assert.ok((await app.store.listAudit(500)).length > 2);
+  const res = await app.call("/v1/audit?limit=2", { token: "read-token" });
+  assert.equal((res.json.events as unknown[]).length, 2);
+  assert.equal((await app.call("/v1/audit?limit=99999", { token: "read-token" })).status, 200);
+});
