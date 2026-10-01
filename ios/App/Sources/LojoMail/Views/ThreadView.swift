@@ -14,6 +14,8 @@ struct ThreadView: View {
     @State private var expanded: Set<String> = []
     @State private var compose: ComposeRequest?
     @State private var preview: URL?
+    @State private var sharing: SharedFile?
+    @State private var saving: URL?
     @State private var opening: String?
     @State private var showKeySetup = false
     @State private var confirmTrash = false
@@ -58,6 +60,15 @@ struct ThreadView: View {
         .onChange(of: preview) { old, new in
             if new == nil, let old { AttachmentFiles.remove(old) }
         }
+        .sheet(item: $sharing, onDismiss: { AttachmentFiles.purge() }) { file in
+            ActivitySheet(items: [file.url])
+                .presentationDetents([.medium, .large])
+                .ignoresSafeArea()
+        }
+        .fileMover(isPresented: Binding(get: { saving != nil }, set: { if !$0 { cleanUpSaving() } }), file: saving) { result in
+            if case .failure(let failure) = result { error = failure.localizedDescription } else { model.toast = Toast(text: "Saved to Files", systemImage: "folder") }
+            cleanUpSaving()
+        }
     }
 
     private var content: some View {
@@ -81,7 +92,7 @@ struct ThreadView: View {
                         opening: opening,
                         onToggle: { toggle(message) },
                         onUnlock: { showKeySetup = true },
-                        onAttachment: { attachment in Task { await open(attachment, of: message) } }
+                        onAttachment: { attachment, action in Task { await open(attachment, of: message, for: action) } }
                     )
                 }
                 if let error {
@@ -251,15 +262,33 @@ struct ThreadView: View {
         }
     }
 
-    private func open(_ attachment: AttachmentMeta, of message: Message) async {
+    private func open(_ attachment: AttachmentMeta, of message: Message, for action: AttachmentAction = .preview) async {
         opening = attachment.id
         defer { opening = nil }
         do {
-            preview = try await model.openAttachment(attachment, of: message)
+            let url = try await model.openAttachment(attachment, of: message)
+            error = nil
+            switch action {
+            case .preview: preview = url
+            case .share: sharing = SharedFile(url: url)
+            case .save: saving = url
+            }
         } catch {
             self.error = "\(attachment.filename): \(error.localizedDescription)"
         }
     }
+
+    private func cleanUpSaving() {
+        if let saving { AttachmentFiles.remove(saving) }
+        saving = nil
+    }
+}
+
+enum AttachmentAction { case preview, share, save }
+
+struct SharedFile: Identifiable {
+    let url: URL
+    var id: URL { url }
 }
 
 struct MessageCard: View {
@@ -270,7 +299,7 @@ struct MessageCard: View {
     var opening: String?
     var onToggle: () -> Void
     var onUnlock: () -> Void
-    var onAttachment: (AttachmentMeta) -> Void
+    var onAttachment: (AttachmentMeta, AttachmentAction) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -365,35 +394,51 @@ struct MessageCard: View {
     private var attachments: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(message.attachments) { attachment in
-                Button { onAttachment(attachment) } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: icon(for: attachment.contentType))
-                            .font(.title3)
-                            .frame(width: 30)
-                            .foregroundStyle(Theme.accent)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(attachment.filename.isEmpty ? "attachment" : attachment.filename).font(.subheadline.weight(.medium)).lineLimit(1)
-                            Text("\(MailText.byteCount(attachment.size)) · \(attachment.contentType)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                let name = attachment.filename.isEmpty ? "attachment" : attachment.filename
+                HStack(spacing: 4) {
+                    Button { onAttachment(attachment, .preview) } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: AttachmentImport.systemImage(forContentType: attachment.contentType))
+                                .font(.title3)
+                                .frame(width: 30)
+                                .foregroundStyle(Theme.accent)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(name).font(.subheadline.weight(.medium)).lineLimit(2).truncationMode(.middle)
+                                Text("\(ByteSize.format(attachment.size)) · \(attachment.contentType)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer(minLength: 4)
+                            if opening == attachment.id { ProgressView() }
                         }
-                        Spacer()
-                        if opening == attachment.id { ProgressView() } else { Image(systemName: "eye").foregroundStyle(.secondary) }
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
                     }
-                    .padding(10)
-                    .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(name), \(ByteSize.format(attachment.size))")
+                    .accessibilityHint("Decrypts and previews the attachment")
+                    Menu {
+                        actions(for: attachment)
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Actions for \(name)")
                 }
-                .buttonStyle(.plain)
+                .padding(.leading, 10)
+                .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .contextMenu { actions(for: attachment) }
                 .disabled(opening != nil)
-                .accessibilityLabel("\(attachment.filename), \(MailText.byteCount(attachment.size))")
-                .accessibilityHint("Decrypts and previews the attachment. Share from the preview to save it.")
             }
         }
     }
 
-    private func icon(for type: String) -> String {
-        if type.hasPrefix("image/") { return "photo" }
-        if type == "application/pdf" { return "doc.richtext" }
-        if type.hasPrefix("text/") { return "doc.text" }
-        if type.contains("zip") { return "doc.zipper" }
-        return "doc"
+    @ViewBuilder
+    private func actions(for attachment: AttachmentMeta) -> some View {
+        Button { onAttachment(attachment, .preview) } label: { Label("Preview", systemImage: "eye") }
+        Button { onAttachment(attachment, .share) } label: { Label("Share…", systemImage: "square.and.arrow.up") }
+        Button { onAttachment(attachment, .save) } label: { Label("Save to Files", systemImage: "folder") }
     }
 }

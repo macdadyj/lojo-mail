@@ -109,12 +109,6 @@ public enum MailText {
         text = text.replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-
-    public static func byteCount(_ size: Int) -> String {
-        if size < 1024 { return "\(size) B" }
-        if size < 1024 * 1024 { return "\(Int((Double(size) / 1024).rounded())) KB" }
-        return String(format: "%.1f MB", Double(size) / (1024 * 1024))
-    }
 }
 
 extension String {
