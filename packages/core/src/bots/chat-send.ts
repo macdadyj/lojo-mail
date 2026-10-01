@@ -121,7 +121,7 @@ export async function chatSendRateRefusals(store: MailStore, bot: string, limits
   return out;
 }
 
-/** Audit detail for one chat-approved send: who, the source, and Jon's words as the bot reported them. */
+/** Audit detail for one chat-approved send: who (the `bot:<name>` label), the source, and Jon's words as the bot reported them. */
 export function chatApprovalDetail(bot: string, note: string, to: string[]): string {
-  return `approvalSource:${CHAT_APPROVAL_SOURCE} bot:${bot} to:${to.join(",")} note:${JSON.stringify(note.trim())}`.slice(0, 500);
+  return `approvalSource:${CHAT_APPROVAL_SOURCE} by:${bot} to:${to.join(",")} note:${JSON.stringify(note.trim())}`.slice(0, 500);
 }

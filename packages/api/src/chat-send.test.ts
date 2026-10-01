@@ -63,7 +63,7 @@ test("a chat-approved reply sends the exact reviewed content and is audited as t
   const audit = await app.store.listAudit(200);
   const approved = audit.find((event) => event.action === "send.chat_approved");
   assert.equal(approved?.actor, "bot:grok");
-  assert.match(approved?.detail ?? "", /approvalSource:chat/);
+  assert.match(approved?.detail ?? "", /^approvalSource:chat by:bot:grok to:mina@example\.com /);
   assert.ok(approved?.detail?.includes(JSON.stringify(NOTE)));
   assert.equal(JSON.stringify(audit).includes(token), false);
   assert.equal((await send(app, token, id, { contentHash: shown.contentHash, approvalSource: "chat", approvalNote: NOTE })).status, 400, "a sent draft cannot be sent again");
