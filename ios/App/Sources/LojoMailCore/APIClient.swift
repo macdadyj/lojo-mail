@@ -217,8 +217,23 @@ public struct APIClient: Sendable {
     /// Human sessions only. The server checks that `reviewed` is exactly what is stored and answers 409 if not.
     public func mintApproval(_ id: String, reviewed: DraftFields) async throws -> String {
         struct Minted: Decodable { var approvalToken: String }
-        let minted: Minted = try await send("POST", "/v1/drafts/\(escaped(id))/approval", json: reviewed.payload)
+        let minted: Minted = try await send("POST", "/v1/drafts/\(escaped(id))/approval", json: reviewed.approvalPayload)
         return minted.approvalToken
+    }
+
+    /// Proposed (ios/docs/API-ATTACHMENTS.md): one file per request, base64 in JSON, so a 4 MB message stays under
+    /// API Gateway's and Lambda's request limits.
+    public func addDraftAttachment(_ id: String, _ file: OutgoingAttachment) async throws -> DraftView {
+        try await send("POST", "/v1/drafts/\(escaped(id))/attachments", json: [
+            "filename": file.filename,
+            "contentType": file.contentType,
+            "sha256": file.sha256,
+            "data": file.data.base64EncodedString(),
+        ])
+    }
+
+    public func removeDraftAttachment(_ id: String, attachmentId: String) async throws -> DraftView {
+        try await send("POST", "/v1/drafts/\(escaped(id))/attachments/\(escaped(attachmentId))/remove")
     }
 
     public func approveAndSend(_ id: String, approvalToken: String) async throws -> String {
@@ -327,13 +342,17 @@ public struct DraftFields: Sendable, Hashable {
     public var subject: String
     public var text: String
     public var pgp: PgpMode
+    /// SHA-256 of each file on the draft, in the server's order. Set from the server's draft view, never by editing:
+    /// files are added and removed with their own calls, and the approval names exactly these.
+    public var attachments: [String]
 
-    public init(to: String = "", cc: String = "", subject: String = "", text: String = "", pgp: PgpMode = .auto) {
+    public init(to: String = "", cc: String = "", subject: String = "", text: String = "", pgp: PgpMode = .auto, attachments: [String] = []) {
         self.to = to
         self.cc = cc
         self.subject = subject
         self.text = text
         self.pgp = pgp
+        self.attachments = attachments
     }
 
     public init(_ view: DraftView) {
@@ -342,7 +361,8 @@ public struct DraftFields: Sendable, Hashable {
             cc: view.draft.cc.map(\.email).joined(separator: ", "),
             subject: view.draft.subject,
             text: view.text ?? "",
-            pgp: view.draft.pgp
+            pgp: view.draft.pgp,
+            attachments: (view.draft.attachments ?? []).map(\.sha256)
         )
     }
 
@@ -360,6 +380,13 @@ public struct DraftFields: Sendable, Hashable {
         ["to": toList, "cc": ccList, "subject": subject, "text": text, "pgp": pgp.rawValue]
     }
 
+    /// Servers without draft attachments reject unknown members, so `attachments` is only sent when there are some.
+    var approvalPayload: [String: Any] {
+        var body = payload
+        if !attachments.isEmpty { body["attachments"] = attachments }
+        return body
+    }
+
     /// Same comparison as `changedFields` in `packages/web/src/review.ts`.
     public func changed(comparedTo current: DraftFields) -> [String] {
         var out: [String] = []
@@ -369,6 +396,7 @@ public struct DraftFields: Sendable, Hashable {
         if subject != current.subject { out.append("subject") }
         if text != current.text { out.append("message text") }
         if pgp != current.pgp { out.append("encryption") }
+        if attachments != current.attachments { out.append("attachments") }
         return out
     }
 }

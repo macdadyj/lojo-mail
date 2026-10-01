@@ -224,6 +224,8 @@ public struct Draft: Codable, Sendable, Hashable, Identifiable {
     public var createdAt: String
     public var updatedAt: String
     public var sentMessageId: String?
+    /// Files on the draft. Only servers with `ServerSettings.draftAttachments` send this; see ios/docs/API-ATTACHMENTS.md.
+    public var attachments: [DraftAttachment]?
 
     /// Same wording as `authorNotice` in `packages/web/src/review.ts`: depends on who wrote the content, never on status.
     public var authorNotice: String? {
@@ -236,6 +238,22 @@ public struct Draft: Codable, Sendable, Hashable, Identifiable {
         let asked = status == .pendingApproval ? " It is waiting for your approval." : ""
         return parts.joined(separator: ", and ") + "." + asked + " Check the recipients and the text before you send."
     }
+}
+
+public struct DraftAttachment: Codable, Sendable, Hashable, Identifiable {
+    public var id: String
+    public var filename: String
+    public var contentType: String
+    public var size: Int
+    /// Hex SHA-256 of the bytes; the approval names attachments by it.
+    public var sha256: String
+}
+
+/// Advertised in `/v1/settings` by a server that accepts attachments on drafts (proposed, ios/docs/API-ATTACHMENTS.md).
+public struct DraftAttachmentSupport: Codable, Sendable, Hashable {
+    /// The whole encoded message, like the bridge's `DEFAULT_CLIENT_SEND_LIMITS.maxBytes` (4,000,000).
+    public var maxMessageBytes: Int
+    public var maxFiles: Int?
 }
 
 public struct DraftView: Codable, Sendable, Hashable, Identifiable {
@@ -271,6 +289,7 @@ public struct ServerSettings: Codable, Sendable, Hashable {
     public var unlocked: Bool
     /// Which key mail is sealed to (servers before #9 omit it).
     public var envelopeKeyFingerprint: String?
+    public var draftAttachments: DraftAttachmentSupport?
     public var dev: Bool
     public var principal: String
 }
