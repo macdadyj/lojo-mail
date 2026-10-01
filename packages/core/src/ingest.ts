@@ -3,6 +3,7 @@ import { ModelOutputError } from "./ai/schema.ts";
 import type { Embedder, LlmClient } from "./ai/types.ts";
 import { packVector, vectorTag } from "./ai/vectors.ts";
 import { aiContextKey, attachmentKey, bodyKey, type BlobStore } from "./blob/store.ts";
+import { activeBotKey, sealBotCopy, type BotBody } from "./bots/copies.ts";
 import { attachmentContext, encodeEnvelope, messageBodyContext, sealBytes, sealJson } from "./crypto/envelope.ts";
 import { aiContextContext, draftContext, serverSeal, type KeyWrapper } from "./crypto/server-seal.ts";
 import { newId, sha256, utcDay } from "./ids.ts";
@@ -42,6 +43,8 @@ export interface IngestDeps {
   styleGuide: string;
   /** Jon's mail rules. Only inbound mail headed for the inbox is filtered. */
   rules?: RulesRuntime | null;
+  /** Also seal `{text, html}` to the bot envelope key, when Jon has registered one (bots/copies.ts). */
+  botCopies?: boolean;
   now?: Date;
 }
 
@@ -339,6 +342,8 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
     attachments.push({ id: item.id, filename: item.filename, contentType: item.contentType, size: item.size, blobKey: key });
   }
 
+  const botCopy = deps.botCopies ? await sealForBot(deps, id, { text: parsed.text, html: parsed.html }, now) : null;
+
   let contextKey: string | undefined;
   const wantsContext =
     origin === "inbound" && deps.keys && deps.config.aiContextDays > 0 && !parsed.pgpEncrypted && !bulk && !classes.quarantined && !classes.dmarcReport;
@@ -385,6 +390,10 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
   }
   if (Object.keys(parsed.verdicts).length > 0) message.verdicts = parsed.verdicts;
   if (contextKey) message.aiContextKey = contextKey;
+  if (botCopy) {
+    message.botBodyKey = botCopy.botBodyKey;
+    message.botKeyId = botCopy.botKeyId;
+  }
   if (parsed.replyTo) message.replyTo = parsed.replyTo;
   if (parsed.inReplyTo) message.inReplyTo = parsed.inReplyTo;
   if (parsed.listId) message.listId = parsed.listId.slice(0, 200);
@@ -441,6 +450,18 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
   }
 
   return { message, duplicate: false };
+}
+
+/** A bot copy that cannot be made never fails delivery: the message is stored without one. */
+async function sealForBot(deps: IngestDeps, id: string, body: BotBody, now: Date): Promise<{ botBodyKey: string; botKeyId: string } | null> {
+  try {
+    const key = activeBotKey(await deps.store.getBotRegistry());
+    return key ? await sealBotCopy(deps.blobs, id, key, body) : null;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    await deps.store.putAudit({ id: newId("aud"), day: utcDay(now), at: now.toISOString(), action: "bot.copy", messageId: id, outcome: "error", detail: detail.slice(0, 200) });
+    return null;
+  }
 }
 
 async function rulesFor(message: StoredMessage, deps: IngestDeps, now: Date): Promise<{ doc: RulesDocument; outcome: RuleOutcome } | null> {

@@ -1,3 +1,4 @@
+import type { BotRegistry } from "../bots/registry.ts";
 import { MailError } from "../errors.ts";
 import { utcDay } from "../ids.ts";
 import {
@@ -14,6 +15,7 @@ import {
 import type { DynamoLike, Item, MailStore, TableNames } from "./types.ts";
 
 const AUDIT_DAYS = 7;
+const BOT_REGISTRY_KEY = { day: "bots:registry" };
 const SENDABLE: DraftStatus[] = ["suggested", "edited", "pending_approval"];
 
 function stripEmpty(value: unknown): unknown {
@@ -195,6 +197,20 @@ export class DynamoMailStore implements MailStore {
     );
     const next = updated?.count;
     return typeof next === "number" ? next : 1;
+  }
+
+  async getBotRegistry(): Promise<BotRegistry | null> {
+    const item = await this.db.get(this.tables.budget, BOT_REGISTRY_KEY);
+    const registry = item?.registry;
+    return registry && typeof registry === "object" ? (registry as BotRegistry) : null;
+  }
+
+  async saveBotRegistry(registry: BotRegistry, expectedVersion: number | null): Promise<boolean> {
+    const updated = await this.db.update(this.tables.budget, BOT_REGISTRY_KEY, {
+      set: { registry: stripEmpty(registry), version: registry.version },
+      condition: expectedVersion === null ? { notExists: ["day"] } : { equals: { version: expectedVersion } },
+    });
+    return updated !== null;
   }
 
   async putContact(contact: Contact, opts?: { ifAbsent?: boolean }): Promise<boolean> {

@@ -1,3 +1,4 @@
+import type { BotRegistry } from "../bots/registry.ts";
 import type {
   AuditEvent,
   Contact,
@@ -53,6 +54,11 @@ export interface MailStore {
   /** Short-lived shared counters (login failures per source). Kept in the budget table with a TTL. */
   getCounter(key: string): Promise<number>;
   bumpCounter(key: string, expiresAt: Date): Promise<number>;
+
+  /** Jon's bot credentials and the bot envelope key: one item in the budget table, no TTL. */
+  getBotRegistry(): Promise<BotRegistry | null>;
+  /** Conditional on the stored version (`null`: nothing stored yet). Returns false when another save won. */
+  saveBotRegistry(registry: BotRegistry, expectedVersion: number | null): Promise<boolean>;
 
   /** Returns false when `ifAbsent` is set and the contact already exists. */
   putContact(contact: Contact, opts?: { ifAbsent?: boolean }): Promise<boolean>;

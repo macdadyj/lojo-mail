@@ -18,9 +18,9 @@ export type Actor = "human" | "agent";
 
 /**
  * Who may soft-delete: Jon's session, the Thunderbird bridge token, or an agent
- * token Jon granted the `trash` scope (`agent:<label>`, capped per day).
+ * or bot token Jon granted the `trash` scope (`agent:<label>`, `bot:<name>`, each capped per day).
  */
-export type TrashActor = "human" | "bridge" | `agent:${string}`;
+export type TrashActor = "human" | "bridge" | `agent:${string}` | `bot:${string}`;
 
 export interface Address {
   name?: string;
@@ -149,6 +149,9 @@ export interface StoredMessage {
   verdicts?: Verdicts;
   bodyKey: string;
   aiContextKey?: string;
+  /** `{text, html}` sealed to the bot envelope key `botKeyId` (bots/copies.ts). Only when Jon registered a bot key. */
+  botBodyKey?: string;
+  botKeyId?: string;
   ai: AiPublic | null;
   /** Packed int8 embedding (see ai/vectors.ts). Derived from plaintext; never returned by the API. */
   vec?: string;
@@ -235,6 +238,8 @@ export interface AuditEvent {
   outcome: string;
   promptSha256?: string;
   detail?: string;
+  /** Who caused it through the API: `human`, `bridge`, `api`, `agent:<label>` or `bot:<name>`. Absent for the pipeline. */
+  actor?: string;
 }
 
 export interface Contact {
@@ -262,6 +267,8 @@ export interface MessagePatch {
   trashedBy?: string;
   keepUntil?: string;
   bcc?: Address[];
+  botBodyKey?: string;
+  botKeyId?: string;
 }
 
 export interface LojoConfig {

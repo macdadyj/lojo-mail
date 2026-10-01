@@ -36,6 +36,8 @@ export interface WorldOptions {
   deps?: Pick<MailboxDeps, "ownPgpPublicKey" | "pgpSigningKey" | "clientSendLimits" | "agentTrashPerDay">;
   /** Wires `autoSender` into the rules runtime, as LOJO_AUTO_SEND=on does in the processor. */
   autoSend?: boolean;
+  /** Seal bot copies at ingest and for sent copies, as the processor and the API do. */
+  botCopies?: boolean;
 }
 
 /** An in-memory mailbox wired the way the API wires it. No AWS, no network. */
@@ -63,6 +65,7 @@ export async function memoryWorld(opts: WorldOptions = {}) {
     embedder,
     sender,
     autoSendEnabled: opts.autoSend ?? false,
+    botCopies: opts.botCopies ?? false,
     styleGuide: TEST_STYLE,
     ...(opts.now ? { now: opts.now } : {}),
     ...opts.deps,
@@ -80,6 +83,7 @@ export async function memoryWorld(opts: WorldOptions = {}) {
         config,
         styleGuide: TEST_STYLE,
         rules: rulesRuntime(blobs, keys, opts.autoSend ? autoSender : null),
+        botCopies: opts.botCopies ?? false,
         ...(opts.now ? { now: opts.now() } : {}),
       },
       options,

@@ -10,6 +10,7 @@ import {
   sameHash,
 } from "./approval.ts";
 import type { BlobStore } from "./blob/store.ts";
+import { botTestSend, type TestSendInput, type TestSendLimits } from "./bots/test-send.ts";
 import { DEFAULT_CLIENT_SEND_LIMITS, sendFromClient, type ClientSendInput, type ClientSendLimits, type ClientSendResult } from "./client-send.ts";
 import {
   attachmentContext,
@@ -35,6 +36,7 @@ import { embedForStorage, embeddingInput, ingestRaw, refreshThread } from "./ing
 import { newId, normalizeMessageId, sha256, utcDay } from "./ids.ts";
 import { buildMimeEntity, buildRawMessage, cleanEmail, cleanHeaderValue } from "./mime/compose.ts";
 import { encryptMimeEntity, encryptText, type PgpSigningKey } from "./openpgp/mail.ts";
+import { deleteBotRule, upsertBotRule } from "./rules/bot-rules.ts";
 import { dryRunRules, loadRules, saveRules, type DryRun } from "./rules/engine.ts";
 import type { RuleAuthor, RulesDocument } from "./rules/types.ts";
 import { emptyRules, parseRulesDocument, rulesHash } from "./rules/validate.ts";
@@ -80,8 +82,13 @@ export interface MailboxDeps {
   autoSendEnabled?: boolean;
   clientSendLimits?: ClientSendLimits;
   draftAttachmentLimits?: DraftAttachmentLimits;
-  /** How many messages one agent token may move to Trash per UTC day. */
+  /** How many messages one agent or bot token may move to Trash per UTC day. */
   agentTrashPerDay?: number;
+  /** Sent copies also get a bot copy when a bot envelope key is registered. */
+  botCopies?: boolean;
+  testSendLimits?: TestSendLimits;
+  /** Who the current API request is (`bot:<name>`, `human`, ...). Stamped on every audit event this mailbox writes. */
+  auditActor?: () => string | undefined;
   styleGuide: string;
   /** Jon's own OpenPGP public key, so his sent copy of encrypted mail is readable to him elsewhere. */
   ownPgpPublicKey?: string;
@@ -266,9 +273,14 @@ export class Mailbox {
     return address.email.toLowerCase() === this.deps.config.mailbox.toLowerCase();
   }
 
+  private actor(): { actor?: string } {
+    const actor = this.deps.auditActor?.();
+    return actor ? { actor } : {};
+  }
+
   private async audit(action: string, outcome: string, extra: { messageId?: string; detail?: string } = {}): Promise<void> {
     const at = this.now();
-    await this.deps.store.putAudit({ id: newId("aud"), day: utcDay(at), at: at.toISOString(), action, outcome, ...extra });
+    await this.deps.store.putAudit({ id: newId("aud"), day: utcDay(at), at: at.toISOString(), action, outcome, ...extra, ...this.actor() });
   }
 
   private async spend(
@@ -293,6 +305,7 @@ export class Mailbox {
       outputTokens: tokens.outputTokens,
       outcome,
       ...(promptSha256 ? { promptSha256 } : {}),
+      ...this.actor(),
     });
   }
 
@@ -978,7 +991,7 @@ export class Mailbox {
     const message = await this.requireMessage(messageId);
     if (message.folder === "trash") return message;
     const at = this.now();
-    if (by.startsWith("agent:")) {
+    if (by.startsWith("agent:") || by.startsWith("bot:")) {
       const day = utcDay(at);
       const cap = this.deps.agentTrashPerDay ?? 100;
       const count = await this.deps.store.bumpCounter(`trash:${by}:${day}`, new Date(Date.parse(`${day}T00:00:00Z`) + 2 * 86_400_000));
@@ -1066,6 +1079,27 @@ export class Mailbox {
     await saveRules(this.deps.blobs, this.deps.keys, next);
     await this.audit("rules.disabled", "ok", { detail: `rule:${ruleId} by:${actor}` });
     return next;
+  }
+
+  /** A bot's own rule (bot-rules.ts): never auto-send, never trash, never one of Jon's rules. */
+  async putBotRule(input: unknown): Promise<RulesDocument> {
+    const next = upsertBotRule(await this.getRules(), input, this.now());
+    await saveRules(this.deps.blobs, this.deps.keys, next);
+    const id = String((input as { id?: unknown }).id);
+    await this.audit("rules.bot_upsert", "ok", { detail: `rule:${id} sha256:${rulesHash(next)}` });
+    return next;
+  }
+
+  async deleteBotRule(ruleId: string): Promise<RulesDocument> {
+    const next = deleteBotRule(await this.getRules(), ruleId, this.now());
+    await saveRules(this.deps.blobs, this.deps.keys, next);
+    await this.audit("rules.bot_delete", "ok", { detail: `rule:${ruleId} sha256:${rulesHash(next)}` });
+    return next;
+  }
+
+  /** The `test-send` scope: one message to LOJO_TEST_RECIPIENT, nobody else (bots/test-send.ts). */
+  async botTestSend(input: TestSendInput): Promise<{ messageId: string; to: string }> {
+    return botTestSend({ ...this.deps, sendRules: () => this.getRules(), now: () => this.now(), ...(this.deps.testSendLimits ? { limits: this.deps.testSendLimits } : {}) }, input);
   }
 
   async testRules(messageId: string): Promise<DryRun> {

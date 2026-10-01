@@ -29,7 +29,27 @@ export { cosineInt8, packVector, rankVectors, unpackVector, vectorTag } from "./
 export type { VectorRow } from "./ai/vectors.ts";
 export type { Embedder, EmbedPurpose, LlmClient, LlmCompletion, LlmEmbedding, LlmRequest, ProviderSecrets } from "./ai/types.ts";
 export { APPROVAL_TTL_MS, approvalContentHash, hashApprovalToken, newApprovalToken, sameHash } from "./approval.ts";
-export { FsBlobStore, MemoryBlobStore, RULES_KEY, aiContextKey, attachmentKey, bodyKey, draftAttachmentKey } from "./blob/store.ts";
+export { FsBlobStore, MemoryBlobStore, RULES_KEY, aiContextKey, attachmentKey, bodyKey, botCopyKey, draftAttachmentKey } from "./blob/store.ts";
+export { BotAdmin, botScopes } from "./bots/admin.ts";
+export type { BotAdminDeps, BotRegistryView } from "./bots/admin.ts";
+export { activeBotKey, botBackfillCandidates, botBodyContext, readBotCopy, sealBotCopy, storeBotCopy } from "./bots/copies.ts";
+export type { BotBody } from "./bots/copies.ts";
+export {
+  BOT_SCOPES,
+  BOT_TOKEN_PREFIX,
+  DEFAULT_BOT_SCOPES,
+  botNameOf,
+  checkBotToken,
+  emptyBotRegistry,
+  hashBotToken,
+  knownBotScope,
+  newBotToken,
+  summarizeBot,
+  validBotName,
+} from "./bots/registry.ts";
+export type { BotCheck, BotEnvelopeKey, BotRecord, BotRegistry, BotScope, BotSummary } from "./bots/registry.ts";
+export { DEFAULT_TEST_SEND_LIMITS, LOJO_TEST_RECIPIENT, TEST_SEND_SUBJECT_PREFIX, botTestSend } from "./bots/test-send.ts";
+export type { TestSendInput, TestSendLimits } from "./bots/test-send.ts";
 export type { BlobStore } from "./blob/store.ts";
 export { clientSendLimitsFromEnv, DEFAULT_CLIENT_SEND_LIMITS, sendFromClient } from "./client-send.ts";
 export type { ClientSendDeps, ClientSendInput, ClientSendLimits, ClientSendResult } from "./client-send.ts";
@@ -82,6 +102,7 @@ export type { PgpSigningKey } from "./openpgp/mail.ts";
 export { wkdAdvancedUrl, wkdLocalPartHash, zBase32Encode } from "./openpgp/wkd.ts";
 export { AUTO_REPLY_FOOTER, autoSendRefusals, rateLimitRefusals, renderTemplate, replyBlockers, replyTextRefusals } from "./rules/autosend.ts";
 export type { AutoSendContext, LoopHeaders } from "./rules/autosend.ts";
+export { deleteBotRule, upsertBotRule } from "./rules/bot-rules.ts";
 export { dryRunRules, fileByRules, loadRules, rulesRuntime, runRuleReply, saveRules } from "./rules/engine.ts";
 export type { DryRun, ReplyResult, RulesRuntime } from "./rules/engine.ts";
 export { evaluateRules, ruleMatches, senderMatches } from "./rules/match.ts";

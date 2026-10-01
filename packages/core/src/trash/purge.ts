@@ -1,4 +1,4 @@
-import { aiContextKey, bodyKey, type BlobStore } from "../blob/store.ts";
+import { aiContextKey, bodyKey, botCopyKey, type BlobStore } from "../blob/store.ts";
 import { newId, utcDay } from "../ids.ts";
 import { refreshThread } from "../ingest.ts";
 import type { MailStore } from "../store/types.ts";
@@ -62,6 +62,7 @@ export function ownedBlobKeys(message: StoredMessage): string[] {
   for (const attachment of message.attachments ?? []) {
     if (attachment.blobKey.startsWith(`objects/${message.id}/`) && !attachment.blobKey.includes("..")) keys.add(attachment.blobKey);
   }
+  if (message.botKeyId && message.botBodyKey === botCopyKey(message.id, message.botKeyId) && !message.botBodyKey.includes("..")) keys.add(message.botBodyKey);
   return [...keys];
 }
 

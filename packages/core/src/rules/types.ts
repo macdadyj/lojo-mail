@@ -48,7 +48,8 @@ export type RuleAction =
   | { type: "trash" }
   | { type: "reply"; reply: ReplyAction };
 
-export type RuleAuthor = "human" | "token";
+/** `bot`: written through a bot credential's `rules` scope (bot-rules.ts). Never auto-sends, never trashes. */
+export type RuleAuthor = "human" | "token" | "bot";
 
 export interface Rule {
   id: string;
