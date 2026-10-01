@@ -13,6 +13,21 @@ enum Provisioning {
 
     static let files = ["provision-session.json", "provision-envelope.private.jwk", "provision-api-url.txt"]
 
+    /// Files handed to the app ("Open in LOJO Mail", AirDrop) are copied into Documents/Inbox. Only key files arrive
+    /// there, so nothing in it is kept.
+    static func purgeInbox() {
+        guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent("Inbox", isDirectory: true))
+    }
+
+    /// Deletes `url` only if it lives inside this app's container (an Inbox copy), never a file Jon picked in Files.
+    static func removeIfOwned(_ url: URL) {
+        let home = URL(fileURLWithPath: NSHomeDirectory()).standardizedFileURL.resolvingSymlinksInPath().path
+        let path = url.standardizedFileURL.resolvingSymlinksInPath().path
+        guard path.hasPrefix(home + "/Documents/Inbox/") || path.hasPrefix(home + "/tmp/") else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
     static func importPending() -> Imported {
         var out = Imported()
         guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return out }

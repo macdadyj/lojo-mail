@@ -52,7 +52,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Decryption")
                 } footer: {
-                    Text("Bodies and attachments are opened on this iPhone with this key. It is kept in the Keychain for this device only and is never sent anywhere.")
+                    Text("Bodies and attachments are opened on this iPhone with this key. It is kept in the Keychain for this device only and is never sent anywhere.\n\nTo load or replace it: tap the button above and choose envelope.private.jwk from Files or paste it; or AirDrop or share the file to this iPhone and pick LOJO Mail.")
                 }
 
                 Section {

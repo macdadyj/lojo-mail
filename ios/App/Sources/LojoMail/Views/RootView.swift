@@ -36,6 +36,32 @@ struct RootView: View {
             applyLaunchTab()
         }
         .onChange(of: model.openThreadRequest) { _, id in if id != nil { tab = .mail } }
+        .onOpenURL { model.receive(openedURL: $0) }
+        .alert(incomingKeyTitle, isPresented: incomingKeyShown, presenting: model.incomingKey) { incoming in
+            Button(incoming.replacesKey ? "Replace key" : "Save to Keychain") { model.accept(incoming) }
+            Button("Cancel", role: .cancel) { model.incomingKey = nil }
+        } message: { incoming in
+            Text("Fingerprint \(incoming.key.fingerprint)\(model.serverSettings?.envelopeKeyFingerprint == incoming.key.fingerprint ? ", matches this mailbox" : ""). It is stored in this iPhone's Keychain only, and the file copy is already deleted."
+                + (incoming.replacesKey ? " The key on this iPhone now will be replaced." : ""))
+        }
+        .alert("Couldn't use that file", isPresented: keyImportErrorShown) {
+            Button("OK", role: .cancel) { model.keyImportError = nil }
+        } message: {
+            Text(model.keyImportError ?? "")
+        }
+    }
+
+    private var incomingKeyTitle: String {
+        model.incomingKey?.replacesKey == true ? "Replace your envelope key?" : "Use this envelope key?"
+    }
+
+    /// Held back while the Face ID lock is up, so nobody can swap the key on a locked app.
+    private var incomingKeyShown: Binding<Bool> {
+        Binding(get: { model.incomingKey != nil && !locked }, set: { if !$0 { model.incomingKey = nil } })
+    }
+
+    private var keyImportErrorShown: Binding<Bool> {
+        Binding(get: { model.keyImportError != nil && !locked }, set: { if !$0 { model.keyImportError = nil } })
     }
 
     private var tabs: some View {

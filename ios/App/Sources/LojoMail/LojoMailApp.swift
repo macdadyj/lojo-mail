@@ -24,6 +24,7 @@ struct LojoMailApp: App {
             case .background:
                 model.stopPolling()
                 Notifier.scheduleRefresh()
+                if model.incomingKey == nil { Provisioning.purgeInbox() }
             case .inactive:
                 break
             @unknown default:

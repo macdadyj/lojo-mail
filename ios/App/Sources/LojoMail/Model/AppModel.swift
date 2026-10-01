@@ -173,9 +173,65 @@ final class AppModel {
     }
 
     func importKey(_ text: String) throws {
-        let key = try Envelope.PrivateKey(pasted: text)
-        if let published = serverSettings?.envelopeKeyFingerprint, key.fingerprint != published { throw WrongKey() }
+        let key = try KeyFile.parse(text)
+        try checkBelongsToMailbox(key)
         store(key: key)
+    }
+
+    func importKey(fileAt url: URL) throws {
+        let key = try readKeyFile(url)
+        try checkBelongsToMailbox(key)
+        store(key: key)
+    }
+
+    private func checkBelongsToMailbox(_ key: Envelope.PrivateKey) throws {
+        if let published = serverSettings?.envelopeKeyFingerprint, key.fingerprint != published { throw WrongKey() }
+    }
+
+    /// A key file that arrived through AirDrop, the share sheet or "Open in LOJO Mail", waiting for Jon to confirm.
+    struct IncomingKey: Identifiable {
+        let id = UUID()
+        let key: Envelope.PrivateKey
+        let replacesKey: Bool
+    }
+
+    var incomingKey: IncomingKey?
+    var keyImportError: String?
+
+    /// `onOpenURL`: iOS copied the file into Documents/Inbox. Read it, delete that copy, and ask before storing.
+    func receive(openedURL url: URL) {
+        guard url.isFileURL else { return }
+        do {
+            let key = try readKeyFile(url)
+            try checkBelongsToMailbox(key)
+            if key.fingerprint == self.key?.fingerprint {
+                keyImportError = "That key is already on this iPhone."
+            } else {
+                incomingKey = IncomingKey(key: key, replacesKey: self.key != nil)
+            }
+        } catch {
+            keyImportError = error.localizedDescription
+        }
+    }
+
+    func accept(_ incoming: IncomingKey) {
+        incomingKey = nil
+        store(key: incoming.key)
+        toast = Toast(text: "Key saved to Keychain", systemImage: "key.fill")
+        if phase == .ready { Task { await refreshAll() } }
+    }
+
+    /// Reads at most `KeyFile.maxBytes`, then removes the file if it is a copy inside this app's container.
+    private func readKeyFile(_ url: URL) throws -> Envelope.PrivateKey {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer {
+            if scoped { url.stopAccessingSecurityScopedResource() }
+            Provisioning.removeIfOwned(url)
+        }
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard size <= KeyFile.maxBytes else { throw KeyFile.Failure.tooLarge }
+        guard let data = try? Data(contentsOf: url) else { throw KeyFile.Failure.notText }
+        return try KeyFile.read(data)
     }
 
     func removeKey() {

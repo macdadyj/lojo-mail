@@ -1,29 +1,48 @@
 import LojoMailCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SignInView: View {
     @Environment(AppModel.self) private var model
     @State private var passphrase = ""
+    @State private var account = ""
     @State private var keep = true
     @State private var busy = false
     @State private var error: String?
     @State private var showServer = false
     @State private var serverText = ""
-    @FocusState private var focused: Bool
 
     var body: some View {
         ScrollView {
             VStack(spacing: 28) {
                 header
                 VStack(alignment: .leading, spacing: 14) {
-                    SecureField("Passphrase", text: $passphrase)
-                        .textContentType(.password)
-                        .submitLabel(.go)
-                        .focused($focused)
-                        .onSubmit { Task { await signIn() } }
-                        .padding(14)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .accessibilityLabel("Web app passphrase")
+                    VStack(spacing: 0) {
+                        // The username half of the login form. The API only takes the passphrase, but password
+                        // managers (iCloud Keychain, 1Password…) pair a .username field with the .password one to
+                        // offer, save and fill the credential.
+                        TextField("Account", text: $account)
+                            .textContentType(.username)
+                            .keyboardType(.emailAddress)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .submitLabel(.next)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 50)
+                            .accessibilityLabel("Account")
+                        Divider().padding(.leading, 14)
+                        SecretField(title: "Passphrase", text: $passphrase, noun: "passphrase", submitLabel: .go) {
+                            Task { await signIn() }
+                        }
+                        .padding(.leading, 14)
+                        .padding(.trailing, 4)
+                        .frame(minHeight: 50)
+                    }
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    Text("Your password manager can fill the passphrase: tap the field, then the key or Passwords button above the keyboard. Save it under \(model.mailbox) (website app.cyberphysical.us) to find it here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
                     Toggle(isOn: $keep) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -91,7 +110,10 @@ struct SignInView: View {
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
-        .onAppear { serverText = model.apiBase.absoluteString }
+        .onAppear {
+            serverText = model.apiBase.absoluteString
+            if account.isEmpty { account = model.mailbox }
+        }
     }
 
     private var header: some View {
@@ -122,51 +144,55 @@ struct SignInView: View {
     }
 }
 
-/// Paste or import `envelope.private.jwk`. The key goes straight to the Keychain.
+/// Load `envelope.private.jwk` from Files, the clipboard, or by typing it. AirDrop and "Open in LOJO Mail" arrive
+/// through `RootView.onOpenURL` instead. Whichever way, the key goes straight to the Keychain.
 struct KeySetupView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
     @State private var error: String?
     @State private var importing = false
-    @State private var clearedClipboard = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Text("Your mail is sealed to a P-256 envelope key that never leaves your devices. Paste the contents of **envelope.private.jwk** (the same text you paste into the web app's Settings), or import the file.")
+                    Text("Mail is sealed to your envelope key, **envelope.private.jwk**, and opened only on this iPhone. Load it once; it stays in this iPhone's Keychain.")
                         .font(.subheadline)
                 }
-                Section("Envelope private key") {
-                    TextEditor(text: $text)
-                        .font(.footnote.monospaced())
-                        .frame(minHeight: 120)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .accessibilityLabel("Envelope private key JSON")
-                    HStack {
-                        PasteButton(payloadType: String.self) { strings in
-                            if let first = strings.first {
-                                Task { @MainActor in
-                                    text = first
-                                    save(fromClipboard: true)
-                                }
-                            }
-                        }
-                        .labelStyle(.titleAndIcon)
-                        Spacer()
-                        Button("Import file…") { importing = true }
+                Section {
+                    Button { importing = true } label: {
+                        Label("Choose from Files…", systemImage: "folder")
                     }
+                    PasteButton(payloadType: String.self) { strings in
+                        if let first = strings.first {
+                            Task { @MainActor in save(first, fromClipboard: true) }
+                        }
+                    }
+                    .labelStyle(.titleAndIcon)
+                } header: {
+                    Text("Load the key")
+                } footer: {
+                    Text("Paste clears the clipboard once the key is saved.")
+                }
+                Section("Other ways to get it here") {
+                    step("airplane.circle", "AirDrop", "From your Mac, AirDrop envelope.private.jwk to this iPhone and choose LOJO Mail.")
+                    step("square.and.arrow.up", "Share or Open in", "In Files, Mail or any app, share the file and pick LOJO Mail (or \"Open in LOJO Mail\").")
+                    step("cable.connector", "USB from Santa Computa", "Run ios/scripts/provision-phone.sh; the app picks the key up on its next launch.")
+                }
+                Section {
+                    SecretField(title: "Paste or type the JWK", text: $text, noun: "key", contentType: nil, multiline: true) {
+                        save(text, fromClipboard: false)
+                    }
+                    Button("Save to Keychain") { save(text, fromClipboard: false) }
+                        .disabled(text.isEmpty)
+                } header: {
+                    Text("Or enter it by hand")
+                } footer: {
+                    Text("Hidden while you type; tap the eye to check it. Stored in the iOS Keychain for this device only: not synced to iCloud, not in backups, and readable only while the iPhone is unlocked. You can replace or remove it later in Settings → Decryption.")
                 }
                 if let error {
                     Section { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
-                }
-                Section {
-                    Button("Save to Keychain") { save(fromClipboard: false) }
-                        .disabled(text.isEmpty)
-                } footer: {
-                    Text("Stored in the iOS Keychain for this device only: not synced to iCloud, not in backups, and readable only while the iPhone is unlocked.")
                 }
             }
             .navigationTitle("Unlock your mail")
@@ -174,30 +200,56 @@ struct KeySetupView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Later") { dismiss() } }
             }
-            .fileImporter(isPresented: $importing, allowedContentTypes: [.json, .data, .plainText, .item]) { result in
-                guard case .success(let url) = result else { return }
-                let scoped = url.startAccessingSecurityScopedResource()
-                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                if let data = try? Data(contentsOf: url), let string = String(data: data, encoding: .utf8) {
-                    text = string
-                    save(fromClipboard: false)
-                } else {
-                    error = "Couldn't read that file."
+            .fileImporter(isPresented: $importing, allowedContentTypes: KeySetupView.importTypes) { result in
+                switch result {
+                case .success(let url):
+                    do {
+                        try model.importKey(fileAt: url)
+                        saved(fromClipboard: false)
+                    } catch {
+                        self.error = error.localizedDescription
+                    }
+                case .failure(let failure):
+                    error = failure.localizedDescription
                 }
             }
         }
     }
 
-    private func save(fromClipboard: Bool) {
+    static let importTypes: [UTType] = [.jwk, .json, .plainText, .data]
+
+    private func step(_ icon: String, _ title: String, _ detail: String) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(detail).font(.footnote).foregroundStyle(.secondary)
+            }
+        } icon: {
+            Image(systemName: icon).foregroundStyle(Theme.accent)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func save(_ value: String, fromClipboard: Bool) {
         do {
-            try model.importKey(text)
-            text = ""
-            if fromClipboard { UIPasteboard.general.string = "" }
-            Haptics.success()
-            model.toast = Toast(text: fromClipboard ? "Key saved. Clipboard cleared." : "Key saved to Keychain", systemImage: "key.fill")
-            dismiss()
+            try model.importKey(value)
+            saved(fromClipboard: fromClipboard)
         } catch {
             self.error = error.localizedDescription
         }
     }
+
+    private func saved(fromClipboard: Bool) {
+        text = ""
+        error = nil
+        if fromClipboard { UIPasteboard.general.string = "" }
+        Haptics.success()
+        model.toast = Toast(text: fromClipboard ? "Key saved. Clipboard cleared." : "Key saved to Keychain", systemImage: "key.fill")
+        dismiss()
+    }
+}
+
+extension UTType {
+    /// `.jwk` files. Declared in Info.plist (UTImportedTypeDeclarations) so Files, AirDrop and the share sheet offer LOJO Mail.
+    static let jwk = UTType(importedAs: "com.lojo.jwk", conformingTo: .json)
 }

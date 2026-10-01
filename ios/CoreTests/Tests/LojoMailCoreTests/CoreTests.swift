@@ -56,6 +56,36 @@ final class EnvelopeTests: XCTestCase {
         XCTAssertThrowsError(try Envelope.open(body.envelope, with: key("key.jwk"), context: Envelope.messageBodyContext(body.id)))
     }
 
+    func testKeyFileAcceptsWhatFilesAirDropAndPasteDeliver() throws {
+        let raw = try Data(contentsOf: vectors().appendingPathComponent("key.jwk"))
+        let expected = try key("key.jwk").fingerprint
+        XCTAssertEqual(try KeyFile.read(raw).fingerprint, expected)
+        XCTAssertEqual(try KeyFile.read(Data([0xEF, 0xBB, 0xBF]) + raw).fingerprint, expected, "UTF-8 BOM from some editors")
+        let object = try JSONSerialization.jsonObject(with: raw)
+        let pretty = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted])
+        XCTAssertEqual(try KeyFile.read(pretty + Data("\n".utf8)).fingerprint, expected, "pretty-printed with a trailing newline")
+        let flattened = String(decoding: pretty, as: UTF8.self).replacingOccurrences(of: "\n", with: "")
+        XCTAssertEqual(try KeyFile.parse(flattened).fingerprint, expected, "a secure field drops the newlines of a paste")
+        var extra = try XCTUnwrap(object as? [String: Any])
+        extra["kid"] = "envelope"
+        extra["use"] = "enc"
+        XCTAssertEqual(try KeyFile.read(JSONSerialization.data(withJSONObject: extra)).fingerprint, expected, "extra JWK members")
+    }
+
+    func testKeyFileRefusesTheWrongFiles() throws {
+        let jwk = try key("key.jwk").jwk
+        XCTAssertThrowsError(try KeyFile.parse(#"{"kty":"EC","crv":"P-256","x":"\#(jwk.x)","y":"\#(jwk.y)"}"#)) {
+            XCTAssertEqual($0 as? KeyFile.Failure, .publicOnly)
+        }
+        XCTAssertThrowsError(try KeyFile.parse("lojo-key-v1.eyJ2IjoxfQ")) { XCTAssertEqual($0 as? KeyFile.Failure, .wrappedKey) }
+        XCTAssertThrowsError(try KeyFile.read(Data(repeating: 0x20, count: KeyFile.maxBytes + 1))) { XCTAssertEqual($0 as? KeyFile.Failure, .tooLarge) }
+        XCTAssertThrowsError(try KeyFile.read(Data([0xFF, 0xFE, 0x00, 0xD8]))) { XCTAssertEqual($0 as? KeyFile.Failure, .notText) }
+        XCTAssertThrowsError(try KeyFile.parse(#"{"hello":"world"}"#)) { XCTAssertEqual($0 as? KeyFile.Failure, .malformed) }
+        for failure in [KeyFile.Failure.tooLarge, .notText, .wrappedKey, .publicOnly, .malformed] {
+            XCTAssertFalse(failure.localizedDescription.contains(jwk.d), "messages never echo key material")
+        }
+    }
+
     func testRejectsPublicOnlyOrMismatchedJWK() throws {
         let jwk = try key("key.jwk").jwk
         XCTAssertThrowsError(try Envelope.PrivateKey(pasted: #"{"kty":"EC","crv":"P-256","x":"\#(jwk.x)","y":"\#(jwk.y)"}"#))
