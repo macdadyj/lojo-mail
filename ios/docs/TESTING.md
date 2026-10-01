@@ -2,11 +2,13 @@
 
 ## Automated (Linux, `ios/scripts/test-core.sh`)
 
-`CoreTests` builds `LojoMailCore` with swift-crypto on Santa Computa. 21 tests:
+`CoreTests` builds `LojoMailCore` with swift-crypto on Santa Computa. 23 tests:
 
-- **Offline (16)**: envelopes sealed by `packages/core/src/envelope.ts` open in Swift (body, 70 KB attachment); wrong
+- **Offline (18)**: envelopes sealed by `packages/core/src/envelope.ts` open in Swift (body, 70 KB attachment); wrong
   AAD, wrong key and tampering are refused; JWK validation; fingerprint equals `keyFingerprint` from `packages/core`; model decoding (messages, drafts, rules
-  including `sendKillSwitch`, session expiry); thread grouping; draft author notices; changed-field comparison
+  including `sendKillSwitch`, session expiry); key files as Files/AirDrop/paste deliver them (BOM,
+  pretty-printed, newlines dropped by a secure field, extra JWK members) and the wrong ones refused (public key,
+  wrapped `lojo-key-v1.` key, oversize, binary, unrelated JSON) without echoing key material; thread grouping; draft author notices; changed-field comparison
   (mirrors `packages/web/src/review.ts`); reply/forward helpers; HTML fallback; base URL validation; request paths.
 - **`--live` (2, read-only)**: signs in with `~/.config/lojo-mail/web-passphrase`, checks the local key's fingerprint
   equals the server's `envelopeKeyFingerprint`, decrypts every Inbox body and attachment with the real envelope key, and decodes drafts, rules, search and every folder.
@@ -42,6 +44,11 @@ trashed thread with "Trashed by you", compose, the send confirmation, the review
 both kill switches, Settings, and key setup.
 
 ## Not tested yet
+
+- **The sign-in and key-import changes have not run on a phone yet** (built with `deploy-phone.sh --build` only):
+  the eye toggle, password-manager fill from the Passwords button, AirDrop / share sheet / "Open in LOJO Mail" for a
+  `.jwk` or `.json` file, the confirmation alert, and Choose from Files. To check: AirDrop `envelope.private.jwk` from
+  the Mac, pick LOJO Mail, confirm the fingerprint matches Settings → Decryption.
 
 - **Taps on the phone.** pymobiledevice3 can launch and screenshot but can't tap without a paid-account XCTest
   runner, so swipe actions, Undo, the Face ID lock, pull to refresh, the rewrite menu and pressing "Send now" were

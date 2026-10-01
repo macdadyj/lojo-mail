@@ -13,6 +13,17 @@ The web app's threat model (`docs/SECURITY.md`) still applies. This covers what 
 - The key is validated on import (curve, `d` matches `x`/`y`) and identified in Settings by the same fingerprint the
   server publishes in `/v1/settings` (`envelopeKeyFingerprint`, #9). A key for a different mailbox is refused on
   import, and a stored one that doesn't match shows a red banner. Pasting clears the clipboard afterwards.
+- **Importing the key** (Files, AirDrop, share sheet, paste, typing): the key text never appears on screen unless Jon
+  taps the eye on the manual field, and the field hides again when the app leaves the foreground (so the app switcher
+  snapshot can't show it). Paste and file imports go straight to the Keychain without filling any field. Files that
+  arrive by AirDrop or "Open in" are copies in Documents/Inbox: read (64 KB cap), deleted immediately, and anything
+  left there is purged when the app backgrounds. Files picked in the Files app are only read, never moved or deleted.
+  An incoming key is stored only after a confirmation that shows its fingerprint, and that confirmation waits while
+  the Face ID lock is up. Error messages name the problem (public key, wrapped key, wrong mailbox) and never echo key
+  material.
+- **Passphrase field**: `SecureField` with `textContentType(.password)` next to a `.username` field, autocorrect,
+  autocapitalisation and spell-check off, show/hide toggle that resets on backgrounding. No associated domains (free
+  account), so iOS won't offer to save the passphrase from the app; it can still be filled from the password manager.
 - Because the key is `WhenUnlocked`, background refresh can't decrypt; notifications use list metadata only
   (sender and subject, which the server already stores in the clear for listing).
 - The app never logs: there is no `print`, `os_log` or `Logger` in the sources. `URLSession` is ephemeral (no cookie

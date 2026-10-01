@@ -35,7 +35,7 @@ signed with a free Apple ID and installed over USB, the same way as
 - **Freshness**: a 60-second poll while open, iOS background app refresh, and local notifications for new mail
   (sender, optionally subject). **There is no push (APNs): a free Apple account can't use it**, so notifications arrive
   whenever iOS decides to run background refresh, which can be hours apart.
-- **Settings**: session expiry, key fingerprint / replace / remove, send test mode, notifications, Face ID lock,
+- **Settings**: session expiry, key fingerprint / replace / remove (with import instructions), send test mode, notifications, Face ID lock,
   server URL, sign out.
 - Dark mode, Dynamic Type, VoiceOver labels, empty / error / offline / missing-key states throughout.
 
@@ -53,10 +53,37 @@ ios/scripts/provision-phone.sh          # hand the app a fresh session + the env
 The phone's UDID is read from USB at run time (or `LOJO_UDID`); it is never written to the repo. The installed bundle
 ID is `XTL-HG9HAYXW44.com.lojo.Mail` (xtool prefixes the team ID).
 
-**Signing in on the phone** works without the scripts: type the web passphrase, then paste or import
-`envelope.private.jwk` when the app asks for it. `provision-phone.sh` is the shortcut from Santa Computa: it signs in
-from the host, pushes the session and the key into the app's private container over USB, and the app moves both into
-the Keychain and deletes the files on its next launch.
+### Signing in on the phone
+
+Type (or autofill) the web passphrase. The eye button shows what you typed; it hides again when the app leaves the
+screen. The form has an **Account** field (prefilled with the mailbox) next to the passphrase so password managers
+treat it as a login: tap the passphrase field and pick the credential from the key / **Passwords** button above the
+keyboard (iCloud Keychain, 1Password and others). Save the passphrase in your password manager under
+`lojo@cyberphysical.us` with website `app.cyberphysical.us` so it is easy to find.
+
+What a free account can't do here: iOS only offers the credential *automatically* and asks "Save password?" when the
+app has an Associated Domains entitlement (`webcredentials:app.cyberphysical.us`) plus an
+`apple-app-site-association` file on that site. Free personal teams can't get that entitlement, so on the phone you
+pick the credential from the Passwords list yourself, and new passphrases are saved in the password manager, not
+from the app.
+
+### Loading the envelope key
+
+After sign-in the app asks for `envelope.private.jwk` (later: **Settings → Decryption → Replace key…**). Any of:
+
+- **Files**: *Choose from Files…* and pick the file (iCloud Drive, On My iPhone, a USB stick, any Files provider).
+- **AirDrop**: AirDrop the file from the Mac and choose LOJO Mail.
+- **Share sheet / Open in**: in Files, Mail or any app, share the file and pick LOJO Mail.
+- **Paste**: copy the JWK text and tap *Paste*; the clipboard is cleared once the key is saved.
+- **By hand**: type or paste into the hidden field (eye to check), then *Save to Keychain*.
+- **USB from Santa Computa**: `ios/scripts/provision-phone.sh` signs in on the host and pushes the session and the key
+  into the app's private container; the app moves both into the Keychain and deletes the files on its next launch.
+
+AirDrop, share and "Open in" copy the file into the app's Documents/Inbox. The app reads it, deletes that copy at once,
+shows the key's fingerprint (and whether it matches the mailbox's published fingerprint) and asks before storing or
+replacing the key. A key for a different mailbox, the public key, or the web app's wrapped key (`lojo-key-v1.…`) is
+refused with a message saying which file to use. The app registers `.jwk` and `.json` as an *alternate* handler, so it
+never becomes the default app for JSON.
 
 Free-account limits to know:
 
