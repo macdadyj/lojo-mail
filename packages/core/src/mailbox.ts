@@ -10,6 +10,14 @@ import {
   sameHash,
 } from "./approval.ts";
 import type { BlobStore } from "./blob/store.ts";
+import {
+  approvalNoteRefusals,
+  CHAT_APPROVAL_SOURCE,
+  chatApprovalDetail,
+  chatSendRateRefusals,
+  replyRecipientRefusals,
+  type ChatSendLimits,
+} from "./bots/chat-send.ts";
 import { botTestSend, type TestSendInput, type TestSendLimits } from "./bots/test-send.ts";
 import { DEFAULT_CLIENT_SEND_LIMITS, sendFromClient, type ClientSendInput, type ClientSendLimits, type ClientSendResult } from "./client-send.ts";
 import {
@@ -39,7 +47,8 @@ import { encryptMimeEntity, encryptText, type PgpSigningKey } from "./openpgp/ma
 import { deleteBotRule, upsertBotRule } from "./rules/bot-rules.ts";
 import { dryRunRules, loadRules, saveRules, type DryRun } from "./rules/engine.ts";
 import type { RuleAuthor, RulesDocument } from "./rules/types.ts";
-import { emptyRules, parseRulesDocument, rulesHash } from "./rules/validate.ts";
+import { enableRule, setAutomationMode, type AutomationMode } from "./rules/promote.ts";
+import { assertShadowedFirst, automationModes, emptyRules, parseRulesDocument, ruleFingerprint, rulesHash } from "./rules/validate.ts";
 import { sesRfcId, type MailSender, type OutboundAttachment, type OutboundMessage } from "./send.ts";
 import type { MailStore } from "./store/types.ts";
 import type {
@@ -217,6 +226,16 @@ function authorOf(actor: Actor): RuleAuthor {
 function withoutApproval(draft: Draft): Draft {
   const { approvalTokenHash: _a, approvalContentHash: _b, approvalExpiresAt: _c, approvalUsedAt: _d, ...rest } = draft;
   return rest;
+}
+
+/** For the audit log: which rules act outside the mailbox, and how. */
+function automationSummary(doc: RulesDocument): string {
+  const list = (live: boolean) =>
+    doc.rules
+      .filter((rule) => rule.enabled && automationModes(rule).some((mode) => mode.live === live))
+      .map((rule) => rule.id)
+      .join(",") || "none";
+  return `live:${list(true)} shadow:${list(false)}`;
 }
 
 export class Mailbox {
@@ -1037,12 +1056,29 @@ export class Mailbox {
     if (actor !== "human") throw new MailError("Only a signed-in human can change mail rules", "forbidden");
     const previous = await loadRules(this.deps.blobs, this.deps.keys);
     const doc = parseRulesDocument(input, "human", this.now(), previous);
+    assertShadowedFirst(previous, doc);
     await saveRules(this.deps.blobs, this.deps.keys, doc);
-    const autoSend = doc.rules.filter((rule) => rule.enabled && rule.actions.some((action) => action.type === "reply" && action.reply.mode === "autoSend"));
-    await this.audit("rules.updated", "ok", {
-      detail: `sha256:${rulesHash(doc)} rules:${doc.rules.length} autoSend:${autoSend.map((rule) => rule.id).join(",") || "none"} killSwitch:${doc.killSwitch} paused:${doc.paused}`,
-    });
+    await this.audit("rules.updated", "ok", { detail: `sha256:${rulesHash(doc)} rules:${doc.rules.length} ${automationSummary(doc)} killSwitch:${doc.killSwitch} paused:${doc.paused}` });
     return doc;
+  }
+
+  /** Human sessions only. `sha256` is the rule as Jon reviewed it (GET /v1/rules `fingerprints`). */
+  async enableRule(ruleId: string, sha256: unknown, actor: Actor): Promise<RulesDocument> {
+    if (actor !== "human") throw new MailError("Only a signed-in human can enable a rule", "forbidden");
+    const next = enableRule(await this.getRules(), ruleId, sha256, this.now());
+    await saveRules(this.deps.blobs, this.deps.keys, next);
+    await this.audit("rules.enabled", "ok", { detail: `rule:${ruleId} sha256:${String(sha256)} ${automationSummary(next)}` });
+    return next;
+  }
+
+  /** Human sessions only: draft, shadow or live for a rule's reply or unsubscribe. Live only after shadow. */
+  async setRuleAutomation(ruleId: string, mode: AutomationMode, sha256: unknown, actor: Actor): Promise<RulesDocument> {
+    if (actor !== "human") throw new MailError("Only a signed-in human can change what a rule sends", "forbidden");
+    const next = setAutomationMode(await this.getRules(), ruleId, mode, sha256, this.now());
+    await saveRules(this.deps.blobs, this.deps.keys, next);
+    const rule = next.rules.find((item) => item.id === ruleId);
+    await this.audit("rules.automation", mode, { detail: `rule:${ruleId} sha256:${rule ? ruleFingerprint(rule) : ""} ${automationSummary(next)}` });
+    return next;
   }
 
   /** Anyone with `write` can make the rules safer (pause, kill switch on, disable a rule); only Jon can undo it. */
@@ -1100,6 +1136,87 @@ export class Mailbox {
   /** The `test-send` scope: one message to LOJO_TEST_RECIPIENT, nobody else (bots/test-send.ts). */
   async botTestSend(input: TestSendInput): Promise<{ messageId: string; to: string }> {
     return botTestSend({ ...this.deps, sendRules: () => this.getRules(), now: () => this.now(), ...(this.deps.testSendLimits ? { limits: this.deps.testSendLimits } : {}) }, input);
+  }
+
+  /** What a bot shows Jon in chat before he approves: the exact content and the hash it must send back. */
+  async chatSendReview(draftId: string, allowNew: boolean) {
+    const draft = await this.requireDraft(draftId);
+    const text = await this.readDraftText(draft);
+    const recipientRefusals = allowNew ? [] : await replyRecipientRefusals(this.deps.store, draft, this.deps.config.mailbox, this.deps.config.domain);
+    return {
+      draftId,
+      status: draft.status,
+      contentHash: this.contentHash(draft, text),
+      from: this.deps.config.mailbox,
+      to: draft.to.map((item) => item.email),
+      cc: draft.cc.map((item) => item.email),
+      subject: draft.subject,
+      text,
+      pgp: draft.pgp,
+      attachments: (draft.attachments ?? []).map(({ filename, contentType, size, sha256: hash }) => ({ filename, contentType, size, sha256: hash })),
+      ...(draft.inReplyTo ? { inReplyTo: draft.inReplyTo } : {}),
+      sendable: EDITABLE.has(draft.status) && draft.to.length > 0 && recipientRefusals.length === 0,
+      recipientRefusals,
+    };
+  }
+
+  /**
+   * The `send-approved` scope (bots/chat-send.ts). Checks everything the server
+   * can check, then mints a one-time approval for the current content and sends
+   * through approveAndSend, so the send kill switch, PGP and the sent copy work
+   * exactly as for a send Jon approves in the app.
+   */
+  async botChatSend(input: {
+    bot: string;
+    draftId: string;
+    contentHash: unknown;
+    approvalSource: unknown;
+    approvalNote: unknown;
+    allowNew: boolean;
+    limits: ChatSendLimits;
+  }): Promise<{ messageId: string; encryption: SendEncryption; approvalSource: string }> {
+    const refuse = async (outcome: string, message: string, kind: "forbidden" | "conflict" | "invalid" | "rate_limited") => {
+      await this.audit("send.chat_refused", outcome, { messageId: input.draftId, detail: `approvalSource:${String(input.approvalSource)} ${message}`.slice(0, 500) });
+      throw new MailError(message, kind);
+    };
+    if (input.approvalSource !== CHAT_APPROVAL_SOURCE) await refuse("bad_source", `approvalSource must be "${CHAT_APPROVAL_SOURCE}"`, "invalid");
+    const draft = await this.requireDraft(input.draftId);
+    if (!EDITABLE.has(draft.status)) await refuse("not_editable", `Draft is ${draft.status}`, "invalid");
+    if (draft.to.length === 0) await refuse("no_recipients", "The draft has no recipients", "invalid");
+    if ((await this.getRules()).sendKillSwitch) await refuse("kill_switch", "Sending is stopped: the global send kill switch is on", "forbidden");
+    const text = await this.readDraftText(draft);
+    const hash = this.contentHash(draft, text);
+    if (typeof input.contentHash !== "string" || !sameHash(input.contentHash, hash)) {
+      await refuse("content_changed", "The draft is not what Jon approved: its content hash changed. Show Jon the current version and ask again.", "conflict");
+    }
+    if (!input.allowNew) {
+      const recipients = await replyRecipientRefusals(this.deps.store, draft, this.deps.config.mailbox, this.deps.config.domain);
+      if (recipients.length > 0) await refuse("recipients", recipients.join("; "), "forbidden");
+    }
+    const thread = draft.threadId ? await this.deps.store.listThreadMessages(draft.threadId) : [];
+    const mailboxText: string[] = [];
+    for (const message of thread) {
+      mailboxText.push(message.subject, message.snippet);
+      const context = await this.contextText(message).catch(() => null);
+      if (context) mailboxText.push(context);
+    }
+    const noteRefusals = approvalNoteRefusals(input.approvalNote, mailboxText);
+    if (noteRefusals.length > 0) await refuse("note", noteRefusals.join("; "), "forbidden");
+    const rate = await chatSendRateRefusals(this.deps.store, input.bot, input.limits, this.now());
+    if (rate.length > 0) await refuse("rate_limited", rate.join("; "), "rate_limited");
+    if ((draft.attachments ?? []).length > 0) assertFits(text, draft.attachments ?? [], this.draftAttachmentLimits);
+
+    const token = newApprovalToken();
+    await this.deps.store.putDraft({
+      ...withoutApproval(draft),
+      approvalTokenHash: hashApprovalToken(token),
+      approvalContentHash: hash,
+      approvalExpiresAt: new Date(this.now().getTime() + APPROVAL_TTL_MS).toISOString(),
+    });
+    const note = String(input.approvalNote);
+    await this.audit("send.chat_approved", "ok", { messageId: draft.id, detail: chatApprovalDetail(input.bot, note, [...draft.to, ...draft.cc].map((item) => item.email)) });
+    const sent = await this.approveAndSend(draft.id, token);
+    return { ...sent, approvalSource: CHAT_APPROVAL_SOURCE };
   }
 
   async testRules(messageId: string): Promise<DryRun> {

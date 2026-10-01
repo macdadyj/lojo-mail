@@ -2,7 +2,9 @@ import { keyFingerprint } from "../crypto/envelope.ts";
 import { MailError } from "../errors.ts";
 import type { MailStore } from "../store/types.ts";
 import type { EcPublicJwk } from "../types.ts";
+import { chatSendLimits, type ChatSendLimits } from "./chat-send.ts";
 import {
+  BOT_SCOPES,
   DEFAULT_BOT_SCOPES,
   emptyBotRegistry,
   hashBotToken,
@@ -38,10 +40,12 @@ export function botScopes(value: unknown): BotScope[] {
   if (!Array.isArray(value) || value.length === 0) throw new MailError("scopes must be a non-empty list", "invalid");
   const scopes = value.map((item) => {
     const scope = typeof item === "string" ? knownBotScope(item) : null;
-    if (!scope) throw new MailError(`A bot cannot hold the scope ${String(item)}. Bot scopes: read, write, body, trash, rules, test-send`, "invalid");
+    if (!scope) throw new MailError(`A bot cannot hold the scope ${String(item)}. Bot scopes: ${BOT_SCOPES.join(", ")}`, "invalid");
     return scope;
   });
   if (!scopes.includes("read")) throw new MailError("Every bot needs the read scope", "invalid");
+  if (scopes.includes("send-approved") && !scopes.includes("write")) throw new MailError("send-approved needs write (the bot drafts what it sends)", "invalid");
+  if (scopes.includes("send-new") && !scopes.includes("send-approved")) throw new MailError("send-new only widens send-approved; grant both", "invalid");
   return [...new Set(scopes)];
 }
 
@@ -122,6 +126,15 @@ export class BotAdmin {
       this.live(registry, name).scopes = scopes;
     });
     await this.deps.audit("bot.scopes", "ok", `bot:${name} scopes:${scopes.join(",")}`);
+    return this.summary(registry, name);
+  }
+
+  async setSendLimits(name: string, value: unknown): Promise<BotSummary> {
+    const limits: ChatSendLimits = chatSendLimits(value);
+    const registry = await this.change((registry) => {
+      this.live(registry, name).sendLimits = limits;
+    });
+    await this.deps.audit("bot.send_limits", "ok", `bot:${name} perHour:${limits.perHour} perDay:${limits.perDay}`);
     return this.summary(registry, name);
   }
 

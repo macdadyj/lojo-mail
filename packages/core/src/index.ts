@@ -31,6 +31,15 @@ export type { Embedder, EmbedPurpose, LlmClient, LlmCompletion, LlmEmbedding, Ll
 export { APPROVAL_TTL_MS, approvalContentHash, hashApprovalToken, newApprovalToken, sameHash } from "./approval.ts";
 export { FsBlobStore, MemoryBlobStore, RULES_KEY, aiContextKey, attachmentKey, bodyKey, botCopyKey, draftAttachmentKey } from "./blob/store.ts";
 export { BotAdmin, botScopes } from "./bots/admin.ts";
+export {
+  approvalNoteRefusals,
+  CHAT_APPROVAL_SOURCE,
+  chatSendLimits,
+  DEFAULT_CHAT_SEND_LIMITS,
+  MAX_CHAT_SEND_LIMITS,
+  replyRecipientRefusals,
+} from "./bots/chat-send.ts";
+export type { ChatSendLimits } from "./bots/chat-send.ts";
 export type { BotAdminDeps, BotRegistryView } from "./bots/admin.ts";
 export { activeBotKey, botBackfillCandidates, botBodyContext, readBotCopy, sealBotCopy, storeBotCopy } from "./bots/copies.ts";
 export type { BotBody } from "./bots/copies.ts";
@@ -102,13 +111,30 @@ export type { PgpSigningKey } from "./openpgp/mail.ts";
 export { wkdAdvancedUrl, wkdLocalPartHash, zBase32Encode } from "./openpgp/wkd.ts";
 export { AUTO_REPLY_FOOTER, autoSendRefusals, rateLimitRefusals, renderTemplate, replyBlockers, replyTextRefusals } from "./rules/autosend.ts";
 export type { AutoSendContext, LoopHeaders } from "./rules/autosend.ts";
-export { deleteBotRule, upsertBotRule } from "./rules/bot-rules.ts";
+export { deleteBotRule, isProposal, upsertBotRule } from "./rules/bot-rules.ts";
+export { enableRule, isAutomationMode, ruleFingerprints, setAutomationMode } from "./rules/promote.ts";
+export type { AutomationMode } from "./rules/promote.ts";
+export { fetchOneClick, parseListUnsubscribe, parseMailto, runUnsubscribe, safeOneClickUrl } from "./rules/unsubscribe.ts";
+export type { OneClickClient, UnsubscribeResult, UnsubscribeTarget } from "./rules/unsubscribe.ts";
 export { dryRunRules, fileByRules, loadRules, rulesRuntime, runRuleReply, saveRules } from "./rules/engine.ts";
 export type { DryRun, ReplyResult, RulesRuntime } from "./rules/engine.ts";
 export { evaluateRules, ruleMatches, senderMatches } from "./rules/match.ts";
 export { RULE_FOLDERS } from "./rules/types.ts";
-export type { ReplyAction, Rule, RuleAction, RuleAuthor, RuleFolder, RuleHit, RuleMatch, RuleOutcome, RulesDocument } from "./rules/types.ts";
-export { checkRulesFile, emptyRules, parseRulesDocument, rulesHash } from "./rules/validate.ts";
+export type {
+  ReplyAction,
+  ReplyMode,
+  Rule,
+  RuleAction,
+  RuleAuthor,
+  RuleFolder,
+  RuleHit,
+  RuleMatch,
+  RuleOutcome,
+  RulesDocument,
+  UnsubscribeAction,
+  UnsubscribeMode,
+} from "./rules/types.ts";
+export { assertShadowedFirst, automationModes, checkRulesFile, emptyRules, parseRulesDocument, ruleFingerprint, rulesHash } from "./rules/validate.ts";
 export { isPurgeDue, ownedBlobKeys, PURGE_MAX_PER_RUN, PURGE_MIN_AGE_DAYS, purgeExpiredTrash, purgeModeFrom } from "./trash/purge.ts";
 export type { PurgeDeps, PurgeMode, PurgeResult } from "./trash/purge.ts";
 export { MemorySender, sesRfcId } from "./send.ts";

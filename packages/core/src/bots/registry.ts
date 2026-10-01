@@ -3,13 +3,17 @@ import { sameHash } from "../approval.ts";
 import { sha256 } from "../ids.ts";
 import type { EcPublicJwk } from "../types.ts";
 
+import type { ChatSendLimits } from "./chat-send.ts";
+
 /**
  * What a bot credential can hold. Never send, compose, client-send or admin:
- * a bot's drafts wait for Jon, and `test-send` only ever reaches LOJO_TEST_RECIPIENT.
+ * a bot's drafts wait for Jon unless he grants `send-approved` (replies he
+ * approved in chat, bots/chat-send.ts), and `test-send` only ever reaches
+ * LOJO_TEST_RECIPIENT. `send-new` widens `send-approved` to new recipients.
  */
-export type BotScope = "read" | "write" | "body" | "trash" | "rules" | "test-send";
+export type BotScope = "read" | "write" | "body" | "trash" | "rules" | "test-send" | "send-approved" | "send-new";
 
-export const BOT_SCOPES = ["read", "write", "body", "trash", "rules", "test-send"] as const satisfies readonly BotScope[];
+export const BOT_SCOPES = ["read", "write", "body", "trash", "rules", "test-send", "send-approved", "send-new"] as const satisfies readonly BotScope[];
 export const DEFAULT_BOT_SCOPES: readonly BotScope[] = ["read", "write", "body"];
 
 export const BOT_TOKEN_PREFIX = "lbt_";
@@ -23,6 +27,8 @@ export interface BotRecord {
   createdAt: string;
   rotatedAt?: string;
   revokedAt?: string;
+  /** Chat-approved send limits Jon set; DEFAULT_CHAT_SEND_LIMITS when absent. */
+  sendLimits?: ChatSendLimits;
 }
 
 /** The public half of the bot's envelope key. The private half stays on Santa with the bot. */
