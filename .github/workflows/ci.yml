@@ -22,6 +22,7 @@ jobs:
       - run: npm run bundles:check
       - run: npm run build:web
       - run: npm run build:bridge
+      - run: npm run build:bot
       - run: bash -n scripts/install-bridge.sh
       - uses: hashicorp/setup-terraform@v3
         with:
