@@ -237,6 +237,14 @@ data "aws_iam_policy_document" "api" {
     resources = ["${aws_s3_bucket.mail.arn}/rules/*"]
   }
 
+  # Files on drafts, KMS-sealed under the existing `draft` purpose (Drafts below). The API deletes them
+  # when a file is removed or the draft is sent or discarded; this is its only DeleteObject.
+  statement {
+    sid       = "DraftAttachments"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.mail.arn}/drafts/*"]
+  }
+
   statement {
     sid       = "ListRulesPrefix"
     actions   = ["s3:ListBucket"]

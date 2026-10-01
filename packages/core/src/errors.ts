@@ -1,8 +1,19 @@
 /**
  * `upstream`: the model provider failed or returned something unusable.
  * `unavailable`: storage refused a read the deployment should allow (an IAM gap), so the answer is unknown.
+ * `too_large`: the message would go over a size limit (HTTP 413).
  */
-export type MailErrorCode = "not_found" | "locked" | "forbidden" | "invalid" | "budget" | "conflict" | "upstream" | "unavailable" | "rate_limited";
+export type MailErrorCode =
+  | "not_found"
+  | "locked"
+  | "forbidden"
+  | "invalid"
+  | "budget"
+  | "conflict"
+  | "upstream"
+  | "unavailable"
+  | "rate_limited"
+  | "too_large";
 
 export class MailError extends Error {
   readonly code: MailErrorCode;

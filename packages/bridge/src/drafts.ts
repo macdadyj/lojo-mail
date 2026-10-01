@@ -7,6 +7,12 @@ const OPEN_STATUSES = new Set(["suggested", "edited", "pending_approval"]);
 /** A keyword on every draft an assistant or rule wrote, so Jon can tell them apart (and tag them in Thunderbird). */
 export const BOT_DRAFT_LABEL = "bot-draft";
 
+/**
+ * A keyword on drafts with files attached through the API (the iOS app, a bot). Thunderbird can't
+ * show or send those files; send such a draft with Approve in the app or the web app.
+ */
+export const SERVER_FILES_LABEL = "server-files";
+
 const ENTRY = /^drf:([A-Za-z0-9_-]+):[0-9a-f]+$/;
 
 export interface DraftEntry {
@@ -50,6 +56,7 @@ export function draftIdOf(entryId: string): string | null {
 export function draftMessageView(entryId: string, view: DraftView, text: string, address: string): MessageView {
   const { draft } = view;
   const labels = botWritten(draft.origin) ? [BOT_DRAFT_LABEL] : [];
+  if ((draft.attachments ?? []).length > 0) labels.push(SERVER_FILES_LABEL);
   const out: MessageView = {
     id: entryId,
     threadId: draft.threadId ?? draft.id,

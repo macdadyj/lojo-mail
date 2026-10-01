@@ -107,6 +107,7 @@ The context is a required argument to seal and open. A blob copied onto another 
 - `objects/{id}.bin` — the sealed body.
 - `objects/{id}/{attachmentId}.bin` — each attachment, sealed separately so a large attachment never has to pass through DynamoDB or through a model.
 - `ai-context/{id}.bin` — the KMS-sealed AI-context copy, expired by lifecycle after `ai_context_days`.
+- `drafts/{draftId}/{attachmentId}.bin` — a file on a draft, KMS-sealed like the draft text (below), because the server has to send it. The API deletes it when the file is removed, when the draft is discarded, and after the draft is sent (approved, or from Thunderbird); the sealed Sent copy keeps the file. The bucket's 30-day noncurrent-version rule removes what versioning leaves behind.
 - DynamoDB holds metadata plus `bodyKey` and `attachments[].blobKey`. Items stay far below the 400 KB limit regardless of attachment size. (`packages/core/src/security.test.ts` "a 300 KB attachment keeps the item small", `packages/importer/src/tuta-export.test.ts` "20 MB attachment")
 
 ### Server-readable data: drafts and the AI-context copy
@@ -127,13 +128,16 @@ Contexts:
 | Context | Written by | Read by |
 | --- | --- | --- |
 | `{ purpose: "draft", draftId }` | API (create, edit, rewrite), processor (suggested reply) | API |
+| `{ purpose: "draft", draftId, attachmentId }` | API (a file added to a draft) | API |
 | `{ purpose: "ai-context", messageId }` | processor | API |
 
 IAM enforces the split with `kms:EncryptionContext:purpose` conditions. The processor may only `GenerateDataKey` for `draft` and `ai-context`. It cannot decrypt either. The API may `GenerateDataKey` and `Decrypt` for `draft`, and `Decrypt` for `ai-context`. S3 and DynamoDB at-rest use of the key is allowed only through `kms:ViaService`.
 
 **AI-context copy.** At ingest, for inbound mail that is not bulk, not OpenPGP, not quarantined, and not a DMARC report, and only when `ai_context_days > 0` (default 30), the processor stores `serverSeal({ text: body truncated to max_body_chars })` at `ai-context/{id}.bin`. The API uses it for draft reply and summarize. If it is missing (expired, disabled, or never made), draft reply accepts `sourceText` from the browser, which decrypted the body locally.
 
-**Residual risk, stated plainly:** anyone who controls the API role or the processor code can read every draft and the last `ai_context_days` of truncated, non-bulk, non-PGP inbound text. Setting `ai_context_days = 0` removes the second part. Server-side draft reply and summarize then work only when the browser supplies the text. Drafts stay server-readable either way, because the server has to send them.
+Files on drafts use the `draft` purpose on purpose, so the existing grant covers them and no new KMS permission exists; `attachmentId` in the context binds each sealed file to its slot, so a file can't be moved to another draft or position without failing to decrypt.
+
+**Residual risk, stated plainly:** anyone who controls the API role or the processor code can read every draft (and the files on it) and the last `ai_context_days` of truncated, non-bulk, non-PGP inbound text. Setting `ai_context_days = 0` removes the second part. Server-side draft reply and summarize then work only when the browser supplies the text. Drafts stay server-readable either way, because the server has to send them.
 
 **Sent copy.** After SES accepts a message, the API ingests a copy with origin `sent`, sealed to the envelope *public* key. The server needs only the public key for that, so the sent copy is as protected as inbound mail.
 
@@ -162,20 +166,33 @@ Every request carries a bearer credential. The API resolves it to a principal wi
 ### Approval flow
 
 1. A draft exists. Any `write` principal can create or edit it. An agent can move it to `pending_approval` with `submit_for_approval`. The web Drafts view shows those as an approval queue.
-2. `POST /v1/drafts/:id/approval { to, cc, subject, text, pgp }` — **human session only**. Any API token gets 403, even with `admin` or `send`.
+2. `POST /v1/drafts/:id/approval { to, cc, subject, text, pgp, attachments? }` — **human session only**. Any API token gets 403, even with `admin` or `send`.
    - The body is what Jon reviewed: the recipients, subject, text, and encryption setting on his screen when he pressed the button. The server hashes it with the same canonicalization as the stored draft (addresses trimmed and compared case-insensitively, header line breaks stripped). If the stored draft differs in any of those, or in PGP mode, it returns **409** `conflict`, stores nothing, and audits `send.approval_refused`. The web app then reloads the draft and names the fields that changed. The "an assistant wrote this" notice stays visible, because it depends on who wrote the draft (`origin`, and `lastEditedBy`, which every edit and rewrite records), not on its status. The send button is disabled for 3 seconds and relabeled "Approve this version and send", so a reflexive second click cannot approve the new content. It is a plain button, not a form submit, so pressing Enter in a field never approves anything.
+   - `attachments` is the SHA-256 of every file on Jon's screen, in draft order. A list that differs from the draft's (missing, extra, reordered, or different bytes) is the same 409. Omitting it means "no files", so a client that predates files keeps working on drafts without them and is refused on drafts with them.
    - Why: a `write` token can edit a draft at any time. Without this step the token would bind to whatever the server held at mint time. An agent that swapped the text, a recipient, or turned PGP off after Jon opened the page would get its version approved, because the web app does not re-save fields Jon did not touch.
-   - On a match it returns a one-time `apv_…` token (32 random bytes), valid 10 minutes, bound to the draft id and to the SHA-256 of the canonical content: from, to, cc, subject, text, In-Reply-To, and PGP mode. The draft stores only `approvalTokenHash`, `approvalContentHash`, `approvalExpiresAt`, and `approvalUsedAt`. The raw token is never stored.
+   - On a match it returns a one-time `apv_…` token (32 random bytes), valid 10 minutes, bound to the draft id and to the SHA-256 of the canonical content: from, to, cc, subject, text, In-Reply-To, PGP mode, and, when there are files, each file's `[sha256, filename, contentType]` in order. A draft without files hashes exactly as before. The draft stores only `approvalTokenHash`, `approvalContentHash`, `approvalExpiresAt`, and `approvalUsedAt`. The raw token is never stored.
    - Drafts are written as whole items, so the approval fields are only ever stored next to the content they were minted for. An edit that races the mint either overwrites the approval (the send then fails) or is overwritten by the approved content.
 3. `POST /v1/drafts/:id/approve-and-send { approvalToken }` needs the `send` scope **and** a valid token:
    - the token hash matches,
    - it has not expired,
    - it has not been used,
-   - the current content hash equals the approved one. Any edit, including a recipient change, clears the approval.
+   - the current content hash equals the approved one. Any edit, including a recipient change or adding or removing a file, clears the approval,
+   - every file opens under its own context and still hashes to the SHA-256 the approval covers. A file swapped in storage is refused before the draft is claimed.
 4. The draft is claimed with a conditional write (`MailStore.claimDraftForSend`). Two concurrent sends with the same token cannot both win. A replay fails.
 5. If SES rejects the message, the draft goes back to `edited`, the approval is cleared, and Jon must approve again.
 
 The web app mints and sends in one click, so for Jon the flow is still one button.
+
+### Files on drafts
+
+`POST /v1/drafts/:id/attachments { filename, contentType, sha256, data }` adds one file (base64, one per request so each request stays under Lambda's 6 MB payload limit), and `POST /v1/drafts/:id/attachments/:attId/remove` removes one. Both need `write` and an editable draft. `GET /v1/settings` advertises `draftAttachments: { maxMessageBytes: 4000000, maxFiles: 10 }`.
+
+- The server checks `sha256` against the decoded bytes (400), refuses an 11th file (400) and anything that would push the encoded message over `maxMessageBytes` (413, with the same arithmetic as the iOS app's budget, the same limit as `client-send`), cleans the filename (no path, control characters, or quotes; at most 120 characters) and reduces the content type to `type/subtype`.
+- Adding or removing a file is an edit: it records `lastEditedBy` and clears any approval. Bots with `write` may attach files. Only Jon's approval, which names every file by hash, sends them.
+- Sending builds `multipart/mixed` (the text, then each file as base64 with an RFC 2231 `filename*`). With OpenPGP the whole MIME tree is encrypted as PGP/MIME (`multipart/encrypted`), so file names and contents are encrypted too, and signed when a signing key is configured. Text-only encrypted mail stays inline OpenPGP as before.
+- The kill switch, the approval checks, and the one-time claim are unchanged. The `client-send` rate limits still apply to Thunderbird only; the approval path has no per-day cap, as before.
+- Thunderbird can't show or send files attached through the API. The bridge tags such drafts with the keyword `server-files`; if Jon sends one from Thunderbird anyway, the draft is recorded as changed (`clientSent.unchanged: false`) and the server copies are deleted.
+- Tests: `packages/core/src/draft-attachments.test.ts`, `packages/api/src/draft-attachments.test.ts`, and the bridge test "a draft with files attached through the API is tagged".
 
 ### Sending from Thunderbird (`client-send`)
 
@@ -349,7 +366,7 @@ Thunderbird on Jon's Linux desktop talks IMAP and SMTP to a bridge on the same m
 ### IAM
 
 - Processor: `s3:GetObject` on `rules/*` with KMS `Decrypt` for the `rules` context only, `s3:GetObject` and `s3:DeleteObject` on `raw/*`, `s3:ListBucket` limited to the `raw/` prefix (for the sweep) and the `rules/` prefix (so a missing rules object is `NoSuchKey`, not `AccessDenied`), `s3:PutObject` on `objects/*` and `ai-context/*`, KMS `GenerateDataKey` for the `draft` and `ai-context` contexts, KMS through S3/DynamoDB only for storage, DynamoDB `GetItem`/`PutItem`/`UpdateItem`/`Query` on the tables and their indexes, `sqs:SendMessage` on its DLQ, `ssm:GetParameter` on `envelope-public-jwk` and the provider keys (`grok-api-key`, `openai-api-key`, `gemini-api-key`, `vertex-sa-json`) under `/lojo-mail/`, logs, and `bedrock:InvokeModel` only on the selected chat model (when `llm_provider = bedrock`) and the Titan embedding model (when `embed_provider = bedrock`). No SES send, unless `auto_send_enabled = true`, which adds `ses:SendEmail`/`ses:SendRawEmail` constrained by `ses:FromAddress` for auto-send rules.
-- API: the same DynamoDB actions, `s3:GetObject` and `s3:PutObject` on `rules/*` with KMS `GenerateDataKey`/`Decrypt` for the `rules` context, `s3:ListBucket` limited to the `rules/` prefix (it cannot list mail objects), `s3:GetObject` on `objects/*` and `ai-context/*`, `s3:PutObject` on `objects/*` (the sealed sent copy), KMS as described under key custody, `ses:SendEmail`/`ses:SendRawEmail` constrained by `ses:FromAddress`, `ssm:GetParameter` on the named `/lojo-mail/` parameters it reads (tokens, agent tokens, the bridge token, session secret, passphrase hash, envelope public key, PGP keys, provider keys), logs, Bedrock only for the selected models. Only the API can read `agent-tokens`. No access to `raw/*`.
+- API: the same DynamoDB actions, `s3:GetObject` and `s3:PutObject` on `rules/*` with KMS `GenerateDataKey`/`Decrypt` for the `rules` context, `s3:ListBucket` limited to the `rules/` prefix (it cannot list mail objects), `s3:GetObject` on `objects/*` and `ai-context/*`, `s3:PutObject` on `objects/*` (the sealed sent copy), `s3:GetObject`/`s3:PutObject`/`s3:DeleteObject` on `drafts/*` (files on drafts; its only delete), KMS as described under key custody, `ses:SendEmail`/`ses:SendRawEmail` constrained by `ses:FromAddress`, `ssm:GetParameter` on the named `/lojo-mail/` parameters it reads (tokens, agent tokens, the bridge token, session secret, passphrase hash, envelope public key, PGP keys, provider keys), logs, Bedrock only for the selected models. Only the API can read `agent-tokens`. No access to `raw/*`.
 - Trash purge (`purge.tf`): `dynamodb:Query`/`GetItem` on messages and its indexes, `GetItem`/`PutItem`/`UpdateItem` on threads, `PutItem` on audit, KMS through DynamoDB only, logs, and only in `trash_purge_mode = purge`, `dynamodb:DeleteItem` on the messages table and `s3:DeleteObject` on `objects/*` and `ai-context/*`. See [Trash and deletion](#trash-and-deletion).
 - No `dynamodb:Scan` anywhere, and no `dynamodb:DeleteItem` except the purge role's. Every read path is `GetItem` or `Query` on a declared index. A unit test fails if `ScanCommand` appears in `packages/*/src`.
 - No `*` resource on data APIs. No IAM write. No SES identity administration from the runtime roles.
@@ -381,7 +398,7 @@ Thunderbird on Jon's Linux desktop talks IMAP and SMTP to a bridge on the same m
 ### Outbound
 
 - Header values are stripped of CR/LF, and non-ASCII subjects are RFC 2047 encoded, in both the SES raw message and the stored sent copy.
-- OpenPGP: when any recipient (To or Cc) has a key on file, the message is encrypted to **every** recipient plus Jon's own key (SSM `/lojo-mail/pgp-public-key`, optional). If some recipients have keys and others do not, sending fails unless the draft's PGP mode is `off`. When a signing key is configured (SSM `/lojo-mail/pgp-signing-key`, optional), the message is signed. That key is then server-readable, with the same exposure as drafts; leave it unset if that is not acceptable. The stored sent copy is the plaintext, sealed to the envelope public key.
+- OpenPGP: when any recipient (To or Cc) has a key on file, the message is encrypted to **every** recipient plus Jon's own key (SSM `/lojo-mail/pgp-public-key`, optional). If some recipients have keys and others do not, sending fails unless the draft's PGP mode is `off`. When a signing key is configured (SSM `/lojo-mail/pgp-signing-key`, optional), the message is signed. That key is then server-readable, with the same exposure as drafts; leave it unset if that is not acceptable. The stored sent copy is the plaintext, sealed to the envelope public key. A draft with files goes out as PGP/MIME (RFC 3156), so the files are inside the encryption.
 - Inbound PGP is detected only for `multipart/encrypted`, `application/pgp-encrypted`, or an armored `BEGIN PGP MESSAGE`. Signed-only mail is analyzed normally.
 
 ### OpenPGP / WKD

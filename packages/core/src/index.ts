@@ -29,7 +29,7 @@ export { cosineInt8, packVector, rankVectors, unpackVector, vectorTag } from "./
 export type { VectorRow } from "./ai/vectors.ts";
 export type { Embedder, EmbedPurpose, LlmClient, LlmCompletion, LlmEmbedding, LlmRequest, ProviderSecrets } from "./ai/types.ts";
 export { APPROVAL_TTL_MS, approvalContentHash, hashApprovalToken, newApprovalToken, sameHash } from "./approval.ts";
-export { FsBlobStore, MemoryBlobStore, RULES_KEY, aiContextKey, attachmentKey, bodyKey } from "./blob/store.ts";
+export { FsBlobStore, MemoryBlobStore, RULES_KEY, aiContextKey, attachmentKey, bodyKey, draftAttachmentKey } from "./blob/store.ts";
 export type { BlobStore } from "./blob/store.ts";
 export { clientSendLimitsFromEnv, DEFAULT_CLIENT_SEND_LIMITS, sendFromClient } from "./client-send.ts";
 export type { ClientSendDeps, ClientSendInput, ClientSendLimits, ClientSendResult } from "./client-send.ts";
@@ -52,11 +52,16 @@ export {
   LocalKeyWrapper,
   aiContextContext,
   canonicalContext,
+  draftAttachmentContext,
   draftContext,
   rulesContext,
   serverOpen,
+  serverOpenBytes,
   serverSeal,
+  serverSealBytes,
 } from "./crypto/server-seal.ts";
+export { DRAFT_ATTACHMENT_LIMITS, cleanAttachmentFilename, encodedSize, estimatedMessageBytes } from "./draft-attachments.ts";
+export type { DraftAttachmentLimits, NewDraftAttachment } from "./draft-attachments.ts";
 export type { DataKey, KeyWrapper } from "./crypto/server-seal.ts";
 export { MailError, assertNever } from "./errors.ts";
 export type { MailErrorCode } from "./errors.ts";
@@ -66,13 +71,13 @@ export type { IngestDeps, IngestOptions, IngestResult } from "./ingest.ts";
 export { Mailbox } from "./mailbox.ts";
 export type { AttachmentPayload, DraftInput, DraftPatch, MailboxDeps, ReviewedDraft, ViewOptions } from "./mailbox.ts";
 export { isBulk } from "./mime/bulk.ts";
-export { buildRawMessage, cleanEmail, cleanHeaderValue, encodeHeaderText, formatAddress } from "./mime/compose.ts";
+export { buildMimeEntity, buildRawMessage, cleanContentType, cleanEmail, cleanHeaderValue, encodeHeaderText, formatAddress, mimeParameter } from "./mime/compose.ts";
 export { htmlToText, snippetFrom } from "./mime/html.ts";
 export { parseMime, rawHeaders, sesVerdicts } from "./mime/parse.ts";
 export type { ParsedInbound } from "./mime/parse.ts";
 export { heuristicPhishing } from "./mime/phishing.ts";
 export { assignThreadIds, threadIdForRoot } from "./mime/thread.ts";
-export { decryptText, encryptText, generateTestKey } from "./openpgp/mail.ts";
+export { decryptText, encryptMimeEntity, encryptText, generateTestKey } from "./openpgp/mail.ts";
 export type { PgpSigningKey } from "./openpgp/mail.ts";
 export { wkdAdvancedUrl, wkdLocalPartHash, zBase32Encode } from "./openpgp/wkd.ts";
 export { AUTO_REPLY_FOOTER, autoSendRefusals, rateLimitRefusals, renderTemplate, replyBlockers, replyTextRefusals } from "./rules/autosend.ts";
@@ -86,7 +91,7 @@ export { checkRulesFile, emptyRules, parseRulesDocument, rulesHash } from "./rul
 export { isPurgeDue, ownedBlobKeys, PURGE_MAX_PER_RUN, PURGE_MIN_AGE_DAYS, purgeExpiredTrash, purgeModeFrom } from "./trash/purge.ts";
 export type { PurgeDeps, PurgeMode, PurgeResult } from "./trash/purge.ts";
 export { MemorySender, sesRfcId } from "./send.ts";
-export type { MailSender, OutboundMessage, RawOutbound } from "./send.ts";
+export type { MailSender, OutboundAttachment, OutboundMessage, RawOutbound } from "./send.ts";
 export { DynamoMailStore } from "./store/dynamo.ts";
 export { DYNAMO_ITEM_LIMIT_BYTES, DynamoItemTooLarge, MemoryDynamo } from "./store/memory-dynamo.ts";
 export type { MemoryDynamoDump } from "./store/memory-dynamo.ts";
@@ -109,6 +114,7 @@ export type {
   Address,
   AiPublic,
   AttachmentMeta,
+  DraftAttachment,
   AuditEvent,
   Category,
   Contact,

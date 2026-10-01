@@ -43,11 +43,22 @@ async function aesKey(raw: Uint8Array, usage: "encrypt" | "decrypt"): Promise<Cr
   return crypto.subtle.importKey("raw", raw as BufferSource, { name: "AES-GCM" }, false, [usage]);
 }
 
+/**
+ * A file on a draft. Same KMS purpose as the draft text, so the API's existing `purpose = draft` grant
+ * covers it; `attachmentId` in the context binds each sealed file to its own slot.
+ */
+export function draftAttachmentContext(draftId: string, attachmentId: string): EncryptionContext {
+  return { purpose: "draft", draftId, attachmentId };
+}
+
 export async function serverSeal(value: unknown, context: EncryptionContext, wrapper: KeyWrapper): Promise<ServerSealedBlob> {
+  return serverSealBytes(new TextEncoder().encode(JSON.stringify(value)), context, wrapper);
+}
+
+export async function serverSealBytes(plain: Uint8Array, context: EncryptionContext, wrapper: KeyWrapper): Promise<ServerSealedBlob> {
   const key = await wrapper.generateDataKey(context);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const aad = new TextEncoder().encode(canonicalContext(context));
-  const plain = new TextEncoder().encode(JSON.stringify(value));
   const ct = new Uint8Array(
     await crypto.subtle.encrypt(
       { name: "AES-GCM", iv, additionalData: aad as BufferSource },
@@ -60,6 +71,10 @@ export async function serverSeal(value: unknown, context: EncryptionContext, wra
 }
 
 export async function serverOpen<T>(blob: ServerSealedBlob, expected: EncryptionContext, wrapper: KeyWrapper): Promise<T> {
+  return JSON.parse(new TextDecoder().decode(await serverOpenBytes(blob, expected, wrapper))) as T;
+}
+
+export async function serverOpenBytes(blob: ServerSealedBlob, expected: EncryptionContext, wrapper: KeyWrapper): Promise<Uint8Array> {
   if (blob.v !== 1 || blob.alg !== SERVER_SEAL_ALG) throw new Error("Unsupported server-sealed blob");
   const canonical = canonicalContext(expected);
   if (canonicalContext(blob.ctx) !== canonical) {
@@ -72,7 +87,7 @@ export async function serverOpen<T>(blob: ServerSealedBlob, expected: Encryption
     b64ToBytes(blob.ct) as BufferSource,
   );
   raw.fill(0);
-  return JSON.parse(new TextDecoder().decode(plain)) as T;
+  return new Uint8Array(plain);
 }
 
 /** Wraps data keys with AES-GCM under a process-local master key. Never used in AWS. */

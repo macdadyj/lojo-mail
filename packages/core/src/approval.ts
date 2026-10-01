@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { sha256 } from "./ids.ts";
-import type { Address, PgpMode } from "./types.ts";
+import type { Address, DraftAttachment, PgpMode } from "./types.ts";
 
 export const APPROVAL_TTL_MS = 10 * 60 * 1000;
 
@@ -12,11 +12,15 @@ export interface ApprovalContent {
   text: string;
   inReplyTo?: string;
   pgp: PgpMode;
+  attachments?: Pick<DraftAttachment, "sha256" | "filename" | "contentType">[];
 }
 
-/** What Jon approved. Any change to recipients, subject, body, threading, or PGP mode changes the hash. */
+/**
+ * What Jon approved. Any change to recipients, subject, body, threading, PGP mode, or the files
+ * (bytes, name, type, order) changes the hash. A draft without files hashes as it always has.
+ */
 export function approvalContentHash(content: ApprovalContent): string {
-  const canonical = JSON.stringify([
+  const fields: unknown[] = [
     content.from.toLowerCase(),
     content.to.map((address) => address.email.toLowerCase()),
     content.cc.map((address) => address.email.toLowerCase()),
@@ -24,8 +28,10 @@ export function approvalContentHash(content: ApprovalContent): string {
     content.text,
     content.inReplyTo ?? "",
     content.pgp,
-  ]);
-  return sha256(canonical);
+  ];
+  const files = content.attachments ?? [];
+  if (files.length > 0) fields.push(files.map((file) => [file.sha256.toLowerCase(), file.filename, file.contentType]));
+  return sha256(JSON.stringify(fields));
 }
 
 export function newApprovalToken(): string {

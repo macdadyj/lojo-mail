@@ -2,11 +2,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { authorNotice, changedFields, type Fields } from "./review.ts";
 
-const REVIEWED: Fields = { to: "ada@example.com", cc: "", subject: "Lunch", text: "Thursday works.", pgp: "auto" };
+const REVIEWED: Fields = { to: "ada@example.com", cc: "", subject: "Lunch", text: "Thursday works.", pgp: "auto", files: "" };
 
 test("[P2] approval conflict: names every field that changed under Jon", () => {
   const current: Fields = { ...REVIEWED, to: "ada@example.com, attacker@evil.test", text: "Thursday works. Also, the files.", pgp: "off" };
   assert.deepEqual(changedFields(REVIEWED, current), ["recipients (To)", "message text", "encryption"]);
+});
+
+test("approval conflict: a file added or swapped under Jon is named", () => {
+  assert.deepEqual(changedFields({ ...REVIEWED, files: "aa" }, { ...REVIEWED, files: "aa,bb" }), ["attached files"]);
 });
 
 test("approval conflict: address case and spacing are not changes, matching the server", () => {

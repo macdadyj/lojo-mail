@@ -1,8 +1,9 @@
 import type { Embedder } from "./ai/types.ts";
 import type { BlobStore } from "./blob/store.ts";
 import type { KeyWrapper } from "./crypto/server-seal.ts";
+import { deleteDraftAttachments } from "./draft-attachments.ts";
 import { MailError } from "./errors.ts";
-import { newId, normalizeMessageId, utcDay } from "./ids.ts";
+import { newId, normalizeMessageId, sha256, utcDay } from "./ids.ts";
 import { ingestRaw } from "./ingest.ts";
 import { cleanEmail } from "./mime/compose.ts";
 import { parseMime, type ParsedInbound } from "./mime/parse.ts";
@@ -197,6 +198,17 @@ async function rateLimitRefusal(deps: ClientSendDeps, recipients: number): Promi
  * at his own mail client is the approval. Everything else still applies: the
  * global send kill switch, the From list, size and recipient caps, and rate limits.
  */
+/**
+ * Files attached to the draft through the API must have gone out as they were. Thunderbird's own
+ * attachments on a text-only draft are not compared, as before.
+ */
+function sameFileHashes(draft: Draft, parsed: ParsedInbound): boolean {
+  const expected = (draft.attachments ?? []).map((file) => file.sha256).sort();
+  if (expected.length === 0) return true;
+  const sent = parsed.attachments.map((file) => sha256(file.bytes)).sort();
+  return sent.length === expected.length && sent.every((hash, index) => hash === expected[index]);
+}
+
 export async function sendFromClient(deps: ClientSendDeps, input: ClientSendInput): Promise<ClientSendResult> {
   const sender = deps.sender;
   if (!sender?.sendRaw) throw new MailError("No sender is configured", "unavailable");
@@ -243,10 +255,12 @@ export async function sendFromClient(deps: ClientSendDeps, input: ClientSendInpu
       sameAddresses(draft.to, parsed.to) &&
       sameAddresses(draft.cc, parsed.cc) &&
       draft.subject.trim() === parsed.subject.trim() &&
-      normalizedText(await deps.draftText(draft)) === normalizedText(parsed.text);
+      normalizedText(await deps.draftText(draft)) === normalizedText(parsed.text) &&
+      sameFileHashes(draft, parsed);
     const { approvalTokenHash: _a, approvalContentHash: _b, approvalExpiresAt: _c, approvalUsedAt: _d, ...rest } = draft;
     const at = deps.now().toISOString();
     await deps.store.putDraft({ ...rest, status: "sent", sentMessageId: sent.messageId, clientSent: { at, unchanged: draftUnchanged }, updatedAt: at });
+    await deleteDraftAttachments(deps.blobs, draft.id, draft.attachments);
   }
 
   const rfcId = sesRfcId(sent.messageId, deps.config.region);
