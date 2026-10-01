@@ -174,7 +174,7 @@ final class LiveWriteTests: XCTestCase {
         let sent = try await api.folder(.sent, limit: 25).first { $0.subject == subject }
         let copy = try XCTUnwrap(sent, "the Sent copy of \(subject)")
         XCTAssertEqual(copy.attachments.map(\.filename).sorted(), ["notes.txt", "pixel.png"])
-        print("live-write: sent \(copy.attachments.count) files in plain TLS to \(Self.testAddress); Sent copy pgpEncrypted=\(copy.pgpEncrypted.map(String.init) ?? "nil")")
+        print("live-write: sent \(copy.attachments.count) files in plain TLS to \(Self.testAddress); removed, 413 and 11th-file refusals, and stale approvals checked")
     }
 
     private func exerciseAttachments(_ api: APIClient, _ created: DraftView, _ note: OutgoingAttachment, _ png: OutgoingAttachment) async throws {
@@ -225,8 +225,9 @@ final class LiveWriteTests: XCTestCase {
             } catch APIError.conflict {}
         }
         let token = try await api.mintApproval(created.id, reviewed: reviewed)
-        let messageId = try await api.approveAndSend(created.id, approvalToken: token)
-        XCTAssertFalse(messageId.isEmpty)
+        let receipt = try await api.approveAndSendReceipt(created.id, approvalToken: token)
+        XCTAssertFalse(receipt.messageId.isEmpty)
+        if let encryption = receipt.encryption { XCTAssertEqual(encryption, .tlsOnly, "pgp: off goes out over TLS") }
         let status = try await api.draft(created.id).draft.status
         XCTAssertEqual(status, .sent)
     }
@@ -246,7 +247,9 @@ final class LiveWriteTests: XCTestCase {
             let reviewed = DraftFields(view)
             XCTAssertEqual(reviewed.pgp, .auto)
             let token = try await api.mintApproval(created.id, reviewed: reviewed)
-            _ = try await api.approveAndSend(created.id, approvalToken: token)
+            let receipt = try await api.approveAndSendReceipt(created.id, approvalToken: token)
+            if let encryption = receipt.encryption { XCTAssertNotEqual(encryption, .pgpInline, "a draft with files is PGP/MIME when encrypted") }
+            print("live-write: pgp auto with a file went out as \(receipt.encryption?.rawValue ?? "unreported (server without the encryption field)")")
         } catch {
             _ = try? await api.discard(created.id)
             throw error
@@ -254,7 +257,8 @@ final class LiveWriteTests: XCTestCase {
         let sentFolder = try await api.folder(.sent, limit: 25)
         let copy = try XCTUnwrap(sentFolder.first { $0.subject == subject }, "the Sent copy")
         XCTAssertEqual(copy.attachments.map(\.filename), ["pixel.png"])
-        print("live-write: sent 1 file with pgp auto to \(Self.testAddress); Sent copy pgpEncrypted=\(copy.pgpEncrypted.map(String.init) ?? "nil")")
+        // The Sent copy is stored in the clear either way, so it can't say whether the wire copy was encrypted.
+        print("live-write: sent 1 file with pgp auto to \(Self.testAddress)")
     }
 
 }

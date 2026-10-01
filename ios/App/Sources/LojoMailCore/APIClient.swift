@@ -240,9 +240,11 @@ public struct APIClient: Sendable {
     }
 
     public func approveAndSend(_ id: String, approvalToken: String) async throws -> String {
-        struct Sent: Decodable { var messageId: String }
-        let sent: Sent = try await send("POST", "/v1/drafts/\(escaped(id))/approve-and-send", json: ["approvalToken": approvalToken])
-        return sent.messageId
+        try await approveAndSendReceipt(id, approvalToken: approvalToken).messageId
+    }
+
+    public func approveAndSendReceipt(_ id: String, approvalToken: String) async throws -> SendReceipt {
+        try await send("POST", "/v1/drafts/\(escaped(id))/approve-and-send", json: ["approvalToken": approvalToken])
     }
 
     // MARK: Rules

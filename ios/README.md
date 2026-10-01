@@ -29,17 +29,16 @@ signed with a free Apple ID and installed over USB, the same way as
   makes you look before it will send.
 - **Attachments in Compose**: the paperclip (toolbar or the Attachments section) adds photos from the library, a new
   photo from the camera, or any file from Files. Each shows its name, size and a remove button, with a meter against
-  the **4 MB message limit** (the same limit as Thunderbird's direct send, counted after base64 encoding: about
-  2.9 MB of files). Photos go out as JPEG without location data, shrunk if they wouldn't fit. Files stay in memory.
-  **The deployed API can't take attachments on drafts yet**, so on today's server the app shows the files but won't
-  send or queue a draft that has any; it says so in Compose and Settings. The change the server needs is written up
-  in [docs/API-ATTACHMENTS.md](docs/API-ATTACHMENTS.md); the app already speaks it and switches on by itself when
-  `/v1/settings` advertises `draftAttachments`. Forwarding re-attaches the original's files once that is live.
-- **Review**: drafts waiting for approval, drafts written by the AI, bots or Thunderbird, and your own drafts; open one
+  the **4 MB message limit** (counted after base64 encoding: about 2.9 MB of files) and up to 10 files. Photos go out
+  as JPEG without location data, shrunk if they wouldn't fit. Files stay in memory until saving uploads them to the
+  draft; the approval names each by SHA-256, and they go out with plain TLS or OpenPGP (PGP/MIME) sends alike. Limits
+  come from `/v1/settings`, re-read on launch, foreground and Compose. Forwarding re-attaches the original's files.
+  See [docs/API-ATTACHMENTS.md](docs/API-ATTACHMENTS.md).
+- **Review**: drafts waiting for approval, drafts written by the AI, bots or rules, and your own drafts; open one
   to edit and send, swipe to discard.
 - **AI Rules**: status of the rules engine and every rule; a big **Stop all autonomous sending** button (the rules
   kill switch, engages instantly), a **Stop all sending** switch (the global send kill switch from PR #7, which also
-  stops approved sends and Thunderbird), pause/resume, and swipe to disable a rule. Releasing or resuming asks first,
+  stops every send from the mailbox), pause/resume, and swipe to disable a rule. Releasing or resuming asks first,
   and the server only lets a signed-in human session do it.
 - **Freshness**: a 60-second poll while open, iOS background app refresh, and local notifications for new mail
   (sender, optionally subject). **There is no push (APNs): a free Apple account can't use it**, so notifications arrive

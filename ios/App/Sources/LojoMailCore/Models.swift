@@ -173,6 +173,24 @@ public enum DraftStatus: String, Codable, Sendable {
     }
 }
 
+/// What approve-and-send answers. `encryption` is absent on servers that don't report it.
+public struct SendReceipt: Codable, Sendable, Equatable {
+    public enum Encryption: String, Codable, Sendable {
+        case pgpMime = "pgp-mime", pgpInline = "pgp-inline", tlsOnly = "none"
+    }
+    public var messageId: String
+    public var encryption: Encryption?
+
+    public var summary: String {
+        switch encryption {
+        case .pgpMime: "Sent, encrypted with OpenPGP (text and attachments)."
+        case .pgpInline: "Sent, encrypted with OpenPGP."
+        case .tlsOnly: "Sent over TLS (not end-to-end encrypted)."
+        case nil: "Sent."
+        }
+    }
+}
+
 public enum DraftAuthor: String, Codable, Sendable {
     case human, agent, ai, client, rule
 

@@ -86,6 +86,17 @@ final class AttachmentTests: XCTestCase {
         XCTAssertFalse(budget.fits(textBytes: 50_000, attachmentSizes: [1_000_000, 1_000_000, 900_000]), "the server answers 413 for this one")
     }
 
+    func testSendReceiptDecodesWithAndWithoutEncryption() throws {
+        let reported = try JSONDecoder().decode(SendReceipt.self, from: Data(#"{"messageId":"m1","encryption":"pgp-mime"}"#.utf8))
+        XCTAssertEqual(reported.encryption, .pgpMime)
+        XCTAssertTrue(reported.summary.contains("OpenPGP"))
+        let clear = try JSONDecoder().decode(SendReceipt.self, from: Data(#"{"messageId":"m1","encryption":"none"}"#.utf8))
+        XCTAssertEqual(clear.encryption, .tlsOnly)
+        let older = try JSONDecoder().decode(SendReceipt.self, from: Data(#"{"messageId":"m1"}"#.utf8))
+        XCTAssertNil(older.encryption)
+        XCTAssertEqual(older.summary, "Sent.")
+    }
+
     func testReviewedAttachmentsFollowUploadOrder() {
         let onDraft = [DraftAttachment(id: "datt_1", filename: "a", contentType: "text/plain", size: 1, sha256: "aa")]
         let first = OutgoingAttachment(filename: "b", contentType: "text/plain", data: Data("b".utf8))

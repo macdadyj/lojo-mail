@@ -12,13 +12,21 @@
   (mirrors `packages/web/src/review.ts`); reply/forward helpers; HTML fallback; base URL validation; request paths.
 - **`--live` (2, read-only)**: signs in with `~/.config/lojo-mail/web-passphrase`, checks the local key's fingerprint
   equals the server's `envelopeKeyFingerprint`, decrypts every Inbox body and attachment with the real envelope key, and decodes drafts, rules, search and every folder.
-- **`--live-write` (3)**: through the same `APIClient` the app uses, on mail from `lojo-test@cyberphysical.us` only:
+- **`--live-write` (5)**: through the same `APIClient` the app uses, on mail from `lojo-test@cyberphysical.us` only:
   - unread, star, archive and move back, trash (checks `trashedBy`, `keepUntil`, listed in Trash) and restore, then
     search finds it;
   - engages the send kill switch and checks approve-and-send is refused, toggles the rules kill switch and pause,
     and restores all three to what they were;
   - creates a draft, edits it, queues it, checks a mismatched approval gets 409, then approves and sends **one real
-    message to lojo-test@cyberphysical.us**.
+    message to lojo-test@cyberphysical.us**;
+  - attachments, plain TLS (`pgp: off`): checks `/v1/settings` advertises 4,000,000 bytes / 10 files, uploads a text
+    file and a PNG (order, sizes and SHA-256 come back as sent), adds and removes a third, gets 413 for a file that
+    takes the message over 4 MB and 400 for an eleventh file, gets 409 for an approval naming no files, the files in
+    the wrong order, or one of two, then approves and sends, and finds both files on the Sent copy;
+  - attachments, `pgp: auto` (the app's default): one file, approved and sent. Both go to lojo-test@ only.
+
+Offline, `AttachmentTests` pins the budget to values computed with the server's `estimatedMessageBytes`, the
+approval's file order, and the 413/400 mapping through a stubbed transport (the error text names the limit).
 
 `--live-write` found two bugs that the offline tests couldn't: the mutation routes return the stored record, which
 the app failed to decode (every read/star/archive/trash would have errored and rolled back), and `/submit` returns
@@ -92,5 +100,8 @@ interface at the largest Dynamic Type size and with VoiceOver, and an iPad if on
   LLM, and **PGP** modes other than auto.
 - **HTML mail** renders as text (the app converts HTML to plain text when a message has no text part).
 - **Large received attachments** (only a 70 KB vector and the one real image), and types Quick Look can't show.
-- **Sending attachments** end to end: needs the server change in API-ATTACHMENTS.md first.
+- **OpenPGP-encrypted sends with files** live: `pgp: auto` encrypts only when the server holds an OpenPGP key for
+  lojo-test@, which the API can't show or set, and today's approve-and-send doesn't say how a message went out (the
+  Sent copy is always stored in the clear). lojo-mail PR "approve-and-send reports how the message was encrypted"
+  adds `encryption` to the response; the app shows it after Send, and the live test checks it once that is deployed. PGP/MIME with files is covered by the server's own tests (lojo-mail PR #10).
 - Dynamic Type at the largest accessibility sizes, and VoiceOver end to end, on a device.

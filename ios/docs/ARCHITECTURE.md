@@ -44,13 +44,13 @@ opener is checked against the real TypeScript sealer, not against itself.
 
 ## Alignment with the direct-send work (PR #7)
 
-PR #7 added `POST /v1/client/send`, but it is **bridge-only** (`client-send` scope, for Thunderbird on Santa Computa)
+PR #7 added `POST /v1/client/send`, but it is **bridge-only** (`client-send` scope, for the desktop bridge on Santa Computa)
 and deliberately not callable with a human session. That is the right call for a phone: the app keeps using the
 approval flow above, which is the one path that binds a send to content a human saw. What the app picked up from PR #7:
 
 - `sendKillSwitch` in the rules document: shown as **Stop all sending**, engage instantly, release with a confirm;
   compose shows a red notice and disables Approve and send while it is on.
-- `trashedBy` can be `human`, `bridge` or `agent:<label>`; a trashed thread says "Trashed by you / from Thunderbird /
+- `trashedBy` can be `human`, `bridge` or `agent:<label>`; a trashed thread says "Trashed by you / from your mail client /
   by agent X".
 - `rate_limited` maps to HTTP 429, shown as "try again in N s".
 - Bot drafts: the bridge tags drafts whose `origin` is `agent`, `ai` or `rule` with the IMAP keyword `bot-draft`. The

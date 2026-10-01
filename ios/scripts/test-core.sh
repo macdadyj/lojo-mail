@@ -2,7 +2,7 @@
 # Linux-host tests for LojoMailCore: seal envelopes with the repo's TypeScript crypto, open them in Swift.
 #   ios/scripts/test-core.sh           offline tests only
 #   ios/scripts/test-core.sh --live    also read (never write) the deployed API with Jon's session and envelope key
-#   ios/scripts/test-core.sh --live-write  --live plus the write round-trips in LiveWriteTests (sends one message to lojo-test@)
+#   ios/scripts/test-core.sh --live-write  --live plus the write round-trips in LiveWriteTests (sends three messages to lojo-test@, two with files)
 # --live reads the passphrase and key from ~/.config/lojo-mail (override with LOJO_PASSPHRASE_FILE / LOJO_KEY_FILE).
 set -euo pipefail
 

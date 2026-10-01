@@ -326,10 +326,10 @@ final class ComposeModel {
                 throw ConflictFailure(changed: reviewed.changed(comparedTo: DraftFields(current)))
             }
             conflict = nil
-            let messageId = try await model.call { try await $0.approveAndSend(id, approvalToken: token) }
-            sentMessageId = messageId
+            let receipt = try await model.call { try await $0.approveAndSendReceipt(id, approvalToken: token) }
+            sentMessageId = receipt.messageId
             if let view = try? await model.call({ try await $0.draft(id) }) { show(view) }
-            status = "Sent."
+            status = receipt.summary
             await model.refresh(.sent)
         }
     }

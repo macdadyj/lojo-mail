@@ -39,9 +39,8 @@ The web app's threat model (`docs/SECURITY.md`) still applies. This covers what 
   Save to Files, deleted when that closes (Save to Files moves the file out), and the temp directory is purged on
   launch and sign-out.
 - **Attachments you add in Compose** are held in memory only, never written to the phone's disk. Photos are
-  re-encoded as JPEG, which drops EXIF location. Files from Files are sent as they are. On a server with draft
-  attachments, each file is uploaded with its SHA-256 and the approval names those hashes, so a bot can't swap a file
-  after Jon reviewed it ([API-ATTACHMENTS.md](API-ATTACHMENTS.md)). The camera permission is only asked when you tap
+  re-encoded as JPEG, which drops EXIF location. Files from Files are sent as they are. Each file is uploaded to the
+  draft with its SHA-256 and the approval names those hashes in order, so a bot can't swap a file after Jon reviewed it ([API-ATTACHMENTS.md](API-ATTACHMENTS.md)). The camera permission is only asked when you tap
   Take Photo.
 - Optional **Face ID lock** covers the UI when the app returns from the background.
 
@@ -53,7 +52,7 @@ The web app's threat model (`docs/SECURITY.md`) still applies. This covers what 
 - Every send goes through a confirmation that names the recipients and the From address.
 - **Test mode is on by default**: the app refuses any recipient other than `lojo-test@cyberphysical.us` before it
   calls the server. Jon turns it off in Settings when he is ready to send real mail from the phone.
-- `/v1/client/send` (Thunderbird's direct send) is bridge-only and the app does not use it.
+- The app never uses `/v1/client/send` (a bridge-only scope); attachments go through the same approval flow.
 
 ## Kill switches and rules
 

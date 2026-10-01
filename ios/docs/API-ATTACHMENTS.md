@@ -1,86 +1,36 @@
-# Attachments on drafts: the API change the app needs
+# Draft attachments: how the app uses the API
 
-**Status:** proposed. The iOS app already speaks this contract and turns it on by itself when `/v1/settings` says
-the server supports it. Until then Compose lets you pick files but won't send or queue a draft that has any.
+**Status:** live. The server side is lojo-mail PR #10 (`packages/core/src/draft-attachments.ts`,
+`packages/api/src/app.ts`), deployed on AWS.
 
-## Why today's API can't send attachments from the app
+## Capability
 
-- A draft is text only: `Draft.sealed` holds the KMS-sealed body text, and nothing else
-  (`packages/core/src/types.ts`).
-- The approval binds `from, to, cc, subject, text, inReplyTo, pgp` (`approvalContentHash` in
-  `packages/core/src/approval.ts`). Nothing names files, so an approval can't cover them.
-- `OutboundMessage` (`packages/core/src/send.ts`) has no attachments, so `approveAndSend` can't send any.
-- The only path that carries files is the bridge's `client-send` scope (Thunderbird): a raw RFC 5322 message
-  of up to `DEFAULT_CLIENT_SEND_LIMITS.maxBytes` = 4,000,000 bytes, with no approval token. A human session
-  token can't use it, and it shouldn't: the app sends through the approval flow.
+`GET /v1/settings` returns `draftAttachments: { maxMessageBytes: 4000000, maxFiles: 10 }`. The app re-reads settings
+on launch, after sign-in, every time it returns to the foreground, when Compose opens, when Settings opens, and right
+before it saves a draft that has new files. A failed fetch keeps the last answer; an earlier "not supported" is never
+reused. If the server really lacks the field, saving says so and names the server URL to check.
 
-## Proposed contract
+## Flow (the same for every encryption mode)
 
-### Capability
+1. Save the text: `POST /v1/drafts` or `PATCH /v1/drafts/:id`.
+2. Upload each new file, one request each, in the order shown in Compose:
+   `POST /v1/drafts/:id/attachments { filename, contentType, sha256, data }`, with `sha256` the hex SHA-256 of
+   the bytes and `data` base64. The answer is the draft with `attachments: [{ id, filename, contentType, size, sha256 }]`
+   in draft order. Each upload clears any pending approval.
+3. Remove a file already on the draft: `POST /v1/drafts/:id/attachments/:attId/remove`.
+4. Approve: `POST /v1/drafts/:id/approval` with the reviewed `to/cc/subject/text/pgp` and
+   `attachments: [sha256, …]` in draft order (files already on the draft, then the ones just uploaded:
+   `DraftFields.reviewedAttachments`). The list is omitted when there are no files. A different list, order, or any
+   other change is a 409; the app shows what changed.
+5. `POST /v1/drafts/:id/approve-and-send { approvalToken }`. With `pgp: off`, or when a recipient has no key under
+   `auto`, the server sends `multipart/mixed` over TLS. With OpenPGP it encrypts the whole MIME tree, files
+   included, as PGP/MIME. The app sends the same requests in both cases.
 
-`GET /v1/settings` adds:
+## Limits and errors
 
-```json
-"draftAttachments": { "maxMessageBytes": 4000000, "maxFiles": 10 }
-```
-
-The field is absent on servers without this change. `maxMessageBytes` is the whole encoded message, the same
-limit as `client-send`, so Thunderbird and the app agree.
-
-### Add a file
-
-`POST /v1/drafts/:id/attachments` (scope `write`, draft must be editable)
-
-```json
-{ "filename": "Photo 2026-09-30 1.jpg", "contentType": "image/jpeg", "sha256": "<hex>", "data": "<base64>" }
-```
-
-- One file per request, so each body stays far under Lambda's 6 MB synchronous payload limit (4 MB of
-  file is 5.4 MB as base64).
-- The server checks `sha256` against the decoded bytes (400 on mismatch), cleans the filename (no path, no
-  control characters), and refuses with 413 if the encoded message would go over `maxMessageBytes`, or 400
-  past `maxFiles`.
-- It stores the bytes sealed like the draft text (`sealDraftText` in `mailbox.ts`): a KMS data key under
-  `{ purpose: "draft-attachment", draftId, attachmentId }`, in the blob store next to message attachments.
-- It sets `lastEditedBy` like any edit and clears an existing approval: adding a file changes what will be sent.
-- It responds with the `DraftView`, where `draft.attachments` is
-  `[{ "id", "filename", "contentType", "size", "sha256" }]`.
-
-### Remove a file
-
-`POST /v1/drafts/:id/attachments/:attId/remove` (scope `write`) deletes the sealed blob and responds with the
-`DraftView`. A POST verb, like `/submit` and `/discard`.
-
-### Approval
-
-`POST /v1/drafts/:id/approval` takes an optional `"attachments": ["<sha256>", ...]` in the reviewed fields.
-`approvalContentHash` appends the list of `[sha256, filename, contentType]` in draft order (an empty list keeps
-today's hashes valid). If the reviewed list doesn't match the draft's, the server responds 409 like any other
-changed field. The app sends `attachments` only when there are some, so it keeps working with today's server.
-
-### Send
-
-`approveAndSend` unseals the files, re-checks the hash, and builds `multipart/mixed`: the text part, then each
-file as base64 with `Content-Disposition: attachment; filename*=UTF-8''…`. `OutboundMessage` gains
-`attachments?: { filename, contentType, data }[]`. With OpenPGP the whole MIME tree is encrypted
-(PGP/MIME), so the files are encrypted too. After sending, the sealed draft files follow the draft's retention.
-
-### Who can add files
-
-Bots can add files too (scope `write`), but the approval stays human-only. Jon sees every file, with its name
-and size, in the app's Review screen before he approves, and the approval hash covers them.
-
-### Forwarding
-
-The server can't open an attachment that is sealed to Jon's envelope key, so the app decrypts the original
-attachments on the phone and uploads them as ordinary draft files. No forwarding endpoint is needed.
-
-## Client side (already in this PR)
-
-- `LojoMailCore/Attachments.swift`: `OutgoingAttachment` (in memory, SHA-256, cleaned filename) and
-  `AttachmentBudget` (base64 with CRLF every 76 characters, plus headers, against `maxMessageBytes`).
-- `APIClient.addDraftAttachment` / `removeDraftAttachment`, and `DraftFields.attachments` in the approval body.
-- `ComposeModel.save()` uploads pending files after the text and before approving; the reviewed list is the
-  SHA-256 of every file Jon saw.
-- Tests in `CoreTests/Tests/LojoMailCoreTests/AttachmentTests.swift`, including "no `attachments` member when
-  there are none" so today's server keeps accepting approvals.
+| Case | Server | App |
+| --- | --- | --- |
+| Message over 4,000,000 bytes encoded | 413 `too_large` | Refused before upload by `AttachmentBudget` (same arithmetic as `estimatedMessageBytes`); a 413 shows "Too large to send: … Remove a file or send a smaller one." |
+| More than 10 files | 400 | Refused when picking; a 400 shows the server's message |
+| Hash doesn't match the bytes | 400 | Shown next to the file, which stays in Compose |
+| Upload fails part way | — | Files already uploaded stay on the draft; the failed one and later ones stay in Compose to retry or remove |
