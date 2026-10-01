@@ -27,7 +27,8 @@ export async function bodyOf(ctx: OpContext, view: MessageView, html = false): P
       if (!(error instanceof ApiError && error.status === 404)) throw error;
     }
   }
-  if (typeof view.contextText === "string") return { source: "ai-context", text: view.contextText };
+  const context = view.contextText ?? (await ctx.api.get<MessageView>(`/v1/messages/${id(view.id)}?context=1`)).contextText;
+  if (typeof context === "string") return { source: "ai-context", text: context };
   return { source: "none", note: ctx.key ? "No bot copy for this message (older than the bot key; Jon can backfill)" : "No bot envelope key loaded on this machine" };
 }
 
