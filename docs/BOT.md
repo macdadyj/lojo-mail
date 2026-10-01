@@ -1,6 +1,6 @@
 # Jon's bot on lojo-mail (`lojo-bot`)
 
-`lojo-bot` lets Jon's Grok Bot assistant (the Project Manager agent) manage the mailbox from Santa Computa: read, search, sort, label, move to Trash, run its own sort rules, and write drafts and replies with attachments. It cannot send to anyone. Drafts go to Jon, who presses Send in Thunderbird or the web app. The one exception is a test message to `lojo-test@cyberphysical.us`, and only when Jon grants that scope.
+`lojo-bot` lets Jon's Grok Bot assistant (the Project Manager agent) manage the mailbox from Santa Computa: read, search, sort, label, move to Trash, run its own sort rules, propose automated rules, and write drafts and replies with attachments. By default it cannot send to anyone: drafts go to Jon, who presses Send in Thunderbird or the web app. Two opt-in exceptions, each a scope only Jon grants: a test message to `lojo-test@cyberphysical.us` (`test-send`), and a reply Jon approved in chat (`send-approved`, [below](#chat-approved-replies-send-approved)).
 
 ```text
 Grok Bot box ──ssh──▶ Santa: lojo-bot user ──bot credential (lbt_…)──▶ lojo-mail API
@@ -40,10 +40,12 @@ The token is 32 random bytes. It is shown exactly once, written to a mode-600 fi
 | `write` | yes | mark read/unread, flag, set labels, move to inbox/archive/spam, restore from Trash, create/edit/discard drafts, add/remove draft files, submit a draft for Jon's approval, turn any rule **off** |
 | `body` | yes | read message bodies (its own sealed copy, or the server's AI-context text), draft text, semantic search |
 | `trash` | no | move mail to Trash: a soft delete, restorable until the retention window ends (the purge never deletes anything trashed less than 7 days ago), at most 100 per bot per day, recorded as `trashedBy: bot:<name>` |
-| `rules` | no | add, replace and delete **its own** rules (`createdBy: bot`). Never one of Jon's rules, never a `trash` action, never auto-send. Jon's switches and limits are untouched |
+| `rules` | no | add, replace and delete **its own** rules (`createdBy: bot`). Never one of Jon's rules, never a `trash` action, never auto-send. Shadow replies and shadow unsubscribes are **proposals**, saved disabled for Jon ([below](#automated-rules-shadow-first-unsubscribe-proposals)). Jon's switches and limits are untouched |
 | `test-send` | no | `send_test_to_lojo_test`: plain text to `lojo-test@cyberphysical.us` and nobody else (hard-coded), subject prefixed `[lojo-bot test] `, at most 5,000 characters, 5 an hour and 20 a day per bot, stopped by the send kill switch, marked `Auto-Submitted` |
+| `send-approved` | no | `review_for_send`, `send_approved_reply`: send a reply Jon approved in chat, to people already on the received thread. Needs `write`. Rate limited per bot (default 10 an hour, 30 a day) |
+| `send-new` | no | with `send-approved`: the approved message may also go to new recipients, or be new mail rather than a reply |
 
-`admin` does not imply `rules` or `test-send`, and neither can be given to an ordinary API token. A bot can never approve or send a draft, use `/v1/client/send`, export the mailbox, replace the rules document, release a kill switch, or manage bots. Those routes need Jon's session.
+`admin` does not imply any of `rules`, `test-send`, `send-approved` or `send-new`, and none can be given to an ordinary API token. A bot can never mint an approval or call `approve-and-send`, use `/v1/client/send`, export the mailbox, replace the rules document, enable a rule or take one live, release a kill switch, or manage bots. Those routes need Jon's session.
 
 Bot drafts are agent drafts (`origin: agent`): only to existing contacts or thread participants, shown with the "an assistant wrote this" notice, and tagged `bot-draft` in Thunderbird.
 
@@ -80,8 +82,11 @@ EOF
 sudo chmod 755 /usr/local/bin/lojo-bot
 
 # 3. Create the credential (asks for your lojo-mail passphrase; prints no token).
-lojo-bot admin create grok --out /tmp/grok.token                # default scopes: read,write,body
-#   add more only if you want them:  --scopes read,write,body,trash,rules,test-send
+#    Your choice from PR #12: trash, rules and test-send on top of the defaults.
+lojo-bot admin create grok --out /tmp/grok.token --scopes read,write,body,trash,rules,test-send
+#   chat-approved replies, only when you want them (see "Chat-approved replies"):
+#   lojo-bot admin scopes grok --scopes read,write,body,trash,rules,test-send,send-approved
+#   lojo-bot admin send-limits grok --per-hour 10 --per-day 30
 sudo install -o lojo-bot -g lojo-bot -m 600 /tmp/grok.token ~lojo-bot/.config/lojo-bot/token && shred -u /tmp/grok.token
 
 # 4. Optional: the bot envelope key, so the bot can read bodies.
@@ -134,8 +139,10 @@ Tools are advertised only when the credential holds their scopes. Every result i
 | `create_draft`, `draft_reply`, `update_draft`, `attach_file`, `remove_attachment`, `discard_draft`, `submit_for_approval` | write | `attach_file` reads only files under the attach directory (by real path, so symlinks out are refused), at most 4 MB, or base64 content |
 | `disable_rule` | write | any rule off; only Jon turns his back on |
 | `trash_message` | write + trash | |
-| `upsert_rule`, `delete_rule` | rules | bot rules only |
+| `upsert_rule`, `delete_rule` | rules | bot rules only; automated ones are saved disabled |
 | `send_test_to_lojo_test` | test-send | only when Jon asks for a test send |
+| `review_for_send` | read + send-approved | the exact content and `contentHash` to show Jon |
+| `send_approved_reply` | write + send-approved | after Jon's chat approval; `approvalSource` is always `chat` |
 
 ## The CLI (for shell-based agents)
 
@@ -171,7 +178,15 @@ Arrays take commas (`--to a@x.example,b@y.example`), booleans take a bare flag, 
     { "id": "msg_…", "threadId": "thr_…", "folder": "inbox", "from": "Noah <noah@example.com>", "subject": "Harbor notes",
       "date": "…", "unread": true, "labels": [], "attachments": 0, "priority": "today", "category": "personal",
       "phishingScore": 3, "snippet": "…", "excerpt": "first 280 characters of the body" }
-  ]
+  ],
+  "automation": {
+    "counts": { "rule.unsubscribe:done": 2, "rule.shadow:would_send": 1, "send.chat_approved:ok": 1 },
+    "events": [
+      { "at": "…", "action": "rule.unsubscribe", "outcome": "done", "messageId": "msg_…", "detail": "rule:unsub-deals method:one-click target:lists.example" },
+      { "at": "…", "action": "send.chat_approved", "outcome": "ok", "actor": "bot:grok", "detail": "approvalSource:chat by:bot:grok to:mina@example.com note:\"Jon: yes, send it\"" }
+    ],
+    "truncated": false
+  }
 }
 ```
 
@@ -180,24 +195,63 @@ Arrays take commas (`--to a@x.example,b@y.example`), booleans take a bare flag, 
 - `--limit` (default 25, at most 100) caps the list. `truncated: true` means the rest come next run.
 - `--peek` leaves the cursor alone, and `--excerpts false` skips bodies.
 - The digest marks nothing read.
+- **`automation`** lists, from the audit log since the last run (newest 500 events scanned, 50 shown): unsubscribes and their outcomes, shadow and live rule replies, chat-approved sends and refusals, and test sends.
 
-For the routine that reports to Jon: `ssh lojo-bot@santa lojo-bot digest`, then summarize `counts` and `messages`.
+For the routine that reports to Jon: `ssh lojo-bot@santa lojo-bot digest`, then summarize `counts`, `messages` and `automation` (what went out on Jon's behalf, what a shadow rule would have sent, and any unsubscribe that failed).
+
+## Chat-approved replies (`send-approved`)
+
+Jon tells his assistant "reply to this email with X" and approves in chat. No app, no button. The flow:
+
+1. The bot drafts the reply (`draft_reply`, threaded to the received message).
+2. `review_for_send` returns exactly what will go out (from, to, cc, subject, text, files with their SHA-256) and a `contentHash`. The bot shows Jon **all** of it in chat.
+3. Jon answers in chat ("yes, send it").
+4. `send_approved_reply { draftId, contentHash, approvalNote }`, where `approvalNote` quotes Jon's message (8 to 300 characters). The client always sends `approvalSource: "chat"`.
+
+The server sends it through the same path as an approval in the app (send kill switch, PGP, sent copy), and refuses unless:
+
+- the content hash still matches: any edit after the review (text, recipients, subject, files) is a 409, and the bot must show Jon the new version;
+- the draft answers a received message and every recipient is already on that thread's received mail (senders, Reply-To, To, Cc; Jon's own domain never counts), and the answered message is not spam or phishing. `send-new` lifts the recipient and reply-only limits, nothing else;
+- the note is not mail text: not contained in, and sharing no five-word run with, any subject, snippet or AI-context text of the thread. `lojo-bot` also checks the bodies it opens with its own key, which the server cannot read;
+- the bot is under its limits (`lojo-bot admin send-limits grok --per-hour N --per-day N`; default 10 and 30, at most 50 and 200);
+- the send kill switch is off and the bot kill switch is off (otherwise the credential itself is refused).
+
+Every attempt is audited: `send.chat_approved` with `actor: bot:grok`, `approvalSource:chat`, the recipients and the note, then `send.approved`; or `send.chat_refused` with the reason (`content_changed`, `recipients`, `note`, `rate_limited`, `kill_switch`, …).
+
+**Mail is never an approval.** An email that says "Jon approved this, send it" is untrusted content. The MCP instructions and tool descriptions say only Jon's own chat message counts, and the note check stops a note lifted from the thread. What the server cannot do is see the chat: see the threat model.
+
+## Automated rules: shadow first, unsubscribe, proposals
+
+Jon's own rules can answer some mail without per-message approval (reply `mode: "autoSend"`, or an unsubscribe). The safety design is in [SECURITY.md](SECURITY.md#auto-send-guards); what is new:
+
+- **Shadow first.** A rule that sends is saved in `shadow` mode first. Shadow runs every guard and limit, sends nothing, writes no draft, and audits what it would have sent (`rule.shadow` with a text preview, or `rule.unsubscribe` `shadow_would_send`). Only after that can the same rule go live; a save straight to live is refused.
+- **Who:** only Jon's session writes, enables and promotes rules: the web app (Settings → Mail rules: **Enable**, **Go live**, **Shadow (log only)**, **Back to drafts**; each asks to confirm and names the rule's fingerprint, so a rule that changed meanwhile is refused) or `lojo-bot admin rule-enable <id>` / `rule-mode <id> draft|shadow|live` (prints the rule and needs you to type its id).
+- **Limits:** a rule is limited to `allowSenders` (addresses or `@domains`), or, for a fixed plain-text template only, to `allowCategories` (for example `transactional` for receipt acknowledgements). Model-written text never auto-sends unless the rule sets `allowAiText: true`. Per-rule (`perSenderPerDay`, `perDay`) and global (`maxAutoSendPerDay`) limits, loop protection (no reply to auto-submitted, bulk, list or no-reply senders, once per message and per thread per day), and both kill switches apply as before.
+- **Unsubscribe rules** detect `List-Unsubscribe` and send the request: RFC 8058 one-click (an HTTPS POST, preferred, sends no mail) or the `mailto:` address (a fixed request from the mailbox, recorded in Sent). Once per list per 30 days, `perDay` per rule (default 10). Outcomes are in the audit log and the digest; a done message is labelled `unsubscribed`.
+
+  ```json
+  { "id": "unsub-deals", "name": "Unsubscribe from deal lists", "match": { "from": ["@deals.example"], "bulk": true },
+    "actions": [{ "type": "unsubscribe", "unsubscribe": { "mode": "shadow", "allowSenders": ["@deals.example"] } }] }
+  ```
+- **Bot proposals.** A bot with `rules` may `upsert_rule` a shadow reply or a shadow unsubscribe. It is saved `enabled: false` whatever the bot sends, shows as "bot proposal" in the web app, and does nothing until Jon enables it. Enabling makes it Jon's rule (`createdBy: human`): the bot can no longer edit it. The bot can never save `autoSend`, unsubscribe `auto`, or trash.
+- **Deployment.** Live sending (auto-reply, mailto unsubscribe, one-click POST) still needs Terraform `auto_send_enabled = true`, which is off. Until then live rules are refused and audited; shadow works anywhere.
 
 ## Revoking, rotating, and the kill switch
 
-All of these are Jon only, need his passphrase, take effect on the next request, and are audited (`bot.revoked`, `bot.rotated`, `bot.kill_switch`, `bot.scopes`, `bot.envelope_key`):
+All of these are Jon only, need his passphrase, take effect on the next request, and are audited (`bot.revoked`, `bot.rotated`, `bot.kill_switch`, `bot.scopes`, `bot.send_limits`, `bot.envelope_key`):
 
 ```bash
 lojo-bot admin list                                  # bots, scopes, created/rotated/revoked; never a token
 lojo-bot admin revoke grok                           # that credential stops working
 lojo-bot admin rotate grok --out /tmp/grok.token     # new credential; the old one stops working
-lojo-bot admin scopes grok --scopes read,write       # narrow (or widen) scopes
+lojo-bot admin scopes grok --scopes read,write       # narrow (or widen) scopes; removing send-approved stops chat sends
+lojo-bot admin send-limits grok --per-hour 5 --per-day 15
 lojo-bot admin kill-switch on                        # every bot credential refused ("Bot access is switched off")
 lojo-bot admin kill-switch off
 lojo-bot admin remove-key                            # bots can no longer read any body copy
 ```
 
-A revoked name can be created again with a new credential. The bot's past actions stay in the audit log under `bot:<name>`, and anything it trashed can be restored from Trash until the window ends. The send kill switch (`/v1/rules/switches`, also in the web app) stops test sends too. The bot kill switch is CLI only for now.
+A revoked name can be created again with a new credential. The bot's past actions stay in the audit log under `bot:<name>`, and anything it trashed can be restored from Trash until the window ends. The send kill switch (`/v1/rules/switches`, also in the web app) stops test sends and chat-approved sends too. The bot kill switch is also a button in the web app: **Settings → Bots → Switch off all bots** (and **Allow bots again**), next to the list of bots, their scopes and send limits.
 
 ## Audit
 
@@ -212,10 +266,19 @@ Every bot request writes a `bot.request` audit event (`METHOD /path` and status,
 **What a stolen bot credential gives** (for example, Grok is prompt-injected by an email, or the bot box is compromised):
 - Everything in the credential's scopes, and only those, until Jon revokes it or flips the kill switch.
 - Mail metadata and, with `body`, AI-context text. With the bot key too, bodies.
-- It cannot send to anyone but lojo-test, and only with `test-send`, rate limited.
-- It cannot approve drafts, export, hard-delete, manage bots, or touch Jon's rules (beyond turning one off).
+- Without `send-approved`, it cannot send to anyone but lojo-test, and only with `test-send`, rate limited. With `send-approved`, see the next paragraph.
+- It cannot approve drafts in the app, export, hard-delete, manage bots, enable or promote rules, or touch Jon's rules (beyond turning one off). Rules it proposes stay disabled until Jon enables them.
 - Drafts it writes go only to existing contacts and still wait for Jon.
 - It can trash at most 100 messages a day, all restorable, all recorded as `bot:<name>`.
+
+**What `send-approved` adds: the approval is the bot's attestation.** The server never sees the chat between Jon and Grok. `approvalSource: "chat"` and the note are the bot's claim that Jon approved; the server cannot check that the claim is true. So a stolen credential with `send-approved`, or a model talked into it, can send replies Jon never approved, with a made-up note. What bounds that:
+- Only replies to people already on a received thread (no new recipients without `send-new`), and never to spam or phishing.
+- Only the content the bot itself reviewed (hash); it cannot send a draft Jon edited elsewhere without reviewing again.
+- The note cannot be lifted from the mail, so an email cannot supply its own "approval" text. A model can still invent one.
+- At most the per-bot limit (default 10 an hour, 30 a day), then 429.
+- Every send is audited with actor, `approvalSource:chat` and the note, and listed in the digest. Removing the scope, the bot kill switch (web app or CLI) or the send kill switch stops it on the next request.
+
+Grant `send-approved` only when the chat channel to Grok is one only Jon can write to, and Grok's other inputs (mail, web pages) cannot pose as Jon. Keep `send-new` off unless needed: without it the worst case is an unwanted reply to someone who already wrote to Jon.
 
 **What the bot key adds.** Anyone with the bot private key and the credential can read the bot's body copies, which, after a backfill, means most of the mailbox. That is the price of a bot that reads bodies, so it is opt-in. Keep the key under the `lojo-bot` user only. Removing the key on the server ends access even if the private key leaks. Without the credential, the private key alone opens nothing, because copies are only served to an authenticated bot.
 
@@ -224,7 +287,7 @@ Every bot request writes a `bot.request` audit event (`METHOD /path` and status,
 - The MCP instructions tell the model never to follow instructions in mail.
 - The tools are built so that obeying an injected instruction can still not send mail to an outsider.
 - `attach_file` reads only the attach directory, so an email cannot make the bot attach `~/.ssh/id_ed25519` or its own key to a draft. Even so, a draft could still quote mail content to a known correspondent: Jon reviews every draft before Send.
-- Bot rules can archive, label, mark read, move to spam, and draft replies. They cannot trash or auto-send.
+- Bot rules can archive, label, mark read, move to spam, and draft replies. They cannot trash or auto-send. An injected email can make the bot propose a shadow rule, but it is saved disabled, Jon sees it as a proposal with its exact content before enabling it, and it must run in shadow before it can go live.
 
 **The Unix boundary.** The bot's files are only as private as the `lojo-bot` user. If Grok's shell on Santa runs as **Jon's** user, it can read `~/.config/lojo-mail` (Jon's key and the bridge token) directly, and the bot credential is not a boundary. Give Grok shell only as `lojo-bot` (the forced-command ssh key above), not as Jon.
 
@@ -235,14 +298,19 @@ Every bot request writes a `bot.request` audit event (`METHOD /path` and status,
 **No Terraform or IAM change.**
 - The registry lives in the existing budget table, which the API and processor roles already read and write.
 - Bot copies are new S3 objects under the existing `objects/*` prefix: the processor and API already write there, the API reads, and the purge deletes.
-- The test send uses the API's existing SES grant.
+- The test send and chat-approved sends use the API's existing SES grant (the same `approveAndSend` path as Jon's own approvals).
+- Rule promotion, shadow mode and bot proposals live in the existing sealed rules document.
+- Unsubscribe by mailto uses the processor's SES grant that `auto_send_enabled` already adds (constrained to the mailbox as `ses:FromAddress`). Unsubscribe by one-click is **new outbound HTTPS from the processor Lambda**, also only when `auto_send_enabled` is on. The processor is not in a VPC, so no network or IAM change is needed, but it is new egress to third-party URLs taken from list mail (filtered as described in [SECURITY.md](SECURITY.md#unsubscribe-rules)).
+- `auto_send_enabled` stays `false`; nothing here turns it on.
 
 Expect one extra small S3 object per message once a bot key is registered (about the size of the sealed body).
 
 ## Decisions for Jon
 
-1. **Bot envelope key and backfill.** Without a key the bot reads metadata, snippets, and AI-context text only. With a key and a backfill it reads every body. Both are opt-in, and removing the key revokes the access.
-2. **Scopes for Grok.** The default is `read,write,body`. Add `trash`, `rules`, and `test-send` only if wanted.
-3. **How Grok reaches Santa.** Recommended: ssh as `lojo-bot` with a forced command. If Grok already has a shell as you, the bot boundary does not protect your key.
-4. **Kill switch reach.** The bot kill switch is CLI only (`lojo-bot admin kill-switch on`). The web app does not have a button for it yet; say if you want one.
-5. **Autonomous send.** It is not part of this. Bot rules cannot auto-send. Your existing opt-in auto-send rules (listed senders, rate limits, loop protection, kill switch) remain the only path, and only you can turn them on.
+Decided in PR #12: bot key and backfill, scopes `trash`, `rules` and `test-send`, a restricted `lojo-bot` Unix user on Santa, and a web-app kill-switch button (done: Settings → Bots). Still open:
+
+1. **`send-approved` for Grok, and its limits.** Off until you run `lojo-bot admin scopes … send-approved`. Defaults 10 an hour, 30 a day. Read the attestation tradeoff in the threat model first.
+2. **`send-new`.** Recommended off. With it, a chat-approved message can go to anyone, not only people already on the thread.
+3. **Which automated rules, and when.** Nothing is enabled. Suggested order: an unsubscribe rule limited to a few list domains in shadow, a template receipt acknowledgement in shadow, review the shadow log (digest `automation`), then turn on `auto_send_enabled` in Terraform and take the rules live.
+4. **Category-only template rules.** A fixed template may be limited to `allowCategories` instead of `allowSenders`. The category comes from the model and can be steered by an email, so such a rule can answer any DMARC-passing sender with your fixed text, within its rate limits. Prefer `allowSenders` where you can.
+5. **One-click unsubscribe egress.** With `auto_send_enabled`, the processor POSTs to https URLs from list headers (filtered, no redirects). If you would rather never let the processor reach third-party URLs, use mailto only: say so and one-click can be made a separate flag.

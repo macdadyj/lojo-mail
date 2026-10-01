@@ -137,16 +137,17 @@ To reject a draft, delete it in Thunderbird. It is discarded (audited), never se
 
 ## 8. Fully autonomous sending (opt-in, off by default)
 
-Bots never send. The only automatic sending is a **rule** Jon writes himself, with `mode: "autoSend"`:
+Agent tokens never send. (A `lojo-bot` credential with `send-approved` can send replies Jon approved in chat; see [BOT.md](BOT.md#chat-approved-replies-send-approved).) The only automatic sending is a **rule** Jon writes himself, with `mode: "autoSend"` or an unsubscribe in `mode: "auto"`:
 
-- Only Jon's signed-in session can write rules (`npm run rules -- push`, passphrase and a typed `yes`). No token, including `admin`, the bridge, and every agent token, can write rules or turn auto-send on. Agents can only pause rules, engage the kill switches, or disable a rule.
+- Only Jon's signed-in session can write rules (`npm run rules -- push`, passphrase and a typed `yes`), enable them, or take them live. No token, including `admin`, the bridge, and every agent token, can write rules or turn auto-send on. Agents can only pause rules, engage the kill switches, or disable a rule.
+- A rule runs in `shadow` mode first (logs what it would send, sends nothing); a save that goes straight to live is refused.
 - Terraform `auto_send_enabled = true` is also required (default false).
-- Each auto-send rule needs an explicit `allowSenders` list; only those authenticated (DMARC pass) senders get answers.
-- Loop protection refuses auto-replies, mailing lists, bulk mail, `noreply`-style senders, `Auto-Submitted`, and Reply-To redirection.
+- Each auto-send rule needs an explicit `allowSenders` list (only those authenticated, DMARC-pass senders get answers), or a fixed template limited to `allowCategories`. Model-written text needs `allowAiText: true` on the rule.
+- Loop protection refuses auto-replies, mailing lists, bulk mail, `noreply`-style senders, `Auto-Submitted`, and Reply-To redirection (unsubscribe rules answer list mail by design, with their own guards).
 - Rate limits per sender, per rule, and per day across all rules.
 - Two kill switches: the auto-send kill switch (rules reply as drafts instead), and the global send kill switch, which stops auto-send, approved sends and Thunderbird sends together. Any bot may engage either; only Jon can release them (web app → Rules).
 
-Details and the full guard list: [SECURITY.md](SECURITY.md#auto-send-guards).
+Details and the full guard list: [SECURITY.md](SECURITY.md#auto-send-guards) and [unsubscribe rules](SECURITY.md#unsubscribe-rules).
 
 ## 9. Revoking a bot
 
