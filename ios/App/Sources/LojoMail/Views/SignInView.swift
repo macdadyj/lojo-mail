@@ -11,6 +11,7 @@ struct SignInView: View {
     @State private var error: String?
     @State private var showServer = false
     @State private var serverText = ""
+    @ScaledMetric(relativeTo: .largeTitle) private var logoSize: CGFloat = 56
 
     var body: some View {
         ScrollView {
@@ -78,7 +79,7 @@ struct SignInView: View {
                     .disabled(passphrase.isEmpty || busy)
                 }
 
-                DisclosureGroup("Server", isExpanded: $showServer) {
+                DisclosureGroup(isExpanded: $showServer) {
                     VStack(alignment: .leading, spacing: 8) {
                         TextField("API URL", text: $serverText)
                             .textInputAutocapitalization(.never)
@@ -96,9 +97,10 @@ struct SignInView: View {
                         .font(.footnote)
                     }
                     .padding(.top, 6)
+                } label: {
+                    Text("Server").foregroundStyle(.secondary)
                 }
                 .font(.footnote)
-                .foregroundStyle(.secondary)
 
                 Text("Messages are sealed to your envelope key and are opened only on this iPhone. After signing in you'll load that key once.")
                     .font(.footnote)
@@ -119,7 +121,7 @@ struct SignInView: View {
     private var header: some View {
         VStack(spacing: 10) {
             Image(systemName: "envelope.badge.shield.half.filled")
-                .font(.system(size: 56, weight: .regular))
+                .font(.system(size: logoSize, weight: .regular))
                 .foregroundStyle(Theme.accent.gradient)
                 .padding(.top, 40)
                 .accessibilityHidden(true)

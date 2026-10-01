@@ -70,7 +70,12 @@ struct ReviewView: View {
                         .swipeActions {
                             Button(role: .destructive) {
                                 Task {
-                                    _ = try? await model.call { try await $0.discard(view.id) }
+                                    do {
+                                        _ = try await model.call { try await $0.discard(view.id) }
+                                        model.toast = Toast(text: "Draft discarded", systemImage: "trash")
+                                    } catch {
+                                        model.toast = Toast(text: "Couldn't discard: \(error.localizedDescription)", systemImage: "exclamationmark.triangle.fill")
+                                    }
                                     await model.refreshDrafts()
                                 }
                             } label: { Label("Discard", systemImage: "trash") }
@@ -85,14 +90,25 @@ struct ReviewView: View {
     private func row(_ view: DraftView) -> some View {
         NavigationLink(value: view) {
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Chip(text: view.draft.origin.chip, systemImage: view.draft.origin.isBot ? "sparkles" : "person", tint: view.draft.origin.isBot ? Theme.ai : Theme.accent)
                     Chip(text: view.draft.status.label, tint: view.draft.status == .pendingApproval ? .orange : .secondary)
                     Spacer()
                     Text(ISODate.parse(view.draft.updatedAt)?.mailListStamp ?? "").font(.caption).foregroundStyle(.secondary)
                 }
-                Text("To: \(view.draft.to.map(\.email).joined(separator: ", "))").font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text(view.draft.subject.isEmpty ? "(no subject)" : view.draft.subject).font(.subheadline).lineLimit(1)
+                Text(view.draft.to.isEmpty ? "No recipients yet" : "To: \(view.draft.to.map(\.email).joined(separator: ", "))")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(view.draft.to.isEmpty ? .secondary : .primary)
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(view.draft.subject.isEmpty ? "(no subject)" : view.draft.subject).font(.subheadline).lineLimit(1)
+                    if let files = view.draft.attachments, !files.isEmpty {
+                        Label("\(files.count)", systemImage: "paperclip")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel(files.count == 1 ? "1 attachment" : "\(files.count) attachments")
+                    }
+                }
                 if let text = view.text?.nonEmptyTrimmed {
                     Text(text).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
                 }
@@ -280,7 +296,7 @@ struct RulesView: View {
                 Chip(text: rule.enabled ? "On" : "Off", tint: rule.enabled ? .green : .secondary)
             }
             Text(rule.actions.map(\.summary).joined(separator: " · ")).font(.footnote).foregroundStyle(.secondary)
-            HStack(spacing: 5) {
+            FlowLayout {
                 if rule.autoSends { Chip(text: "Auto-send", systemImage: "paperplane", tint: .orange) }
                 if rule.createdBy == "human" { Chip(text: "Written by you", systemImage: "person", tint: Theme.accent) }
                 if rule.stop == true { Chip(text: "Stops later rules", tint: .secondary) }

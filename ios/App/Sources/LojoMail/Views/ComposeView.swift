@@ -156,6 +156,7 @@ struct ComposeView: View {
                 }
             }
         }
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle(title(model))
         .navigationBarTitleDisplayMode(.inline)
         .interactiveDismissDisabled(model.dirty && !model.closed)

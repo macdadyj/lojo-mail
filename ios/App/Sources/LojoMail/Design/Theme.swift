@@ -3,7 +3,13 @@ import SwiftUI
 import UIKit
 
 enum Theme {
-    static let accent = Color(red: 0.06, green: 0.52, blue: 0.56)
+    /// Teal, a shade lighter in dark mode so body-size text keeps 4.5:1 on grouped cards (#1C1C1E) and a shade
+    /// darker in light mode for the same on white.
+    static let accent = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.22, green: 0.70, blue: 0.74, alpha: 1)
+            : UIColor(red: 0.03, green: 0.45, blue: 0.49, alpha: 1)
+    })
     static let unread = Color(red: 0.16, green: 0.47, blue: 0.96)
     static let star = Color.orange
     static let danger = Color.red
@@ -37,7 +43,7 @@ struct Chip: View {
 
 struct Avatar: View {
     var address: Address
-    var size: CGFloat = 36
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = 36
 
     private var initials: String {
         let source = address.name?.nonEmptyTrimmed ?? address.email
@@ -52,6 +58,59 @@ struct Avatar: View {
             .frame(width: size, height: size)
             .background(Theme.avatarColor(for: address.email).gradient, in: Circle())
             .accessibilityHidden(true)
+    }
+}
+
+/// Chips and other short items that wrap onto more lines instead of clipping at large text sizes.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 5
+    var lineSpacing: CGFloat = 5
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let lines = arrange(subviews, width: proposal.width ?? .infinity)
+        let width = lines.map(\.width).max() ?? 0
+        let height = lines.map(\.height).reduce(0, +) + lineSpacing * CGFloat(max(lines.count - 1, 0))
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for line in arrange(subviews, width: bounds.width) {
+            var x = bounds.minX
+            for index in line.indices {
+                let size = subviews[index].sizeThatFits(.init(width: bounds.width, height: nil))
+                subviews[index].place(at: CGPoint(x: x, y: y + (line.height - size.height) / 2), proposal: .init(width: min(size.width, bounds.width), height: size.height))
+                x += min(size.width, bounds.width) + spacing
+            }
+            y += line.height + lineSpacing
+        }
+    }
+
+    private struct Line { var indices: [Int] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
+
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> [Line] {
+        var lines: [Line] = []
+        var current = Line()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.init(width: width, height: nil))
+            let itemWidth = min(size.width, width)
+            if !current.indices.isEmpty && current.width + spacing + itemWidth > width {
+                lines.append(current)
+                current = Line()
+            }
+            current.width += (current.indices.isEmpty ? 0 : spacing) + itemWidth
+            current.height = max(current.height, size.height)
+            current.indices.append(index)
+        }
+        if !current.indices.isEmpty { lines.append(current) }
+        return lines
+    }
+}
+
+/// Keeps long-form content to a comfortable line length on iPad and in landscape.
+extension View {
+    func readableWidth(_ maxWidth: CGFloat = 760) -> some View {
+        frame(maxWidth: maxWidth).frame(maxWidth: .infinity)
     }
 }
 

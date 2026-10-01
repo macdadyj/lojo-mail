@@ -100,7 +100,9 @@ struct ThreadView: View {
                 }
             }
             .padding()
+            .readableWidth()
         }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     @ViewBuilder
@@ -342,7 +344,7 @@ struct MessageCard: View {
         VStack(alignment: .leading, spacing: 4) {
             if !to.isEmpty { Text("To: \(to)").font(.caption).foregroundStyle(.secondary) }
             if !cc.isEmpty { Text("Cc: \(cc)").font(.caption).foregroundStyle(.secondary) }
-            HStack(spacing: 5) {
+            FlowLayout {
                 if let verdicts = message.verdicts { authChip(verdicts) }
                 if message.pgpEncrypted == true { Chip(text: "OpenPGP", systemImage: "lock.fill", tint: .green) }
                 if message.locked { Chip(text: "Sealed to your key", systemImage: "lock.shield", tint: Theme.accent) }

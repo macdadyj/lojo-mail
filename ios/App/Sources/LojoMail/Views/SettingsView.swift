@@ -102,11 +102,19 @@ struct SettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
+                        .submitLabel(.done)
                         .onSubmit { applyAPI() }
+                    if apiText != model.apiBase.absoluteString {
+                        Button("Use this server") { applyAPI() }
+                    }
                     if let apiError { Text(apiError).font(.footnote).foregroundStyle(.red) }
                     if let settings = model.serverSettings {
                         LabeledContent("AI provider", value: settings.llmProvider)
                         LabeledContent("AI budget today", value: "\(settings.budgetUsed.formatted()) / \(settings.dailyTokenBudget.formatted()) tokens")
+                        LabeledContent("Attachments from the app") {
+                            Text(settings.draftAttachments.map { "Up to \(ByteSize.format($0.maxMessageBytes)) per message" } ?? "Not on this server yet")
+                                .foregroundStyle(settings.draftAttachments == nil ? .orange : .secondary)
+                        }
                         if settings.dev { LabeledContent("Server", value: "local dev") }
                     }
                 } header: {

@@ -166,7 +166,7 @@ struct MailboxView: View {
                 }
             }
         } label: {
-            Label("Folders", systemImage: "sidebar.left")
+            Label("Folders", systemImage: "tray.2")
         }
         .accessibilityLabel("Folders")
     }
@@ -292,6 +292,7 @@ struct ConversationRow: View {
     var conversation: Conversation
     var me: String
     var showFolder = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         let latest = conversation.latest
@@ -302,21 +303,16 @@ struct ConversationRow: View {
                 .padding(.top, 6)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(conversation.participants(me: me))
-                        .font(.body.weight(conversation.unread ? .bold : .regular))
-                        .lineLimit(1)
-                    if conversation.count > 1 {
-                        Text("\(conversation.count)").font(.caption).foregroundStyle(.secondary)
+                if typeSize.isAccessibilitySize {
+                    sender.lineLimit(2)
+                    HStack(spacing: 6) { markers; stamp }
+                } else {
+                    HStack(alignment: .firstTextBaseline) {
+                        sender.lineLimit(1)
+                        Spacer(minLength: 6)
+                        markers
+                        stamp
                     }
-                    Spacer(minLength: 6)
-                    if conversation.starred {
-                        Image(systemName: "star.fill").font(.caption).foregroundStyle(Theme.star).accessibilityLabel("Starred")
-                    }
-                    if conversation.hasAttachments {
-                        Image(systemName: "paperclip").font(.caption).foregroundStyle(.secondary).accessibilityLabel("Has attachments")
-                    }
-                    Text(conversation.date?.mailListStamp ?? "").font(.caption).foregroundStyle(.secondary)
                 }
                 Text(conversation.subject)
                     .font(.subheadline.weight(conversation.unread ? .semibold : .regular))
@@ -332,16 +328,40 @@ struct ConversationRow: View {
         .accessibilityHint("Opens the conversation")
     }
 
+    private var sender: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(conversation.participants(me: me))
+                .font(.body.weight(conversation.unread ? .bold : .regular))
+            if conversation.count > 1 {
+                Text("\(conversation.count)").font(.caption).foregroundStyle(.secondary).accessibilityLabel("\(conversation.count) messages")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var markers: some View {
+        if conversation.starred {
+            Image(systemName: "star.fill").font(.caption).foregroundStyle(Theme.star).accessibilityLabel("Starred")
+        }
+        if conversation.hasAttachments {
+            Image(systemName: "paperclip").font(.caption).foregroundStyle(.secondary).accessibilityLabel("Has attachments")
+        }
+    }
+
+    private var stamp: some View {
+        Text(conversation.date?.mailListStamp ?? "").font(.caption).foregroundStyle(.secondary)
+    }
+
     @ViewBuilder
     private var chips: some View {
         let latest = conversation.latest
         let priority = latest.ai?.priority
         if conversation.phishy || priority == "now" || showFolder || latest.bulk == true || latest.pgpEncrypted == true {
-            HStack(spacing: 5) {
+            FlowLayout {
                 if conversation.phishy { Chip(text: "Possible phishing", systemImage: "exclamationmark.shield.fill", tint: .red) }
                 if priority == "now" { Chip(text: "Now", systemImage: "bolt.fill", tint: .orange) }
                 if latest.pgpEncrypted == true { Chip(text: "OpenPGP", systemImage: "lock.fill", tint: .green) }
-                if latest.bulk == true { Chip(text: "Bulk", tint: .secondary) }
+                if latest.bulk == true { Chip(text: "Bulk", systemImage: "megaphone", tint: .secondary) }
                 if showFolder, let folder = latest.folderValue { Chip(text: folder.title, systemImage: folder.systemImage, tint: Theme.accent) }
             }
             .padding(.top, 2)

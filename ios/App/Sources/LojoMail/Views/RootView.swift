@@ -119,15 +119,18 @@ struct RootView: View {
 private struct LockView: View {
     var locked: Bool
     var unlock: () -> Void
+    @ScaledMetric(relativeTo: .largeTitle) private var iconSize: CGFloat = 44
 
     var body: some View {
         ZStack {
             Rectangle().fill(.ultraThickMaterial).ignoresSafeArea()
             VStack(spacing: 16) {
-                Image(systemName: "lock.fill").font(.system(size: 44)).foregroundStyle(Theme.accent)
+                Image(systemName: "lock.fill").font(.system(size: iconSize)).foregroundStyle(Theme.accent).accessibilityHidden(true)
                 Text("LOJO Mail is locked").font(.title3.weight(.semibold))
                 if locked {
-                    Button("Unlock", action: unlock).buttonStyle(.borderedProminent)
+                    Button(action: unlock) { Label("Unlock with Face ID", systemImage: "faceid") }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
                 }
             }
         }
