@@ -137,7 +137,7 @@ To reject a draft, delete it in Thunderbird. It is discarded (audited), never se
 
 ## 8. Fully autonomous sending (opt-in, off by default)
 
-Agent tokens never send. (A `lojo-bot` credential with `send-approved` can send replies Jon approved in chat; see [BOT.md](BOT.md#chat-approved-replies-send-approved).) The only automatic sending is a **rule** Jon writes himself, with `mode: "autoSend"` or an unsubscribe in `mode: "auto"`:
+Agent tokens never send. (A `lojo-bot` credential with `send-approved` can send replies Jon approved in chat, and with `send-new` a new message he granted; see [BOT.md](BOT.md#chat-approved-replies-send-approved). Neither is automatic.) The only automatic sending is a **rule** Jon writes himself, with `mode: "autoSend"` or an unsubscribe in `mode: "auto"`:
 
 - Only Jon's signed-in session can write rules (`npm run rules -- push`, passphrase and a typed `yes`), enable them, or take them live. No token, including `admin`, the bridge, and every agent token, can write rules or turn auto-send on. Agents can only pause rules, engage the kill switches, or disable a rule.
 - A rule runs in `shadow` mode first (logs what it would send, sends nothing); a save that goes straight to live is refused.

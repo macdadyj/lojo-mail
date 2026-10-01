@@ -3,6 +3,7 @@ import type { Draft } from "./types.ts";
 export interface Fields {
   to: string;
   cc: string;
+  bcc: string;
   subject: string;
   text: string;
   pgp: Draft["pgp"];
@@ -16,6 +17,7 @@ export const RECHECK_DELAY_MS = 3000;
 const LABELS: Record<keyof Fields, string> = {
   to: "recipients (To)",
   cc: "recipients (Cc)",
+  bcc: "recipients (Bcc)",
   subject: "subject",
   text: "message text",
   pgp: "encryption",
@@ -24,7 +26,7 @@ const LABELS: Record<keyof Fields, string> = {
 
 function normalized(fields: Fields, name: keyof Fields): string {
   const value = fields[name];
-  if (name === "to" || name === "cc") {
+  if (name === "to" || name === "cc" || name === "bcc") {
     return value
       .split(",")
       .map((item) => item.trim().toLowerCase())

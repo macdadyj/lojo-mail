@@ -104,7 +104,7 @@ export async function replyRecipientRefusals(store: MailStore, draft: Draft, mai
       if (!own(email)) allowed.add(email);
     }
   }
-  const extra = [...draft.to, ...draft.cc].map((item) => item.email.toLowerCase()).filter((email) => !allowed.has(email));
+  const extra = [...draft.to, ...draft.cc, ...(draft.bcc ?? [])].map((item) => item.email.toLowerCase()).filter((email) => !allowed.has(email));
   if (extra.length > 0) out.push(`not on the thread being answered: ${extra.join(", ")} (needs the send-new scope)`);
   return out;
 }
@@ -116,12 +116,18 @@ export async function chatSendRateRefusals(store: MailStore, bot: string, limits
   const perHour = await store.bumpCounter(`chatsend:${bot}:h${hour}`, new Date((hour + 2) * 3_600_000));
   const perDay = await store.bumpCounter(`chatsend:${bot}:${day}`, new Date(Date.parse(`${day}T00:00:00Z`) + 2 * 86_400_000));
   const out: string[] = [];
-  if (perHour > limits.perHour) out.push(`limit of ${limits.perHour} chat-approved sends an hour`);
-  if (perDay > limits.perDay) out.push(`limit of ${limits.perDay} chat-approved sends a day`);
+  if (perHour > limits.perHour) out.push(`limit of ${limits.perHour} bot sends an hour`);
+  if (perDay > limits.perDay) out.push(`limit of ${limits.perDay} bot sends a day`);
   return out;
 }
 
 /** Audit detail for one chat-approved send: who (the `bot:<name>` label), the source, and Jon's words as the bot reported them. */
 export function chatApprovalDetail(bot: string, note: string, to: string[]): string {
   return `approvalSource:${CHAT_APPROVAL_SOURCE} by:${bot} to:${to.join(",")} note:${JSON.stringify(note.trim())}`.slice(0, 500);
+}
+
+/** Audit detail for `bot.send_new`. The quote is Jon's words when approval is required, and absent when he waived it for a window. */
+export function sendNewAuditDetail(bot: string, note: string | null, recipients: string[]): string {
+  const approval = note === null ? "approval:waived" : `approvalSource:${CHAT_APPROVAL_SOURCE} note:${JSON.stringify(note.trim())}`;
+  return `${approval} by:${bot} rcpt:${recipients.join(",")}`.slice(0, 500);
 }

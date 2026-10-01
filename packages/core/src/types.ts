@@ -196,6 +196,8 @@ export interface Draft {
   references?: string[];
   to: Address[];
   cc: Address[];
+  /** Blind recipients. Left out of the RFC 5322 headers; SES still delivers to them. */
+  bcc?: Address[];
   subject: string;
   status: DraftStatus;
   origin: DraftOrigin;
@@ -225,6 +227,11 @@ export interface Draft {
   clientSent?: { at: string; unchanged: boolean };
   /** The Message-ID Jon's mail client gave the draft it saved, so it can find the draft again. */
   clientMessageId?: string;
+  /**
+   * Composed by `send_new`. Only these drafts may be sent to someone who has
+   * never written to Jon. The public draft API cannot set this.
+   */
+  sendNew?: boolean;
 }
 
 export interface AuditEvent {

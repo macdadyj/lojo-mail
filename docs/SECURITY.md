@@ -329,6 +329,8 @@ A bot with `send-approved` (Jon grants it; it needs `write`) may send a reply Jo
 
 **The tradeoff.** The server cannot see the chat. The approval is the bot's attestation that Jon approved; a bot that is compromised, or whose model is talked into it, can send replies to people already on a received thread, up to the rate limits, with a made-up note. What it cannot do: change content after the review it showed, write to new people (without `send-new`), exceed the limits, answer spam or phishing, use mail text as the note, or send at all once either kill switch is on or the scope is removed. Every send is in the audit log and the digest with the note the bot claimed. Grant `send-approved` only to a bot whose chat channel only Jon can write to.
 
+`send-new` (still off until Jon's admin CLI grants it) adds `send_new`: a new message to any To, Cc, or Bcc, with the same hash, kill switches, and caps. Approval stays required unless the grant sets `approvalRequired: false` together with an `expiresAt` at most 30 days out. After that instant the next request removes `send-new` and restores 10 sends an hour and 30 a day. A waived window can send without a quote, up to those caps; the audit says `approval:waived`. It is not a rule, and it does not turn on auto-send or live receiving. Outbound mail keeps the approved subject and adds `X-Lojo-Bot: send-new` plus `X-Auto-Response-Suppress: All` so an autoresponder does not answer it. Bcc is an SES envelope recipient, not a header.
+
 ### Threat model: prompt injection through rules
 
 The attacker sends an email. They control its headers (except SES's verdicts), subject and body. What they can reach:

@@ -314,7 +314,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json(await mailbox.getDraft(c.req.param("id"), { withText }));
   });
   app.post("/v1/drafts", need("write"), async (c) => {
-    const input = await body<{ to: string[]; cc: string[]; subject: string; text: string; threadId: string; inReplyTo: string; pgp: PgpMode; clientMessageId: string }>(c);
+    const input = await body<{ to: string[]; cc: string[]; bcc: string[]; subject: string; text: string; threadId: string; inReplyTo: string; pgp: PgpMode; clientMessageId: string }>(c);
     const to = strings(input.to, "to");
     const principal = c.get("principal");
     const origin = draftOriginOf(principal);
@@ -325,6 +325,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const draft = await mailbox.createDraft({
       to,
       cc: strings(input.cc, "cc"),
+      bcc: strings(input.bcc, "bcc"),
       subject: input.subject,
       text: input.text,
       ...(typeof input.threadId === "string" ? { threadId: input.threadId } : {}),
@@ -341,11 +342,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json(await mailbox.getDraft(draft.id, { withText: canReadText(c.get("principal")) }), 201);
   });
   app.post("/v1/drafts/:id", need("write"), async (c) => {
-    const input = await body<{ text: string; to: string[]; cc: string[]; subject: string; pgp: PgpMode }>(c);
+    const input = await body<{ text: string; to: string[]; cc: string[]; bcc: string[]; subject: string; pgp: PgpMode }>(c);
     const principal = c.get("principal");
     const pgp = pgpMode(input.pgp);
     const to = strings(input.to, "to");
     const cc = strings(input.cc, "cc");
+    const bcc = strings(input.bcc, "bcc");
     const draft = await mailbox.updateDraft(
       c.req.param("id"),
       {
@@ -353,6 +355,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         ...(typeof input.subject === "string" ? { subject: input.subject } : {}),
         ...(to ? { to } : {}),
         ...(cc ? { cc } : {}),
+        ...(bcc ? { bcc } : {}),
         ...(pgp ? { pgp } : {}),
       },
       actorOf(principal),
@@ -404,12 +407,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const input = await body<ReviewedDraft>(c);
     const to = strings(input.to, "to");
     const cc = strings(input.cc, "cc");
+    const bcc = strings(input.bcc, "bcc");
     const pgp = pgpMode(input.pgp);
     const attachments = sha256List(input.attachments);
     if (!to || !cc || !pgp || !attachments || typeof input.subject !== "string" || typeof input.text !== "string") {
       throw new MailError("Send the reviewed to, cc, subject, text, and pgp, and attachments as a list of SHA-256 hashes", "invalid");
     }
-    const reviewed: ReviewedDraft = { to, cc, subject: input.subject, text: input.text, pgp, attachments };
+    const reviewed: ReviewedDraft = { to, cc, ...(bcc ? { bcc } : {}), subject: input.subject, text: input.text, pgp, attachments };
     return c.json(await mailbox.mintApproval(c.req.param("id"), actorOf(c.get("principal")), reviewed));
   });
   app.post("/v1/drafts/:id/approve-and-send", need("send"), async (c) => {

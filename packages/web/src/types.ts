@@ -92,6 +92,7 @@ export interface Draft {
   inReplyTo?: string;
   to: Address[];
   cc: Address[];
+  bcc?: Address[];
   subject: string;
   status: DraftStatus;
   origin: "human" | "agent" | "ai" | "client" | "rule";
@@ -193,6 +194,7 @@ export interface BotSummary {
   rotatedAt?: string;
   revokedAt?: string;
   sendLimits?: { perHour: number; perDay: number };
+  sendGrant?: { expiresAt?: string; approvalRequired: boolean };
 }
 
 export interface BotsView {

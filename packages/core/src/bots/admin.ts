@@ -2,7 +2,8 @@ import { keyFingerprint } from "../crypto/envelope.ts";
 import { MailError } from "../errors.ts";
 import type { MailStore } from "../store/types.ts";
 import type { EcPublicJwk } from "../types.ts";
-import { chatSendLimits, type ChatSendLimits } from "./chat-send.ts";
+import { chatSendLimits } from "./chat-send.ts";
+import { applySendWindow, persistExpiredSendGrants, type SendWindowInput } from "./grant.ts";
 import {
   BOT_SCOPES,
   DEFAULT_BOT_SCOPES,
@@ -35,6 +36,12 @@ export interface BotRegistryView {
 
 const MAX_BOTS = 20;
 
+function approvalFlag(value: unknown): boolean {
+  if (value === true) return true;
+  if (value === false) return false;
+  throw new MailError("approvalRequired must be true or false", "invalid");
+}
+
 export function botScopes(value: unknown): BotScope[] {
   if (value === undefined) return [...DEFAULT_BOT_SCOPES];
   if (!Array.isArray(value) || value.length === 0) throw new MailError("scopes must be a non-empty list", "invalid");
@@ -63,7 +70,7 @@ export class BotAdmin {
   constructor(private readonly deps: BotAdminDeps) {}
 
   async view(): Promise<BotRegistryView> {
-    const registry = await this.deps.store.getBotRegistry();
+    const registry = await persistExpiredSendGrants(this.deps.store, this.deps.now());
     return {
       killSwitch: registry?.killSwitch ?? false,
       bots: (registry?.bots ?? []).map(summarizeBot),
@@ -73,8 +80,9 @@ export class BotAdmin {
   }
 
   private async change(apply: (registry: BotRegistry, at: string) => void): Promise<BotRegistry> {
-    const stored = await this.deps.store.getBotRegistry();
     const at = this.deps.now();
+    await persistExpiredSendGrants(this.deps.store, at);
+    const stored = await this.deps.store.getBotRegistry();
     const next: BotRegistry = structuredClone(stored ?? emptyBotRegistry(at));
     apply(next, at.toISOString());
     next.version = (stored?.version ?? 0) + 1;
@@ -130,12 +138,39 @@ export class BotAdmin {
   }
 
   async setSendLimits(name: string, value: unknown): Promise<BotSummary> {
-    const limits: ChatSendLimits = chatSendLimits(value);
-    const registry = await this.change((registry) => {
-      this.live(registry, name).sendLimits = limits;
+    const body = (value ?? {}) as { expiresAt?: unknown; approvalRequired?: unknown };
+    const limits = chatSendLimits(value);
+    const input: SendWindowInput = { perHour: limits.perHour, perDay: limits.perDay };
+    if (body.expiresAt !== undefined) input.expiresAt = body.expiresAt === null ? null : String(body.expiresAt);
+    if (body.approvalRequired !== undefined) input.approvalRequired = approvalFlag(body.approvalRequired);
+    return this.writeWindow(name, input, "bot.send_limits");
+  }
+
+  /** Adds send-new (or removes it, on revert) and sets the caps, expiry, and approval mode together. */
+  async setSendWindow(name: string, value: unknown): Promise<BotSummary> {
+    const body = (value ?? {}) as Partial<SendWindowInput>;
+    if (body.revert === true) return this.writeWindow(name, { revert: true }, "bot.send_window");
+    const limits = chatSendLimits({ perHour: body.perHour, perDay: body.perDay });
+    const input: SendWindowInput = { perHour: limits.perHour, perDay: limits.perDay, enableSendNew: true };
+    if (body.expiresAt !== undefined) input.expiresAt = body.expiresAt === null ? null : String(body.expiresAt);
+    if (body.approvalRequired !== undefined) input.approvalRequired = approvalFlag(body.approvalRequired);
+    return this.writeWindow(name, input, "bot.send_window");
+  }
+
+  private async writeWindow(name: string, input: SendWindowInput, action: string): Promise<BotSummary> {
+    const registry = await this.change((registry, at) => {
+      const index = registry.bots.findIndex((item) => item.name === name);
+      const bot = this.live(registry, name);
+      registry.bots[index] = applySendWindow(bot, input, new Date(at));
     });
-    await this.deps.audit("bot.send_limits", "ok", `bot:${name} perHour:${limits.perHour} perDay:${limits.perDay}`);
-    return this.summary(registry, name);
+    const bot = this.summary(registry, name);
+    const grant = bot.sendGrant;
+    await this.deps.audit(
+      action,
+      input.revert ? "reverted" : "ok",
+      `bot:${name} scopes:${bot.scopes.join(",")} perHour:${bot.sendLimits?.perHour ?? ""} perDay:${bot.sendLimits?.perDay ?? ""} approval:${grant?.approvalRequired === false ? "not-required" : "required"} expires:${grant?.expiresAt ?? "none"}`,
+    );
+    return bot;
   }
 
   async setKillSwitch(on: boolean): Promise<BotRegistryView> {

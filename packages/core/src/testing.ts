@@ -102,6 +102,7 @@ export async function reviewOf(mailbox: Mailbox, draftId: string): Promise<Revie
   return {
     to: draft.to.map((item) => item.email),
     cc: draft.cc.map((item) => item.email),
+    ...((draft.bcc ?? []).length > 0 ? { bcc: (draft.bcc ?? []).map((item) => item.email) } : {}),
     subject: draft.subject,
     text: text ?? "",
     pgp: draft.pgp,

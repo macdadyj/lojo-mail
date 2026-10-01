@@ -16,6 +16,7 @@ import {
   chatApprovalDetail,
   chatSendRateRefusals,
   replyRecipientRefusals,
+  sendNewAuditDetail,
   type ChatSendLimits,
 } from "./bots/chat-send.ts";
 import { botTestSend, type TestSendInput, type TestSendLimits } from "./bots/test-send.ts";
@@ -118,6 +119,7 @@ export interface ViewOptions {
 export interface DraftInput {
   to: string[];
   cc?: string[];
+  bcc?: string[];
   subject: string;
   text: string;
   threadId?: string;
@@ -133,6 +135,7 @@ export interface DraftPatch {
   text?: string;
   to?: string[];
   cc?: string[];
+  bcc?: string[];
   subject?: string;
   pgp?: PgpMode;
 }
@@ -141,6 +144,7 @@ export interface DraftPatch {
 export interface ReviewedDraft {
   to: string[];
   cc: string[];
+  bcc?: string[];
   subject: string;
   text: string;
   pgp: PgpMode;
@@ -215,6 +219,29 @@ function addresses(emails: string[] | undefined): Address[] {
   return (emails ?? []).map((email) => ({ email: cleanEmail(email) }));
 }
 
+/** To wins over Cc, Cc over Bcc, so a blind copy is not also written on the message. */
+function dedupeRecipients(lists: string[][]): string[][] {
+  const seen = new Set<string>();
+  return lists.map((list) => {
+    const out: string[] = [];
+    for (const email of list) {
+      const key = email.trim().toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(email.trim());
+    }
+    return out;
+  });
+}
+
+function emailList(value: unknown, field: string): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+    throw new MailError(`${field} must be an array of strings`, "invalid");
+  }
+  return value;
+}
+
 function replySubject(subject: string): string {
   return subject.toLowerCase().startsWith("re:") ? subject : `Re: ${subject}`;
 }
@@ -276,6 +303,11 @@ export class Mailbox {
 
   private now(): Date {
     return this.deps.now ? this.deps.now() : new Date();
+  }
+
+  /** The mailbox clock. Bot grant expiry uses it, so tests and sends share one time. */
+  currentTime(): Date {
+    return this.now();
   }
 
   private requireKey(): EcPrivateJwk {
@@ -580,15 +612,17 @@ export class Mailbox {
     return opened.text;
   }
 
-  async createDraft(input: DraftInput): Promise<Draft> {
+  async createDraft(input: DraftInput, opts?: { sendNew?: boolean }): Promise<Draft> {
     const origin = input.origin ?? "agent";
+    const sendNew = opts?.sendNew === true;
     const to = addresses(input.to);
     const cc = addresses(input.cc);
+    const bcc = addresses(input.bcc);
     // Thunderbird saves drafts before the To line is filled in.
     if (to.length === 0 && origin !== "client") throw new MailError("At least one recipient is required", "invalid");
     const parent = !input.threadId && input.inReplyTo ? (await this.deps.store.getMessagesByRfcId(input.inReplyTo))[0] : undefined;
     const threadId = input.threadId ?? parent?.threadId;
-    if (origin === "agent") await this.assertKnownRecipients([...to, ...cc].map((item) => item.email), threadId);
+    if (origin === "agent" && !sendNew) await this.assertKnownRecipients([...to, ...cc, ...bcc].map((item) => item.email), threadId);
     const id = newId("drf");
     const now = this.now().toISOString();
     const draft: Draft = {
@@ -599,14 +633,16 @@ export class Mailbox {
       status: "edited",
       origin,
       aiGenerated: false,
-      pgp: input.pgp ?? "auto",
+      pgp: input.pgp ?? (sendNew ? "off" : "auto"),
       sealed: await this.sealDraftText(id, input.text),
       createdAt: now,
       updatedAt: now,
     };
+    if (bcc.length > 0) draft.bcc = bcc;
+    if (sendNew) draft.sendNew = true;
     if (threadId) draft.threadId = threadId;
-    if (input.inReplyTo) draft.inReplyTo = input.inReplyTo;
-    if (parent) draft.references = [...parent.references, parent.rfcMessageId];
+    if (input.inReplyTo && !sendNew) draft.inReplyTo = input.inReplyTo;
+    if (parent && !sendNew) draft.references = [...parent.references, parent.rfcMessageId];
     if (origin === "client" && input.clientMessageId) draft.clientMessageId = normalizeMessageId(input.clientMessageId).slice(0, 250);
     await this.deps.store.putDraft(draft);
     return draft;
@@ -618,10 +654,11 @@ export class Mailbox {
     if (!EDITABLE.has(draft.status)) throw new MailError(`Draft is ${draft.status}`, "invalid");
     const to = patch.to ? addresses(patch.to) : draft.to;
     const cc = patch.cc ? addresses(patch.cc) : draft.cc;
+    const bcc = patch.bcc ? addresses(patch.bcc) : (draft.bcc ?? []);
     if (to.length === 0) throw new MailError("At least one recipient is required", "invalid");
-    if (actor === "agent" && (patch.to || patch.cc)) {
-      const before = new Set([...draft.to, ...draft.cc].map((item) => item.email.toLowerCase()));
-      const added = [...to, ...cc].map((item) => item.email).filter((email) => !before.has(email.toLowerCase()));
+    if (actor === "agent" && !draft.sendNew && (patch.to || patch.cc || patch.bcc)) {
+      const before = new Set([...draft.to, ...draft.cc, ...(draft.bcc ?? [])].map((item) => item.email.toLowerCase()));
+      const added = [...to, ...cc, ...bcc].map((item) => item.email).filter((email) => !before.has(email.toLowerCase()));
       await this.assertKnownRecipients(added, draft.threadId);
     }
     const updated: Draft = {
@@ -634,6 +671,8 @@ export class Mailbox {
       lastEditedBy: actor,
       updatedAt: this.now().toISOString(),
     };
+    if (bcc.length > 0) updated.bcc = bcc;
+    else delete updated.bcc;
     if (patch.text !== undefined) updated.sealed = await this.sealDraftText(id, patch.text);
     await this.deps.store.putDraft(updated);
     return updated;
@@ -817,7 +856,7 @@ export class Mailbox {
     return { draft: updated, text };
   }
 
-  private contentHash(draft: Pick<Draft, "to" | "cc" | "subject" | "inReplyTo" | "pgp" | "attachments">, text: string): string {
+  private contentHash(draft: Pick<Draft, "to" | "cc" | "subject" | "inReplyTo" | "pgp" | "attachments"> & { bcc?: Draft["bcc"] }, text: string): string {
     return approvalContentHash({
       attachments: approvalFiles(draft.attachments),
       from: this.deps.config.mailbox,
@@ -827,6 +866,7 @@ export class Mailbox {
       text,
       ...(draft.inReplyTo ? { inReplyTo: draft.inReplyTo } : {}),
       pgp: draft.pgp,
+      ...((draft.bcc ?? []).length > 0 ? { bcc: draft.bcc } : {}),
     });
   }
 
@@ -849,6 +889,7 @@ export class Mailbox {
         attachments: draft.attachments ?? [],
         to: addresses(reviewed.to),
         cc: addresses(reviewed.cc),
+        bcc: addresses(reviewed.bcc ?? []),
         subject: cleanHeaderValue(reviewed.subject),
         ...(draft.inReplyTo ? { inReplyTo: draft.inReplyTo } : {}),
         pgp: reviewed.pgp,
@@ -880,12 +921,14 @@ export class Mailbox {
       subject: cleanHeaderValue(draft.subject),
       text,
     };
+    if ((draft.bcc ?? []).length > 0) outbound.bcc = draft.bcc;
+    if (draft.sendNew) outbound.botSendNew = true;
     if (files.length > 0) outbound.attachments = files;
     if (draft.inReplyTo) outbound.inReplyTo = draft.inReplyTo;
     const references = draft.references ?? (draft.inReplyTo ? [draft.inReplyTo] : []);
     if (references.length > 0) outbound.references = references;
     if (draft.pgp === "off") return outbound;
-    const recipients = [...draft.to, ...draft.cc];
+    const recipients = [...draft.to, ...draft.cc, ...(draft.bcc ?? [])];
     const keys = await Promise.all(recipients.map(async (item) => (await this.deps.store.getContact(item.email))?.pgpPublicKey));
     const present = keys.filter((key): key is string => Boolean(key));
     if (present.length === 0) return outbound;
@@ -952,7 +995,8 @@ export class Mailbox {
       { ...outbound, armored: undefined, pgpMime: undefined },
       { messageId: sesRfcId(sent.messageId, this.deps.config.region), date: this.now() },
     );
-    await ingestRaw(copy, { ...this.deps, llm: null, now: this.now() }, { origin: "sent", deliveryId: `sent:${sent.messageId}` });
+    const ingested = await ingestRaw(copy, { ...this.deps, llm: null, now: this.now() }, { origin: "sent", deliveryId: `sent:${sent.messageId}` });
+    if ((draft.bcc ?? []).length > 0) await this.deps.store.updateMessage(ingested.message.id, { bcc: draft.bcc });
     if (files.length > 0) {
       const failed = await deleteDraftAttachments(this.deps.blobs, draftId, draft.attachments);
       if (failed > 0) await this.audit("draft.attachment_cleanup", "failed", { messageId: draftId, detail: `${failed} left` });
@@ -1150,6 +1194,7 @@ export class Mailbox {
       from: this.deps.config.mailbox,
       to: draft.to.map((item) => item.email),
       cc: draft.cc.map((item) => item.email),
+      bcc: (draft.bcc ?? []).map((item) => item.email),
       subject: draft.subject,
       text,
       pgp: draft.pgp,
@@ -1193,14 +1238,7 @@ export class Mailbox {
       const recipients = await replyRecipientRefusals(this.deps.store, draft, this.deps.config.mailbox, this.deps.config.domain);
       if (recipients.length > 0) await refuse("recipients", recipients.join("; "), "forbidden");
     }
-    const thread = draft.threadId ? await this.deps.store.listThreadMessages(draft.threadId) : [];
-    const mailboxText: string[] = [];
-    for (const message of thread) {
-      mailboxText.push(message.subject, message.snippet);
-      const context = await this.contextText(message).catch(() => null);
-      if (context) mailboxText.push(context);
-    }
-    const noteRefusals = approvalNoteRefusals(input.approvalNote, mailboxText);
+    const noteRefusals = approvalNoteRefusals(input.approvalNote, await this.approvalSources(draft, text));
     if (noteRefusals.length > 0) await refuse("note", noteRefusals.join("; "), "forbidden");
     const rate = await chatSendRateRefusals(this.deps.store, input.bot, input.limits, this.now());
     if (rate.length > 0) await refuse("rate_limited", rate.join("; "), "rate_limited");
@@ -1214,9 +1252,107 @@ export class Mailbox {
       approvalExpiresAt: new Date(this.now().getTime() + APPROVAL_TTL_MS).toISOString(),
     });
     const note = String(input.approvalNote);
-    await this.audit("send.chat_approved", "ok", { messageId: draft.id, detail: chatApprovalDetail(input.bot, note, [...draft.to, ...draft.cc].map((item) => item.email)) });
+    await this.audit("send.chat_approved", "ok", { messageId: draft.id, detail: chatApprovalDetail(input.bot, note, this.envelopeRecipients(draft)) });
     const sent = await this.approveAndSend(draft.id, token);
     return { ...sent, approvalSource: CHAT_APPROVAL_SOURCE };
+  }
+
+  /**
+   * `send_new`: a brand-new message to any recipient. Not a reply, so it cannot
+   * slip past the reply checks. PGP stays off; outside tests go in the clear.
+   */
+  async composeBotSendNew(input: { to?: unknown; cc?: unknown; bcc?: unknown; subject?: unknown; text?: unknown }): Promise<Draft> {
+    const to = emailList(input.to, "to");
+    const cc = emailList(input.cc, "cc");
+    const bcc = emailList(input.bcc, "bcc");
+    if (!to || to.length === 0) throw new MailError("to, subject, and text are required", "invalid");
+    if (typeof input.subject !== "string" || typeof input.text !== "string") throw new MailError("to, subject, and text are required", "invalid");
+    if (!cleanHeaderValue(input.subject) || !input.text.trim()) throw new MailError("subject and text are required", "invalid");
+    const unique = dedupeRecipients([to, cc, bcc]);
+    const toUnique = unique[0] ?? [];
+    const ccUnique = unique[1] ?? [];
+    const bccUnique = unique[2] ?? [];
+    if (toUnique.length + ccUnique.length + bccUnique.length > 50) throw new MailError("At most 50 recipients", "invalid");
+    return this.createDraft(
+      { to: toUnique, cc: ccUnique, bcc: bccUnique, subject: input.subject, text: input.text, origin: "agent", pgp: "off" },
+      { sendNew: true },
+    );
+  }
+
+  /** Why send_new will refuse this draft. Empty means the content checks are next. */
+  sendNewBlocks(draft: Pick<Draft, "sendNew" | "inReplyTo">): string[] {
+    const blocks: string[] = [];
+    if (!draft.sendNew) blocks.push("not a send-new draft; compose it with send_new");
+    if (draft.inReplyTo) blocks.push("send_new starts a new message; replies use send_approved_reply");
+    return blocks;
+  }
+
+  /**
+   * Send a send-new draft. Approval is required unless Jon waived it for a
+   * window that has not expired. The content hash is always required: an edit
+   * after the review voids the send.
+   */
+  async botSendNew(input: {
+    bot: string;
+    draftId: string;
+    contentHash: unknown;
+    approvalNote: unknown;
+    approvalRequired: boolean;
+    limits: ChatSendLimits;
+  }): Promise<{ messageId: string; encryption: SendEncryption; approval: "chat" | "waived" }> {
+    const refuse = async (outcome: string, message: string, kind: "forbidden" | "conflict" | "invalid" | "rate_limited") => {
+      await this.audit("bot.send_new_refused", outcome, { messageId: input.draftId, detail: message.slice(0, 500) });
+      throw new MailError(message, kind);
+    };
+    const draft = await this.requireDraft(input.draftId);
+    const blocks = this.sendNewBlocks(draft);
+    if (blocks.length > 0) await refuse("not_send_new", blocks.join("; "), "forbidden");
+    if (!EDITABLE.has(draft.status)) await refuse("not_editable", `Draft is ${draft.status}`, "invalid");
+    if (draft.to.length === 0) await refuse("no_recipients", "The draft has no recipients", "invalid");
+    if ((await this.getRules()).sendKillSwitch) await refuse("kill_switch", "Sending is stopped: the global send kill switch is on", "forbidden");
+    const text = await this.readDraftText(draft);
+    const hash = this.contentHash(draft, text);
+    if (typeof input.contentHash !== "string" || !sameHash(input.contentHash, hash)) {
+      await refuse("content_changed", "The draft is not what was reviewed: its content hash changed. Show the current version and ask again.", "conflict");
+    }
+    let note: string | null = null;
+    if (input.approvalRequired) {
+      const refusals = approvalNoteRefusals(input.approvalNote, await this.approvalSources(draft, text));
+      if (refusals.length > 0) await refuse("note", refusals.join("; "), "forbidden");
+      note = String(input.approvalNote);
+    } else if (input.approvalNote !== undefined && input.approvalNote !== null && input.approvalNote !== "") {
+      await refuse("note", "This window does not use chat approval. Omit approvalNote; the audit records approval:waived.", "invalid");
+    }
+    const rate = await chatSendRateRefusals(this.deps.store, input.bot, input.limits, this.now());
+    if (rate.length > 0) await refuse("rate_limited", rate.join("; "), "rate_limited");
+    if ((draft.attachments ?? []).length > 0) assertFits(text, draft.attachments ?? [], this.draftAttachmentLimits);
+
+    const token = newApprovalToken();
+    await this.deps.store.putDraft({
+      ...withoutApproval(draft),
+      approvalTokenHash: hashApprovalToken(token),
+      approvalContentHash: hash,
+      approvalExpiresAt: new Date(this.now().getTime() + APPROVAL_TTL_MS).toISOString(),
+    });
+    await this.audit("bot.send_new", "ok", { messageId: draft.id, detail: sendNewAuditDetail(input.bot, note, this.envelopeRecipients(draft)) });
+    const sent = await this.approveAndSend(draft.id, token);
+    return { ...sent, approval: input.approvalRequired ? "chat" : "waived" };
+  }
+
+  private envelopeRecipients(draft: Draft): string[] {
+    return [...draft.to, ...draft.cc, ...(draft.bcc ?? [])].map((item) => item.email);
+  }
+
+  /** The note must be Jon's words, not the draft and not mail already in the mailbox. */
+  private async approvalSources(draft: Draft, text: string): Promise<string[]> {
+    const mailboxText = [draft.subject, text];
+    const thread = draft.threadId ? await this.deps.store.listThreadMessages(draft.threadId) : [];
+    for (const message of thread) {
+      mailboxText.push(message.subject, message.snippet);
+      const context = await this.contextText(message).catch(() => null);
+      if (context) mailboxText.push(context);
+    }
+    return mailboxText;
   }
 
   async testRules(messageId: string): Promise<DryRun> {

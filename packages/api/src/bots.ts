@@ -7,6 +7,8 @@ import {
   checkBotToken,
   DEFAULT_CHAT_SEND_LIMITS,
   MailError,
+  persistExpiredSendGrants,
+  sendNewApprovalRequired,
   newId,
   readBotCopy,
   storeBotCopy,
@@ -64,7 +66,8 @@ function refusalMessage(reason: Refusal): string {
 
 /** One registry read per request, so revoke, rotate and the kill switch apply to the very next call. */
 export async function botPrincipal(mailbox: Mailbox, authorization: string | undefined): Promise<{ principal: Principal } | { error: string }> {
-  const check = checkBotToken(await mailbox.store.getBotRegistry(), bearerOf(authorization));
+  const registry = await persistExpiredSendGrants(mailbox.store, mailbox.currentTime());
+  const check = checkBotToken(registry, bearerOf(authorization));
   if (!check.ok) return { error: refusalMessage(check.reason) };
   return { principal: { kind: "token", label: `${BOT_LABEL_PREFIX}${check.bot.name}`, scopes: check.bot.scopes as Scope[] } };
 }
@@ -113,9 +116,9 @@ export function registerBotRoutes(app: Hono<Env>, deps: BotRouteDeps): void {
   const admin = new BotAdmin({
     store: mailbox.store,
     publicJwk: mailbox.publicJwk,
-    now: () => new Date(),
+    now: () => mailbox.currentTime(),
     audit: async (action, outcome, detail) => {
-      const at = new Date();
+      const at = mailbox.currentTime();
       await mailbox.store.putAudit({ id: newId("aud"), day: utcDay(at), at: at.toISOString(), action, outcome, detail, actor: "human" });
     },
   });
@@ -148,7 +151,15 @@ export function registerBotRoutes(app: Hono<Env>, deps: BotRouteDeps): void {
   app.get("/v1/bot/whoami", async (c) => {
     const label = requireBot(c);
     const view = await admin.view();
-    return c.json({ bot: label, scopes: c.get("principal").scopes, envelopeKeyId: view.envelopeKey?.keyId ?? null, sendFrom: mailbox.config.mailbox });
+    const me = view.bots.find((bot) => `${BOT_LABEL_PREFIX}${bot.name}` === label);
+    return c.json({
+      bot: label,
+      scopes: c.get("principal").scopes,
+      envelopeKeyId: view.envelopeKey?.keyId ?? null,
+      sendFrom: mailbox.config.mailbox,
+      sendLimits: me?.sendLimits ?? DEFAULT_CHAT_SEND_LIMITS,
+      sendGrant: me?.sendGrant ?? null,
+    });
   });
   /** The bot's sealed copy of the body. Only the bot's private key, on Santa, opens it. */
   app.get("/v1/messages/:id/bot-copy", need("read"), need("body"), async (c) => {
@@ -166,6 +177,7 @@ export function registerBotRoutes(app: Hono<Env>, deps: BotRouteDeps): void {
     return c.json({ rules: await mailbox.deleteBotRule(c.req.param("id")) });
   });
   app.post("/v1/bots/:name/send-limits", need("human"), async (c) => c.json(await admin.setSendLimits(c.req.param("name"), await body<unknown>(c))));
+  app.post("/v1/bots/:name/send-window", need("human"), async (c) => c.json(await admin.setSendWindow(c.req.param("name"), await body<unknown>(c))));
 
   /**
    * Chat-approved replies (`send-approved`). The server cannot see the chat:
@@ -179,7 +191,8 @@ export function registerBotRoutes(app: Hono<Env>, deps: BotRouteDeps): void {
   app.post("/v1/bot/drafts/:id/send-approved", need("send-approved"), async (c) => {
     const bot = requireBot(c);
     const input = await body<{ contentHash: string; approvalSource: string; approvalNote: string }>(c);
-    const record = (await mailbox.store.getBotRegistry())?.bots.find((item) => `${BOT_LABEL_PREFIX}${item.name}` === bot);
+    const registry = await persistExpiredSendGrants(mailbox.store, mailbox.currentTime());
+    const record = registry?.bots.find((item) => `${BOT_LABEL_PREFIX}${item.name}` === bot);
     return c.json(
       await mailbox.botChatSend({
         bot,
@@ -187,10 +200,44 @@ export function registerBotRoutes(app: Hono<Env>, deps: BotRouteDeps): void {
         contentHash: input.contentHash,
         approvalSource: input.approvalSource,
         approvalNote: input.approvalNote,
-        allowNew: hasScope(c.get("principal").scopes, "send-new"),
+        allowNew: record?.scopes.includes("send-new") ?? false,
         limits: record?.sendLimits ?? DEFAULT_CHAT_SEND_LIMITS,
       }),
     );
+  });
+  /**
+   * Brand-new mail (`send-new`). Without contentHash this composes or reviews
+   * and does not send. With it, the server sends that exact content.
+   */
+  app.post("/v1/bot/send-new", need("write"), need("send-new"), async (c) => {
+    const bot = requireBot(c);
+    const input = await body<{ draftId?: string; contentHash?: string; approvalNote?: string; to?: string[]; cc?: string[]; bcc?: string[]; subject?: string; text?: string }>(c);
+    const now = mailbox.currentTime();
+    const registry = await persistExpiredSendGrants(mailbox.store, now);
+    const record = registry?.bots.find((item) => `${BOT_LABEL_PREFIX}${item.name}` === bot);
+    if (!record?.scopes.includes("send-new")) throw new MailError("send-new is off", "forbidden");
+    const approvalRequired = sendNewApprovalRequired(record, now);
+    const expiresAt = record.sendGrant?.expiresAt ?? null;
+    if (typeof input.draftId === "string" && input.draftId) {
+      if (typeof input.contentHash !== "string") {
+        const review = await mailbox.chatSendReview(input.draftId, true);
+        const blocks = mailbox.sendNewBlocks(await mailbox.getDraft(input.draftId).then((view) => view.draft));
+        return c.json({ ...review, recipientRefusals: [...review.recipientRefusals, ...blocks], sendable: review.sendable && blocks.length === 0, sent: false, approvalRequired, expiresAt });
+      }
+      return c.json(
+        await mailbox.botSendNew({
+          bot,
+          draftId: input.draftId,
+          contentHash: input.contentHash,
+          approvalNote: input.approvalNote,
+          approvalRequired,
+          limits: record.sendLimits ?? DEFAULT_CHAT_SEND_LIMITS,
+        }),
+      );
+    }
+    const draft = await mailbox.composeBotSendNew(input);
+    const review = await mailbox.chatSendReview(draft.id, true);
+    return c.json({ ...review, sent: false, approvalRequired, expiresAt }, 201);
   });
   app.post("/v1/bot/test-send", need("test-send"), async (c) => {
     const bot = requireBot(c);

@@ -20,6 +20,16 @@ export interface OutboundMessage {
   pgpMime?: string;
   /** RFC 3834 `Auto-Submitted: auto-replied`, set on everything a rule sends. */
   autoReplied?: boolean;
+  /**
+   * Envelope-only. Never copied into the message headers, so the other
+   * recipients cannot see who was blind-copied. SES gets them as BccAddresses.
+   */
+  bcc?: Address[];
+  /**
+   * Bot `send_new`: keep the approved subject, and add loop-suppression headers
+   * instead of Auto-Submitted (that banner would hide a real test message).
+   */
+  botSendNew?: boolean;
 }
 
 export interface OutboundAttachment {

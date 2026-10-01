@@ -8,6 +8,8 @@ import { loadRules } from "../rules/engine.ts";
 import { fixture, memoryWorld, type MemoryWorld } from "../testing.ts";
 import { ownedBlobKeys } from "../trash/purge.ts";
 import { BotAdmin } from "./admin.ts";
+import { applySendGrantExpiry, applySendWindow, TEST_WINDOW_SEND_LIMITS } from "./grant.ts";
+import { DEFAULT_CHAT_SEND_LIMITS } from "./chat-send.ts";
 import { botBackfillCandidates, botBodyContext, readBotCopy, storeBotCopy, type BotBody } from "./copies.ts";
 import { botNameOf, checkBotToken } from "./registry.ts";
 import { LOJO_TEST_RECIPIENT } from "./test-send.ts";
@@ -233,4 +235,29 @@ test("audit events carry the request's actor", async () => {
   await mailbox.setRuleSwitches({ killSwitch: true }, "agent");
   const events = (await w.store.listAudit(10)).filter((event) => event.action === "rules.switches");
   assert.deepEqual(events.map((event) => event.actor ?? null).sort(), ["bot:grok", null]);
+});
+
+test("a send window reverts to the safe caps and drops send-new after it expires", () => {
+  const now = new Date("2026-10-01T12:00:00.000Z");
+  const bot = {
+    name: "grok",
+    tokenHash: "abc",
+    scopes: ["read", "write", "send-approved"] as ("read" | "write" | "send-approved" | "send-new")[],
+    createdAt: now.toISOString(),
+  };
+  const opened = applySendWindow(
+    bot,
+    { perHour: 30, perDay: 100, enableSendNew: true, expiresAt: new Date(now.getTime() + 3_600_000).toISOString(), approvalRequired: false },
+    now,
+  );
+  assert.ok(opened.scopes.includes("send-new"));
+  assert.deepEqual(opened.sendLimits, TEST_WINDOW_SEND_LIMITS);
+  assert.equal(opened.sendGrant?.approvalRequired, false);
+  assert.throws(() => applySendWindow(opened, { perHour: 30, perDay: 100, approvalRequired: false, expiresAt: null }, now), /time-boxed/);
+  const later = new Date(now.getTime() + 2 * 3_600_000);
+  const applied = applySendGrantExpiry({ version: 1, killSwitch: false, bots: [opened], updatedAt: now.toISOString() }, later);
+  assert.deepEqual(applied.expired, ["grok"]);
+  assert.equal(applied.registry.bots[0]?.scopes.includes("send-new"), false);
+  assert.deepEqual(applied.registry.bots[0]?.sendLimits, DEFAULT_CHAT_SEND_LIMITS);
+  assert.equal(applied.registry.bots[0]?.sendGrant, undefined);
 });
