@@ -416,6 +416,11 @@ final class AppModel {
 
     /// Decrypts an attachment on the phone and writes it to a temporary, file-protected location for Quick Look.
     func openAttachment(_ attachment: AttachmentMeta, of message: Message) async throws -> URL {
+        try AttachmentFiles.write(try await attachmentData(attachment, of: message), filename: attachment.filename)
+    }
+
+    /// Decrypted bytes, in memory only (forwarding re-attaches them without writing them to disk).
+    func attachmentData(_ attachment: AttachmentMeta, of message: Message) async throws -> Data {
         let payload = try await call { try await $0.attachment(messageId: message.id, attachmentId: attachment.id) }
         let context = Envelope.attachmentContext(message.id, attachment.id)
         let bytes: Data
@@ -430,8 +435,11 @@ final class AppModel {
             let data = try await api.download(url)
             bytes = try Envelope.open(try Envelope.decodeBlob(data), with: key, context: context)
         }
-        return try AttachmentFiles.write(bytes, filename: attachment.filename)
+        return bytes
     }
+
+    /// `nil` until `/v1/settings` says the server accepts files on drafts (ios/docs/API-ATTACHMENTS.md).
+    var draftAttachmentSupport: DraftAttachmentSupport? { serverSettings?.draftAttachments }
 
     // MARK: Mail actions (optimistic, rolled back on failure)
 

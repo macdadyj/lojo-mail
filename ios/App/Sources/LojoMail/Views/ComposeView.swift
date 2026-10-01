@@ -1,4 +1,5 @@
 import LojoMailCore
+import PhotosUI
 import SwiftUI
 
 /// Compose, reply, forward, and review of any draft (Jon's, the AI's, an assistant's, a rule's or Thunderbird's).
@@ -14,6 +15,10 @@ struct ComposeView: View {
     @State private var confirmDiscard = false
     @State private var customInstruction = ""
     @State private var askCustom = false
+    @State private var pickPhotos = false
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var pickFiles = false
+    @State private var takePhoto = false
     @FocusState private var focus: Field?
 
     enum Field { case to, cc, subject, body }
@@ -99,6 +104,7 @@ struct ComposeView: View {
             } footer: {
                 if let warning = model.forwardWarning { Text(warning) }
             }
+            ComposeAttachmentsSection(model: model, photos: openPhotos, camera: openCamera, files: openFiles)
             Section {
                 Picker("Encryption", selection: $model.fields.pgp) {
                     Text("OpenPGP when possible").tag(PgpMode.auto)
@@ -142,7 +148,7 @@ struct ComposeView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
-                    .disabled(model.busy || model.fields.toList.isEmpty || !model.conflictArmed || !model.blockedByTestMode.isEmpty || app.rules?.rules.sendKillSwitch == true)
+                    .disabled(!canSend(model) || app.rules?.rules.sendKillSwitch == true)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                 } footer: {
@@ -171,11 +177,29 @@ struct ComposeView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This sends real email from \(app.mailbox)\(model.fields.pgp == .off ? " in plain text" : ""). Subject: \(model.fields.subject.isEmpty ? "(none)" : model.fields.subject)")
+            Text("This sends real email from \(app.mailbox)\(model.fields.pgp == .off ? " in plain text" : ""). Subject: \(model.fields.subject.isEmpty ? "(none)" : model.fields.subject)\(attachmentSummary(model))")
+        }
+        .photosPicker(isPresented: $pickPhotos, selection: $photoItems, maxSelectionCount: max(1, model.budget.maxFiles - model.serverAttachments.count - model.attachments.count), matching: .images, preferredItemEncoding: .compatible)
+        .onChange(of: photoItems) { _, items in
+            guard !items.isEmpty else { return }
+            photoItems = []
+            Task { await addPhotos(items, to: model) }
+        }
+        .fileImporter(isPresented: $pickFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls): addFiles(urls, to: model)
+            case .failure(let failure): model.error = failure.localizedDescription
+            }
+        }
+        .fullScreenCover(isPresented: $takePhoto) {
+            CameraPicker { image in addCameraPhoto(image, to: model) }
+                .ignoresSafeArea()
         }
         .confirmationDialog("Keep this draft?", isPresented: $confirmClose, titleVisibility: .visible) {
             Button("Save draft") { Task { await model.saveDraft(); if model.error == nil { dismiss() } } }
-            Button("Save to approval queue") { Task { await model.saveToApprovalQueue(); if model.error == nil { dismiss() } } }
+            if !model.attachmentsUnsendable {
+                Button("Save to approval queue") { Task { await model.saveToApprovalQueue(); if model.error == nil { dismiss() } } }
+            }
             Button("Close without saving", role: .destructive) { dismiss() }
             Button("Keep editing", role: .cancel) {}
         }
@@ -217,13 +241,22 @@ struct ComposeView: View {
                 } label: {
                     Image(systemName: "paperplane.fill")
                 }
-                .disabled(model.busy || model.fields.toList.isEmpty || !model.conflictArmed || !model.blockedByTestMode.isEmpty)
+                .disabled(!canSend(model))
                 .accessibilityLabel("Approve and send")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    AttachMenuItems(photos: openPhotos, camera: openCamera, files: openFiles)
+                } label: {
+                    Image(systemName: "paperclip")
+                }
+                .accessibilityLabel("Add attachment")
             }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button { Task { await model.saveDraft() } } label: { Label("Save draft", systemImage: "square.and.arrow.down") }
                     Button { Task { await model.saveToApprovalQueue() } } label: { Label("Save to approval queue", systemImage: "tray.and.arrow.down") }
+                        .disabled(model.attachmentsUnsendable)
                     Menu {
                         ForEach(["Make it shorter.", "Make it friendlier.", "Make it more formal.", "Fix grammar and spelling only."], id: \.self) { instruction in
                             Button(instruction) { Task { await model.rewrite(instruction) } }
@@ -240,6 +273,57 @@ struct ComposeView: View {
                     Image(systemName: "ellipsis.circle")
                 }
                 .accessibilityLabel("Draft actions")
+            }
+        }
+    }
+
+    private func canSend(_ model: ComposeModel) -> Bool {
+        !model.busy && !model.fields.toList.isEmpty && model.conflictArmed && model.blockedByTestMode.isEmpty
+            && !model.attachmentsUnsendable && !model.overBudget && model.loadingAttachments == 0
+    }
+
+    private func attachmentSummary(_ model: ComposeModel) -> String {
+        let count = model.serverAttachments.count + model.attachments.count
+        guard count > 0 else { return "" }
+        return ". \(count == 1 ? "1 attachment" : "\(count) attachments"), \(ByteSize.format(model.attachedBytes))."
+    }
+
+    private func openPhotos() { focus = nil; pickPhotos = true }
+    private func openCamera() { focus = nil; takePhoto = true }
+    private func openFiles() { focus = nil; pickFiles = true }
+
+    private func addPhotos(_ items: [PhotosPickerItem], to model: ComposeModel) async {
+        model.loadingAttachments += items.count
+        let start = model.attachments.count + model.serverAttachments.count
+        for (offset, item) in items.enumerated() {
+            defer { model.loadingAttachments -= 1 }
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else { continue }
+                let name = AttachmentImport.photoName(start + offset + 1)
+                let room = model.roomLeft
+                let file = try await Task.detached(priority: .userInitiated) { try AttachmentImport.photo(data, name: name, room: room) }.value
+                model.attach(file)
+            } catch {
+                model.error = error.localizedDescription
+            }
+        }
+    }
+
+    private func addCameraPhoto(_ image: UIImage, to model: ComposeModel) {
+        let name = AttachmentImport.photoName(model.attachments.count + model.serverAttachments.count + 1)
+        do {
+            model.attach(try AttachmentImport.photo(image, name: name, room: model.roomLeft))
+        } catch {
+            model.error = error.localizedDescription
+        }
+    }
+
+    private func addFiles(_ urls: [URL], to model: ComposeModel) {
+        for url in urls {
+            do {
+                model.attach(try AttachmentImport.file(at: url, room: model.roomLeft))
+            } catch {
+                model.error = error.localizedDescription
             }
         }
     }

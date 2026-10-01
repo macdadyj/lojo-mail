@@ -8,6 +8,8 @@
 	<string>0.1</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>LOJO Mail can ask for Face ID before it shows your mail.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Take a photo to attach to a message. Photos stay in memory until you send or close the draft.</string>
 	<!--
 	Background app refresh is an Info.plist capability, so it works with a free Apple ID.
 	Push (APNs) needs the aps-environment entitlement, which free provisioning profiles do not grant.
@@ -73,6 +75,13 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 </dict>
 </plist>

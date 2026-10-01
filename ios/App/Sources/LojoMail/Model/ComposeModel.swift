@@ -1,6 +1,7 @@
 import Foundation
 import LojoMailCore
 import Observation
+import UIKit
 
 enum ComposeRequest: Identifiable, Hashable {
     case new(to: String?)
@@ -38,6 +39,10 @@ final class ComposeModel {
     var sentMessageId: String?
     var preparing = false
     private var attachmentsNotForwarded: [AttachmentMeta] = []
+    /// Picked in Compose and not on the server yet. Memory only.
+    private(set) var attachments: [OutgoingAttachment] = []
+    private(set) var thumbnails: [UUID: UIImage] = [:]
+    var loadingAttachments = 0
 
     private let model: AppModel
 
@@ -62,7 +67,11 @@ final class ComposeModel {
         case .forward(let message):
             fields.subject = MailText.forwardSubject(message.subject)
             fields.text = MailText.forwarded(model.bodyText(message) ?? "(The original text is sealed; load your envelope key to include it.)", message: message)
-            attachmentsNotForwarded = message.attachments
+            if model.draftAttachmentSupport != nil, !message.attachments.isEmpty {
+                Task { await self.forwardAttachments(of: message) }
+            } else {
+                attachmentsNotForwarded = message.attachments
+            }
         case .aiReply(let message):
             preparing = true
             Task { await self.askAIForReply(message) }
@@ -71,11 +80,98 @@ final class ComposeModel {
         }
     }
 
-    var dirty: Bool { saved.map { $0 != fields } ?? !(fields.to.isEmpty && fields.subject.isEmpty && fields.text.isEmpty) }
+    var dirty: Bool {
+        !attachments.isEmpty || (saved.map { $0 != fields } ?? !(fields.to.isEmpty && fields.subject.isEmpty && fields.text.isEmpty))
+    }
     var closed: Bool { draft.map { !$0.status.editable } ?? false }
     var forwardWarning: String? {
         guard !attachmentsNotForwarded.isEmpty else { return nil }
-        return "Attachments are not forwarded yet (\(attachmentsNotForwarded.map(\.filename).joined(separator: ", "))). The API has no way to attach files to a draft."
+        return "The original's attachments (\(attachmentsNotForwarded.map(\.filename).joined(separator: ", "))) aren't forwarded: this server can't take files on drafts yet."
+    }
+
+    // MARK: Attachments
+
+    var support: DraftAttachmentSupport? { model.draftAttachmentSupport }
+    var budget: AttachmentBudget { AttachmentBudget(support) }
+    var serverAttachments: [DraftAttachment] { draft?.attachments ?? [] }
+    var hasAttachments: Bool { !attachments.isEmpty || !serverAttachments.isEmpty }
+    private var attachmentSizes: [Int] { serverAttachments.map(\.size) + attachments.map(\.size) }
+    private var textBytes: Int { fields.text.utf8.count }
+    var attachedBytes: Int { attachmentSizes.reduce(0, +) }
+    var budgetUsage: Double { budget.usage(textBytes: textBytes, attachmentSizes: attachmentSizes) }
+    var overBudget: Bool { hasAttachments && !budget.fits(textBytes: textBytes, attachmentSizes: attachmentSizes) }
+    /// Files are attached but this server can't carry them on a draft, so sending or queueing would drop them.
+    var attachmentsUnsendable: Bool { support == nil && hasAttachments }
+    var roomLeft: Int { budget.remainingRawBytes(textBytes: textBytes, attachmentSizes: attachmentSizes) }
+
+    /// Adds a file if it fits; otherwise says why. Photos may already have been shrunk by the caller.
+    @discardableResult
+    func attach(_ file: OutgoingAttachment) -> Bool {
+        guard !closed else { return false }
+        if attachments.contains(where: { $0.sha256 == file.sha256 }) || serverAttachments.contains(where: { $0.sha256 == file.sha256 }) {
+            error = "\(file.filename) is already attached."
+            return false
+        }
+        guard attachmentSizes.count < budget.maxFiles else {
+            error = "One message can carry up to \(budget.maxFiles) attachments."
+            return false
+        }
+        guard budget.fits(textBytes: textBytes, attachmentSizes: attachmentSizes + [file.size]) else {
+            let left = roomLeft
+            error = "\(file.filename) is \(ByteSize.format(file.size)). " + (left > 0
+                ? "Only \(ByteSize.format(left)) more fits in one message (\(ByteSize.format(budget.maxMessageBytes)) including encoding)."
+                : "The message is at its \(ByteSize.format(budget.maxMessageBytes)) limit.") + " Share a link for larger files."
+            return false
+        }
+        error = nil
+        attachments.append(file)
+        if file.contentType.hasPrefix("image/"), let image = UIImage(data: file.data) {
+            thumbnails[file.id] = image.preparingThumbnail(of: CGSize(width: 96, height: 96))
+        }
+        return true
+    }
+
+    func detach(_ file: OutgoingAttachment) {
+        attachments.removeAll { $0.id == file.id }
+        thumbnails[file.id] = nil
+    }
+
+    func detach(_ file: DraftAttachment) async {
+        guard let id = draft?.id else { return }
+        await run {
+            show(try await model.call { try await $0.removeDraftAttachment(id, attachmentId: file.id) })
+        }
+    }
+
+    private func forwardAttachments(of message: Message) async {
+        loadingAttachments += message.attachments.count
+        var skipped: [String] = []
+        for meta in message.attachments {
+            defer { loadingAttachments -= 1 }
+            guard let data = try? await model.attachmentData(meta, of: message) else {
+                skipped.append(meta.filename)
+                continue
+            }
+            let previous = error
+            if !attach(OutgoingAttachment(filename: meta.filename, contentType: meta.contentType, data: data)) {
+                skipped.append(meta.filename)
+                error = previous
+            }
+        }
+        if !skipped.isEmpty {
+            attachmentsNotForwarded = message.attachments.filter { skipped.contains($0.filename) }
+            error = "Not forwarded: \(skipped.joined(separator: ", ")). It couldn't be opened or doesn't fit in \(ByteSize.format(budget.maxMessageBytes))."
+        }
+    }
+
+    /// Uploads files picked here to the saved draft, one request each, then shows the server's list.
+    private func uploadAttachments(to id: String) async throws {
+        while let file = attachments.first {
+            let view = try await model.call { try await $0.addDraftAttachment(id, file) }
+            attachments.removeFirst()
+            thumbnails[file.id] = nil
+            show(view)
+        }
     }
 
     /// Recipients outside the test address while test mode is on.
@@ -111,21 +207,29 @@ final class ComposeModel {
         }
     }
 
+    /// Saves the text, then (on a server that takes them) the attachments. On an older server the files stay here.
     @discardableResult
     func save() async throws -> String {
-        if let draft, let saved, saved == fields { return draft.id }
         guard !fields.toList.isEmpty else { throw APIError.invalid("Add at least one recipient.") }
-        let fields = fields
-        let view: DraftView
-        if let id = draft?.id {
-            view = try await model.call { try await $0.updateDraft(id, fields) }
+        guard !overBudget else { throw APIError.invalid("The attachments don't fit in one message (\(ByteSize.format(budget.maxMessageBytes))). Remove one.") }
+        let id: String
+        if let draft, let saved, saved == fields {
+            id = draft.id
         } else {
-            let threadId = threadId
-            let inReplyTo = inReplyTo
-            view = try await model.call { try await $0.createDraft(fields, threadId: threadId, inReplyTo: inReplyTo) }
+            let fields = fields
+            let view: DraftView
+            if let existing = draft?.id {
+                view = try await model.call { try await $0.updateDraft(existing, fields) }
+            } else {
+                let threadId = threadId
+                let inReplyTo = inReplyTo
+                view = try await model.call { try await $0.createDraft(fields, threadId: threadId, inReplyTo: inReplyTo) }
+            }
+            show(view)
+            id = view.draft.id
         }
-        show(view)
-        return view.draft.id
+        if support != nil { try await uploadAttachments(to: id) }
+        return id
     }
 
     private func run(_ action: () async throws -> Void) async {
@@ -145,11 +249,19 @@ final class ComposeModel {
     func saveDraft() async {
         await run {
             try await save()
-            status = "Saved as a draft. Nothing is sent until you approve it."
+            status = attachmentsUnsendable
+                ? "Text saved as a draft. The attachments stay on this screen only: the server can't store them yet."
+                : "Saved as a draft. Nothing is sent until you approve it."
         }
     }
 
+    static let unsendableAttachments = "This server can't send attachments from the app yet, so they would be dropped. Remove them to send, or send this one from Thunderbird."
+
     func saveToApprovalQueue() async {
+        guard !attachmentsUnsendable else {
+            error = ComposeModel.unsendableAttachments
+            return
+        }
         await run {
             let id = try await save()
             let view = try await model.call { try await $0.submitForApproval(id) }
@@ -185,9 +297,15 @@ final class ComposeModel {
             error = "Test mode is on: only \(AppModel.testAddress) can receive mail from this app. Turn it off in Settings."
             return
         }
+        guard !attachmentsUnsendable else {
+            error = ComposeModel.unsendableAttachments
+            return
+        }
         guard conflictArmed else { return }
         await run {
-            let reviewed = fields
+            var shown = fields
+            shown.attachments = serverAttachments.map(\.sha256) + attachments.map(\.sha256)
+            let reviewed = shown
             let id = try await save()
             let token: String
             do {
