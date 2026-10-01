@@ -66,7 +66,10 @@ export function autoSendRefusals(ctx: AutoSendContext): string[] {
   if (doc.sendKillSwitch) out.push("global send kill switch is engaged");
   if (doc.paused) out.push("rules are paused");
   if (rule.createdBy !== "human") out.push("rule was not written by a human session");
-  if (action.allowSenders.length === 0 || !senderMatches(from, action.allowSenders)) out.push("sender is not on the rule's allowlist");
+  if (action.allowSenders.length > 0 ? !senderMatches(from, action.allowSenders) : !(action.template && action.allowCategories.length > 0)) {
+    out.push("sender is not on the rule's allowlist");
+  }
+  if (action.ai && !action.allowAiText) out.push("model-written text is not enabled for this rule (allowAiText)");
   if (action.allowCategories.length > 0 && !(message.ai && action.allowCategories.includes(message.ai.category))) {
     out.push("category is not on the rule's allowlist");
   }
@@ -125,17 +128,20 @@ function quotesIncoming(reply: string, incoming: string, window = 8): boolean {
  * Counts this attempt against every limit and reports which are exceeded.
  * Counters are bumped before the check, so concurrent deliveries cannot both
  * slip under a limit; a refused attempt still counts, which errs toward fewer sends.
+ * Shadow mode counts in its own namespace, so it shows the limits it would hit
+ * without using up the live ones.
  */
-export async function rateLimitRefusals(store: MailStore, ctx: AutoSendContext, at: Date): Promise<string[]> {
+export async function rateLimitRefusals(store: MailStore, ctx: AutoSendContext, at: Date, namespace: "autosend" | "shadow" = "autosend"): Promise<string[]> {
   const day = utcDay(at);
   const dayEnd = new Date(Date.parse(`${day}T00:00:00Z`) + 2 * 86_400_000);
   const sender = ctx.message.from.email.toLowerCase();
   const out: string[] = [];
-  if ((await store.bumpCounter(`autosend:msg:${ctx.message.id}`, new Date(at.getTime() + 30 * 86_400_000))) > 1) out.push("already answered this message");
-  if ((await store.bumpCounter(`autosend:thread:${ctx.message.threadId}:${day}`, dayEnd)) > 1) out.push("already answered this thread today");
-  if ((await store.bumpCounter(`autosend:sender:${sender}:${day}`, dayEnd)) > ctx.action.perSenderPerDay) out.push("per-sender daily limit");
-  if ((await store.bumpCounter(`autosend:rule:${ctx.rule.id}:${day}`, dayEnd)) > ctx.action.perDay) out.push("rule daily limit");
-  if ((await store.bumpCounter(`autosend:day:${day}`, dayEnd)) > ctx.doc.maxAutoSendPerDay) out.push("global daily limit");
+  const n = namespace;
+  if ((await store.bumpCounter(`${n}:msg:${ctx.message.id}`, new Date(at.getTime() + 30 * 86_400_000))) > 1) out.push("already answered this message");
+  if ((await store.bumpCounter(`${n}:thread:${ctx.message.threadId}:${day}`, dayEnd)) > 1) out.push("already answered this thread today");
+  if ((await store.bumpCounter(`${n}:sender:${sender}:${day}`, dayEnd)) > ctx.action.perSenderPerDay) out.push("per-sender daily limit");
+  if ((await store.bumpCounter(`${n}:rule:${ctx.rule.id}:${day}`, dayEnd)) > ctx.action.perDay) out.push("rule daily limit");
+  if ((await store.bumpCounter(`${n}:day:${day}`, dayEnd)) > ctx.doc.maxAutoSendPerDay) out.push("global daily limit");
   return out;
 }
 

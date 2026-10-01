@@ -5,6 +5,7 @@ import {
   createEmbedder,
   createLlmClient,
   DynamoMailStore,
+  fetchOneClick,
   ingestRaw,
   loadConfig,
   loadProviderSecrets,
@@ -106,7 +107,8 @@ export async function handler(event: S3Notification | SweepEvent): Promise<{ pro
     ingest: async (bytes, deliveryId) => {
       const blobs = new S3BlobStore(s3, loaded.bucket ?? bucket);
       const { autoSender, ...ingestDeps } = loaded;
-      const rules = ingestDeps.keys ? rulesRuntime(blobs, ingestDeps.keys, autoSender) : null;
+      // One-click unsubscribe POSTs share the auto-send gate: off unless Jon set auto_send_enabled.
+      const rules = ingestDeps.keys ? rulesRuntime(blobs, ingestDeps.keys, autoSender, autoSender ? fetchOneClick() : null) : null;
       await ingestRaw(bytes, { ...ingestDeps, blobs, rules, botCopies: true }, { origin: "inbound", deliveryId });
     },
   });

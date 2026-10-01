@@ -14,6 +14,7 @@ import { threadIdForRoot } from "./mime/thread.ts";
 import { replyBlockers } from "./rules/autosend.ts";
 import { fileByRules, runRuleReply, type ReplyResult, type RulesRuntime } from "./rules/engine.ts";
 import { evaluateRules } from "./rules/match.ts";
+import { parseListUnsubscribe, runUnsubscribe } from "./rules/unsubscribe.ts";
 import type { RuleOutcome, RulesDocument } from "./rules/types.ts";
 import type { MailStore } from "./store/types.ts";
 import type {
@@ -401,6 +402,8 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
     const { replyTo, from, ...headers } = parsed;
     const blockers = replyBlockers({ ...headers, from: from.email, ...(replyTo ? { replyTo: replyTo.email } : {}) });
     if (blockers.length > 0) message.replyBlockers = blockers;
+    const unsubscribe = parseListUnsubscribe(parsed.listUnsubscribe, parsed.listUnsubscribePost);
+    if (unsubscribe) message.unsubscribe = unsubscribe;
   }
 
   const ruled = origin === "inbound" && folder === "inbox" && !classes.fromSelf ? await rulesFor(message, deps, now) : null;
@@ -494,6 +497,24 @@ async function afterStore(
   if (message.folder === "trash") {
     await deps.store.putAudit({ ...base, id: newId("aud"), action: "rule.trash", outcome: "trashed", detail: `${message.trashedBy ?? ""} keepUntil:${message.keepUntil ?? ""}` });
   }
+  const recordSent = async (raw: string, deliveryId: string) => {
+    await ingestRaw(raw, { ...deps, llm: null, embedder: null, rules: null, now }, { origin: "sent", deliveryId });
+  };
+  const unsubscribe = ruled.outcome.unsubscribe;
+  if (unsubscribe) {
+    try {
+      await runUnsubscribe(
+        { store: deps.store, config: deps.config, autoSender: deps.rules?.autoSender ?? null, oneClick: deps.rules?.oneClick ?? null, recordSent, now },
+        ruled.doc,
+        unsubscribe.rule,
+        unsubscribe.action,
+        message,
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "unknown error";
+      await deps.store.putAudit({ ...base, id: newId("aud"), action: "rule.unsubscribe", outcome: "error", detail: `rule:${unsubscribe.rule.id} ${detail}`.slice(0, 300) });
+    }
+  }
   const reply = ruled.outcome.reply;
   if (!reply) return null;
   if (!deps.keys) {
@@ -509,9 +530,7 @@ async function afterStore(
         config: deps.config,
         autoSender: deps.rules?.autoSender ?? null,
         now,
-        recordSent: async (raw, deliveryId) => {
-          await ingestRaw(raw, { ...deps, llm: null, embedder: null, rules: null, now }, { origin: "sent", deliveryId });
-        },
+        recordSent,
       },
       ruled.doc,
       reply.rule,

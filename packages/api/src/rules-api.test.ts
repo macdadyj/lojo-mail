@@ -12,10 +12,12 @@ const RULES = {
       id: "mina",
       name: "Answer Mina",
       match: { from: ["mina@example.com"] },
-      actions: [{ type: "reply", reply: { mode: "autoSend", template: "Thanks, I will reply soon.\n\nJon", allowSenders: ["mina@example.com"] } }],
+      actions: [{ type: "reply", reply: { mode: "shadow", template: "Thanks, I will reply soon.\n\nJon", allowSenders: ["mina@example.com"] } }],
     },
   ],
 };
+
+const LIVE = JSON.parse(JSON.stringify(RULES).replace('"mode":"shadow"', '"mode":"autoSend"')) as typeof RULES;
 
 test("only a signed-in human can write rules; no token can, however broad", async () => {
   const t = await testApp();
@@ -24,14 +26,19 @@ test("only a signed-in human can write rules; no token can, however broad", asyn
     assert.equal(res.status, 403, token);
   }
   const session = await t.login();
-  const saved = await t.call("/v1/rules", { method: "PUT", token: session, body: RULES });
-  assert.equal(saved.status, 200);
+  const early = await t.call("/v1/rules", { method: "PUT", token: session, body: LIVE });
+  assert.equal(early.status, 400);
+  assert.match(String(early.json.error), /shadow mode first/);
+  assert.equal((await t.call("/v1/rules", { method: "PUT", token: session, body: RULES })).status, 200);
+  const saved = await t.call("/v1/rules", { method: "PUT", token: session, body: LIVE });
+  assert.equal(saved.status, 200, saved.text);
   const read = await t.call("/v1/rules", { token: "read-token" });
   const rules = (read.json.rules as { rules: Array<{ id: string; createdBy: string }> }).rules;
   assert.deepEqual(rules.map((rule) => [rule.id, rule.createdBy]), [["leases", "human"], ["mina", "human"]]);
   assert.equal(read.json.autoSendEnabled, false);
   const events = (await t.store.listAudit(50)).filter((event) => event.action === "rules.updated");
-  assert.match(events[0]?.detail ?? "", /autoSend:mina/);
+  assert.match(events[0]?.detail ?? "", /live:mina shadow:none/);
+  assert.match(events[1]?.detail ?? "", /live:none shadow:mina/);
 });
 
 test("an empty ruleset (no rules object yet) reads as no rules", async () => {

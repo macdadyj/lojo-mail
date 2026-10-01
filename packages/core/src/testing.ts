@@ -9,6 +9,7 @@ import { LocalKeyWrapper } from "./crypto/server-seal.ts";
 import { ingestRaw, type IngestOptions, type IngestResult } from "./ingest.ts";
 import { Mailbox, type MailboxDeps, type ReviewedDraft } from "./mailbox.ts";
 import { rulesRuntime } from "./rules/engine.ts";
+import type { OneClickClient } from "./rules/unsubscribe.ts";
 import { MemorySender } from "./send.ts";
 import { MemoryStore } from "./store/memory.ts";
 import type { LojoConfig } from "./types.ts";
@@ -38,6 +39,8 @@ export interface WorldOptions {
   autoSend?: boolean;
   /** Seal bot copies at ingest and for sent copies, as the processor and the API do. */
   botCopies?: boolean;
+  /** One-click unsubscribe client, wired only with autoSend (as LOJO_AUTO_SEND=on does). */
+  oneClick?: OneClickClient;
 }
 
 /** An in-memory mailbox wired the way the API wires it. No AWS, no network. */
@@ -82,7 +85,7 @@ export async function memoryWorld(opts: WorldOptions = {}) {
         embedder,
         config,
         styleGuide: TEST_STYLE,
-        rules: rulesRuntime(blobs, keys, opts.autoSend ? autoSender : null),
+        rules: rulesRuntime(blobs, keys, opts.autoSend ? autoSender : null, opts.autoSend ? (opts.oneClick ?? null) : null),
         botCopies: opts.botCopies ?? false,
         ...(opts.now ? { now: opts.now() } : {}),
       },

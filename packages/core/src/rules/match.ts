@@ -33,10 +33,11 @@ export function ruleMatches(match: RuleMatch, input: MatchInput): boolean {
 
 /**
  * Folds every enabled matching rule into one outcome, in document order. Labels
- * accumulate; the last move wins; trash beats any move; the first reply wins.
+ * accumulate; the last move wins; trash beats any move; the first reply and
+ * the first unsubscribe win. Trash cancels a reply, never an unsubscribe.
  */
 export function evaluateRules(doc: RulesDocument, input: MatchInput): RuleOutcome {
-  const outcome: RuleOutcome = { hits: [], labels: [], folder: null, trashRuleId: null, markRead: false, reply: null };
+  const outcome: RuleOutcome = { hits: [], labels: [], folder: null, trashRuleId: null, markRead: false, reply: null, unsubscribe: null };
   if (doc.paused) return outcome;
   const labels = new Set<string>();
   for (const rule of doc.rules) {
@@ -59,6 +60,9 @@ export function evaluateRules(doc: RulesDocument, input: MatchInput): RuleOutcom
           break;
         case "reply":
           outcome.reply ??= { rule, action: action.reply };
+          break;
+        case "unsubscribe":
+          outcome.unsubscribe ??= { rule, action: action.unsubscribe };
           break;
         default:
           assertNever(action, "rule action");

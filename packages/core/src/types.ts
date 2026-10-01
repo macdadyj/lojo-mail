@@ -143,6 +143,8 @@ export interface StoredMessage {
   bulk: boolean;
   /** The List-Id header, for rules. */
   listId?: string;
+  /** Parsed List-Unsubscribe targets (rules/unsubscribe.ts), for unsubscribe rules. Header metadata, never body text. */
+  unsubscribe?: { mailto?: string; oneClick?: string };
   /** Header-derived reasons never to auto-reply (rules/autosend.ts). Codes only. */
   replyBlockers?: string[];
   pgpEncrypted: boolean;
