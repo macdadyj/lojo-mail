@@ -46,7 +46,7 @@ Which scopes to grant:
 | Scope | Adds | Consider it for |
 | --- | --- | --- |
 | `read` | inbox, any folder, triage, threads and search over metadata and snippets, labels, drafts list | every client |
-| `write` | labels, archive, move (not to trash), restore from Trash, create and edit drafts, `draft_reply` and `summarize_thread` (these spend model tokens), `submit_for_approval` | clients that should triage or draft |
+| `write` | labels, archive, move (not to trash), restore from Trash, create and edit drafts, attach files to drafts over HTTP (`POST /v1/drafts/:id/attachments`; there is no MCP tool for it), `draft_reply` and `summarize_thread` (these spend model tokens), `submit_for_approval` | clients that should triage or draft |
 | `body` | message text, AI summaries, action items, semantic search | only clients whose model provider you are content to show mail text to |
 | `trash` | `trash_message` (soft delete, restorable; 100 per agent per day) | clients you trust to clean up; everything is restorable from Trash |
 
