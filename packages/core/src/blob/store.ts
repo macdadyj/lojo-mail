@@ -23,6 +23,11 @@ export function draftAttachmentKey(draftId: string, attachmentId: string): strin
   return `drafts/${draftId}/${attachmentId}.bin`;
 }
 
+/** `{text, html}` sealed to the bot envelope key, under the message's own prefix so the purge removes it with the message. */
+export function botCopyKey(messageId: string, keyId: string): string {
+  return `objects/${messageId}/bot/${keyId}.bin`;
+}
+
 export function aiContextKey(messageId: string): string {
   return `ai-context/${messageId}.bin`;
 }

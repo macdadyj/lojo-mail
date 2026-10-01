@@ -239,7 +239,7 @@ test("[P1-5] OpenPGP send: every recipient and Jon can decrypt, and the message 
     await world.store.putContact({ email: "bob@example.com", pgpPublicKey: bob.publicKey });
   }
   const draft = await signed.mailbox.createDraft({ to: ["ada@example.com", "bob@example.com"], subject: "s", text: "secret plan" });
-  await approveAndSend(signed, draft.id);
+  assert.equal((await approveAndSend(signed, draft.id)).encryption, "pgp-inline");
   const out = signed.sender.sent[0];
   assert.ok(out?.armored);
   for (const key of [ada, bob, jon]) {

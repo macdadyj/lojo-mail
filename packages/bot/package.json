@@ -1,0 +1,23 @@
+{
+  "name": "@lojo/bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "lojo-bot": "./src/cli.ts"
+  },
+  "scripts": {
+    "build": "esbuild src/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/lojo-bot.mjs --banner:js=\"import { createRequire as lojoCreateRequire } from 'node:module'; const require = lojoCreateRequire(import.meta.url);\"",
+    "start": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@lojo/core": "*",
+    "@lojo/mcp": "*",
+    "@modelcontextprotocol/sdk": "^1.17.4",
+    "esbuild": "^0.25.5",
+    "zod": "^3.25.56"
+  },
+  "devDependencies": {
+    "@lojo/api": "*"
+  }
+}

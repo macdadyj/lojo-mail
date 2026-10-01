@@ -104,7 +104,8 @@ test("sending builds multipart/mixed, files a copy with the attachment in Sent, 
   await w.mailbox.addDraftAttachment(w.draft.id, upload(PHOTO), "human");
   await w.mailbox.addDraftAttachment(w.draft.id, upload(second, "Résumé – final.pdf", "application/pdf"), "human");
   const files = (await w.store.getDraft(w.draft.id))?.attachments ?? [];
-  await send(w, w.draft.id);
+  const result = await send(w, w.draft.id);
+  assert.equal(result.encryption, "none");
 
   const out = w.sender.sent[0];
   assert.ok(out);
@@ -166,7 +167,9 @@ test("with OpenPGP the whole MIME tree, files included, is encrypted (PGP/MIME)"
   await w.store.putContact({ email: "ada@example.com", pgpPublicKey: ada.publicKey });
   const draft = await w.mailbox.createDraft({ to: ["ada@example.com"], subject: "plans", text: "secret plan attached", origin: "human" });
   await w.mailbox.addDraftAttachment(draft.id, upload(PHOTO, "plan.jpg"), "human");
-  await send(w, draft.id);
+  const result = await send(w, draft.id);
+  assert.equal(result.encryption, "pgp-mime");
+  assert.ok((await w.store.listAudit()).some((event) => event.action === "send.approved" && event.detail?.endsWith("encryption:pgp-mime")));
 
   const out = w.sender.sent[0];
   assert.ok(out?.pgpMime);

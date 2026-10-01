@@ -3,6 +3,7 @@ import { ModelOutputError } from "./ai/schema.ts";
 import type { Embedder, LlmClient } from "./ai/types.ts";
 import { packVector, vectorTag } from "./ai/vectors.ts";
 import { aiContextKey, attachmentKey, bodyKey, type BlobStore } from "./blob/store.ts";
+import { activeBotKey, sealBotCopy, type BotBody } from "./bots/copies.ts";
 import { attachmentContext, encodeEnvelope, messageBodyContext, sealBytes, sealJson } from "./crypto/envelope.ts";
 import { aiContextContext, draftContext, serverSeal, type KeyWrapper } from "./crypto/server-seal.ts";
 import { newId, sha256, utcDay } from "./ids.ts";
@@ -13,6 +14,7 @@ import { threadIdForRoot } from "./mime/thread.ts";
 import { replyBlockers } from "./rules/autosend.ts";
 import { fileByRules, runRuleReply, type ReplyResult, type RulesRuntime } from "./rules/engine.ts";
 import { evaluateRules } from "./rules/match.ts";
+import { parseListUnsubscribe, runUnsubscribe } from "./rules/unsubscribe.ts";
 import type { RuleOutcome, RulesDocument } from "./rules/types.ts";
 import type { MailStore } from "./store/types.ts";
 import type {
@@ -42,6 +44,8 @@ export interface IngestDeps {
   styleGuide: string;
   /** Jon's mail rules. Only inbound mail headed for the inbox is filtered. */
   rules?: RulesRuntime | null;
+  /** Also seal `{text, html}` to the bot envelope key, when Jon has registered one (bots/copies.ts). */
+  botCopies?: boolean;
   now?: Date;
 }
 
@@ -339,6 +343,8 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
     attachments.push({ id: item.id, filename: item.filename, contentType: item.contentType, size: item.size, blobKey: key });
   }
 
+  const botCopy = deps.botCopies ? await sealForBot(deps, id, { text: parsed.text, html: parsed.html }, now) : null;
+
   let contextKey: string | undefined;
   const wantsContext =
     origin === "inbound" && deps.keys && deps.config.aiContextDays > 0 && !parsed.pgpEncrypted && !bulk && !classes.quarantined && !classes.dmarcReport;
@@ -385,6 +391,10 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
   }
   if (Object.keys(parsed.verdicts).length > 0) message.verdicts = parsed.verdicts;
   if (contextKey) message.aiContextKey = contextKey;
+  if (botCopy) {
+    message.botBodyKey = botCopy.botBodyKey;
+    message.botKeyId = botCopy.botKeyId;
+  }
   if (parsed.replyTo) message.replyTo = parsed.replyTo;
   if (parsed.inReplyTo) message.inReplyTo = parsed.inReplyTo;
   if (parsed.listId) message.listId = parsed.listId.slice(0, 200);
@@ -392,6 +402,8 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
     const { replyTo, from, ...headers } = parsed;
     const blockers = replyBlockers({ ...headers, from: from.email, ...(replyTo ? { replyTo: replyTo.email } : {}) });
     if (blockers.length > 0) message.replyBlockers = blockers;
+    const unsubscribe = parseListUnsubscribe(parsed.listUnsubscribe, parsed.listUnsubscribePost);
+    if (unsubscribe) message.unsubscribe = unsubscribe;
   }
 
   const ruled = origin === "inbound" && folder === "inbox" && !classes.fromSelf ? await rulesFor(message, deps, now) : null;
@@ -443,6 +455,18 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
   return { message, duplicate: false };
 }
 
+/** A bot copy that cannot be made never fails delivery: the message is stored without one. */
+async function sealForBot(deps: IngestDeps, id: string, body: BotBody, now: Date): Promise<{ botBodyKey: string; botKeyId: string } | null> {
+  try {
+    const key = activeBotKey(await deps.store.getBotRegistry());
+    return key ? await sealBotCopy(deps.blobs, id, key, body) : null;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    await deps.store.putAudit({ id: newId("aud"), day: utcDay(now), at: now.toISOString(), action: "bot.copy", messageId: id, outcome: "error", detail: detail.slice(0, 200) });
+    return null;
+  }
+}
+
 async function rulesFor(message: StoredMessage, deps: IngestDeps, now: Date): Promise<{ doc: RulesDocument; outcome: RuleOutcome } | null> {
   if (!deps.rules) return null;
   let doc: RulesDocument | null;
@@ -473,6 +497,24 @@ async function afterStore(
   if (message.folder === "trash") {
     await deps.store.putAudit({ ...base, id: newId("aud"), action: "rule.trash", outcome: "trashed", detail: `${message.trashedBy ?? ""} keepUntil:${message.keepUntil ?? ""}` });
   }
+  const recordSent = async (raw: string, deliveryId: string) => {
+    await ingestRaw(raw, { ...deps, llm: null, embedder: null, rules: null, now }, { origin: "sent", deliveryId });
+  };
+  const unsubscribe = ruled.outcome.unsubscribe;
+  if (unsubscribe) {
+    try {
+      await runUnsubscribe(
+        { store: deps.store, config: deps.config, autoSender: deps.rules?.autoSender ?? null, oneClick: deps.rules?.oneClick ?? null, recordSent, now },
+        ruled.doc,
+        unsubscribe.rule,
+        unsubscribe.action,
+        message,
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "unknown error";
+      await deps.store.putAudit({ ...base, id: newId("aud"), action: "rule.unsubscribe", outcome: "error", detail: `rule:${unsubscribe.rule.id} ${detail}`.slice(0, 300) });
+    }
+  }
   const reply = ruled.outcome.reply;
   if (!reply) return null;
   if (!deps.keys) {
@@ -488,9 +530,7 @@ async function afterStore(
         config: deps.config,
         autoSender: deps.rules?.autoSender ?? null,
         now,
-        recordSent: async (raw, deliveryId) => {
-          await ingestRaw(raw, { ...deps, llm: null, embedder: null, rules: null, now }, { origin: "sent", deliveryId });
-        },
+        recordSent,
       },
       ruled.doc,
       reply.rule,

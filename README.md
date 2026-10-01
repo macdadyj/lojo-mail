@@ -18,6 +18,7 @@ Nothing in this repo deploys itself. Terraform plans; it does not apply. There a
 | [docs/THUNDERBIRD.md](docs/THUNDERBIRD.md) | Thunderbird as the full mail client through the local IMAP/SMTP bridge: install, account setup, direct send, Drafts, delete |
 | [docs/WEB_KEY.md](docs/WEB_KEY.md) | Using the web app from any device: wrapped envelope key, lock and auto-lock, passkey remember, password-manager layout, backup and recovery, rotating the sign-in passphrase |
 | [docs/BOTS.md](docs/BOTS.md) | Bots managing your mail: Grok Bot, Grok Build, Cursor, grok.com, local Ollama; bot drafts approved by Send in Thunderbird |
+| [docs/BOT.md](docs/BOT.md) | `lojo-bot` for Jon's Grok Bot: revocable bot credential, opt-in bot envelope key, stdio MCP + CLI on Santa, new-mail digest, threat model |
 | [config/rules.example.json](config/rules.example.json) | Mail rules: sort, label, archive, trash (restorable), and replies (drafts by default; guarded auto-send). See SECURITY.md, mail rules |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | Leaving Tuta (`lojo@tuta.io`) without IMAP, locally or straight into AWS |
 | [qa/REVIEW_REPORT.md](qa/REVIEW_REPORT.md) | Independent pre-deploy review, with evidence and screenshots under `qa/` |

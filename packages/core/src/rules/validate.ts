@@ -46,9 +46,10 @@ const matchSchema = z
 
 const replySchema = z
   .object({
-    mode: z.enum(["draft", "autoSend"]).default("draft"),
+    mode: z.enum(["draft", "shadow", "autoSend"]).default("draft"),
     template: z.string().trim().min(1).max(REPLY_MAX_CHARS).optional(),
     ai: z.object({ instruction: z.string().trim().min(1).max(1000) }).strict().optional(),
+    allowAiText: z.boolean().default(false),
     maxChars: z.number().int().min(40).max(REPLY_MAX_CHARS).default(600),
     allowSenders: z.array(senderPattern).max(500).default([]),
     allowCategories: z.array(z.enum(CATEGORIES)).default([]),
@@ -58,13 +59,30 @@ const replySchema = z
   .strict()
   .superRefine((reply, ctx) => {
     if (Boolean(reply.template) === Boolean(reply.ai)) ctx.addIssue({ code: "custom", message: "set exactly one of template and ai" });
-    if (reply.mode === "autoSend" && reply.allowSenders.length === 0) {
-      ctx.addIssue({ code: "custom", message: "autoSend needs allowSenders; categories alone are model output an email can steer" });
+    const automated = reply.mode !== "draft";
+    if (automated && reply.allowSenders.length === 0 && !(reply.template && reply.allowCategories.length > 0)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "autoSend and shadow need allowSenders, or a fixed template with allowCategories; model-written text to a category alone is too easy to steer",
+      });
     }
-    if (reply.mode === "autoSend" && reply.allowCategories.includes("phishing")) {
+    if (automated && reply.allowCategories.includes("phishing")) {
       ctx.addIssue({ code: "custom", message: "autoSend never answers mail classified as phishing" });
     }
+    if (reply.mode === "autoSend" && reply.ai && !reply.allowAiText) {
+      ctx.addIssue({ code: "custom", message: "autoSend with model-written text needs allowAiText: true on the rule (Jon's explicit opt-in); otherwise use a fixed template" });
+    }
   });
+
+export const UNSUBSCRIBE_PER_DAY_MAX = 50;
+
+const unsubscribeSchema = z
+  .object({
+    mode: z.enum(["shadow", "auto"]).default("shadow"),
+    allowSenders: z.array(senderPattern).max(500).default([]),
+    perDay: z.number().int().min(1).max(UNSUBSCRIBE_PER_DAY_MAX).default(10),
+  })
+  .strict();
 
 const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("label"), labels: z.array(label).min(1).max(20) }).strict(),
@@ -72,6 +90,7 @@ const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("markRead") }).strict(),
   z.object({ type: z.literal("trash") }).strict(),
   z.object({ type: z.literal("reply"), reply: replySchema }).strict(),
+  z.object({ type: z.literal("unsubscribe"), unsubscribe: unsubscribeSchema }).strict(),
 ]);
 
 const ruleSchema = z
@@ -94,6 +113,8 @@ const ruleSchema = z
       ctx.addIssue({ code: "custom", message: "one move or trash per rule" });
     }
     if (types.includes("trash") && types.includes("reply")) ctx.addIssue({ code: "custom", message: "a rule cannot both reply and trash" });
+    if (types.filter((type) => type === "unsubscribe").length > 1) ctx.addIssue({ code: "custom", message: "one unsubscribe per rule" });
+    if (types.includes("unsubscribe") && types.includes("reply")) ctx.addIssue({ code: "custom", message: "a rule cannot both reply and unsubscribe" });
   });
 
 const documentSchema = z
@@ -154,9 +175,38 @@ function withoutAuthorship(input: unknown): unknown {
   return { ...input, rules };
 }
 
-function ruleFingerprint(rule: Rule): string {
+/** What a rule does, without who wrote it or when. Jon enables or promotes a rule by this hash, so he enables exactly what he reviewed. */
+export function ruleFingerprint(rule: Rule): string {
   const { createdBy: _c, updatedAt: _u, ...rest } = rule;
   return sha256(JSON.stringify(rest));
+}
+
+/** `shadow`, `live` or null for each automated action: an auto-send reply or an unsubscribe. */
+export function automationModes(rule: Rule): Array<{ type: "reply" | "unsubscribe"; live: boolean }> {
+  const out: Array<{ type: "reply" | "unsubscribe"; live: boolean }> = [];
+  for (const action of rule.actions) {
+    if (action.type === "reply" && action.reply.mode !== "draft") out.push({ type: "reply", live: action.reply.mode === "autoSend" });
+    if (action.type === "unsubscribe") out.push({ type: "unsubscribe", live: action.unsubscribe.mode === "auto" });
+  }
+  return out;
+}
+
+/**
+ * Shadow first: an automated action may go live only if the stored rule with
+ * the same id already ran that action in shadow (or live) mode. Jon's session
+ * paths call this; nothing else can make an action live.
+ */
+export function assertShadowedFirst(previous: RulesDocument | null, next: RulesDocument): void {
+  const before = new Map((previous?.rules ?? []).map((rule) => [rule.id, rule]));
+  for (const rule of next.rules) {
+    for (const mode of automationModes(rule)) {
+      if (!mode.live) continue;
+      const prior = before.get(rule.id);
+      if (!prior || !automationModes(prior).some((item) => item.type === mode.type)) {
+        throw new MailError(`Rule ${rule.id}: run its ${mode.type === "reply" ? "auto-reply" : "unsubscribe"} in shadow mode first, check what it would have sent, then make it live`, "invalid");
+      }
+    }
+  }
 }
 
 /** A stable hash of what the rules do, for the audit log. */

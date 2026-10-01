@@ -9,6 +9,7 @@ import { LocalKeyWrapper } from "./crypto/server-seal.ts";
 import { ingestRaw, type IngestOptions, type IngestResult } from "./ingest.ts";
 import { Mailbox, type MailboxDeps, type ReviewedDraft } from "./mailbox.ts";
 import { rulesRuntime } from "./rules/engine.ts";
+import type { OneClickClient } from "./rules/unsubscribe.ts";
 import { MemorySender } from "./send.ts";
 import { MemoryStore } from "./store/memory.ts";
 import type { LojoConfig } from "./types.ts";
@@ -33,9 +34,13 @@ export interface WorldOptions {
   embedder?: Embedder | null;
   config?: Partial<LojoConfig>;
   now?: () => Date;
-  deps?: Pick<MailboxDeps, "ownPgpPublicKey" | "pgpSigningKey" | "clientSendLimits" | "agentTrashPerDay">;
+  deps?: Pick<MailboxDeps, "ownPgpPublicKey" | "pgpSigningKey" | "clientSendLimits" | "agentTrashPerDay" | "auditActor" | "testSendLimits">;
   /** Wires `autoSender` into the rules runtime, as LOJO_AUTO_SEND=on does in the processor. */
   autoSend?: boolean;
+  /** Seal bot copies at ingest and for sent copies, as the processor and the API do. */
+  botCopies?: boolean;
+  /** One-click unsubscribe client, wired only with autoSend (as LOJO_AUTO_SEND=on does). */
+  oneClick?: OneClickClient;
 }
 
 /** An in-memory mailbox wired the way the API wires it. No AWS, no network. */
@@ -63,6 +68,7 @@ export async function memoryWorld(opts: WorldOptions = {}) {
     embedder,
     sender,
     autoSendEnabled: opts.autoSend ?? false,
+    botCopies: opts.botCopies ?? false,
     styleGuide: TEST_STYLE,
     ...(opts.now ? { now: opts.now } : {}),
     ...opts.deps,
@@ -79,7 +85,8 @@ export async function memoryWorld(opts: WorldOptions = {}) {
         embedder,
         config,
         styleGuide: TEST_STYLE,
-        rules: rulesRuntime(blobs, keys, opts.autoSend ? autoSender : null),
+        rules: rulesRuntime(blobs, keys, opts.autoSend ? autoSender : null, opts.autoSend ? (opts.oneClick ?? null) : null),
+        botCopies: opts.botCopies ?? false,
         ...(opts.now ? { now: opts.now() } : {}),
       },
       options,

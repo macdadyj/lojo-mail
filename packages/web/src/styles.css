@@ -109,6 +109,8 @@ h2 { font-size: 26px; }
 .chip.now { background: var(--danger-bg); color: var(--now); }
 .chip.today { background: #f8f0df; color: var(--today); }
 .chip.noise, .chip.bulk { background: #eeeae4; color: var(--muted); }
+ul.rules li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+ul.rules li .chip { overflow-wrap: anywhere; }
 
 .reader { padding-bottom: 48px; }
 .summary {

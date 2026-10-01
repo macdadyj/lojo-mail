@@ -155,7 +155,7 @@ test("the global send kill switch stops Thunderbird sends, approved sends and au
   const refusals = autoSendRefusals({
     doc: rules,
     rule: { id: "r", name: "r", enabled: true, match: { from: ["a@example.org"] }, actions: [], stop: false, createdBy: "human", updatedAt: "" },
-    action: { mode: "autoSend", template: "ok", maxChars: 100, allowSenders: ["a@example.org"], allowCategories: [], perSenderPerDay: 1, perDay: 1 },
+    action: { mode: "autoSend", template: "ok", maxChars: 100, allowSenders: ["a@example.org"], allowCategories: [], perSenderPerDay: 1, perDay: 1, allowAiText: false },
     message,
     enabled: true,
     mailbox: JON,

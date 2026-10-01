@@ -23,21 +23,42 @@ export interface RuleMatch {
   hasAttachment?: boolean;
 }
 
-export type ReplyMode = "draft" | "autoSend";
+/**
+ * `draft` (default) parks the reply in the approval queue. `shadow` runs every
+ * auto-send guard and audits what would have gone out, sending and storing
+ * nothing. `autoSend` needs every guard in autosend.ts, and Jon must have run
+ * the rule in `shadow` first.
+ */
+export type ReplyMode = "draft" | "shadow" | "autoSend";
 
 export interface ReplyAction {
-  /** `draft` (default) parks the reply in the approval queue. `autoSend` needs every guard in autosend.ts. */
   mode: ReplyMode;
   /** Jon's fixed text. `{{first_name}}` is the only placeholder. Exactly one of template and ai. */
   template?: string;
   /** Jon's instruction to the model. The model sees only this message, never the mailbox. */
   ai?: { instruction: string };
+  /** Jon's per-rule opt-in to auto-sending model-written text. Without it an `ai` reply never auto-sends. */
+  allowAiText: boolean;
   maxChars: number;
-  /** Required for autoSend: exact addresses or `@domain`. */
+  /** Exact addresses or `@domain`. Auto-send needs these, or a fixed template with allowCategories. */
   allowSenders: string[];
-  /** Optional extra narrowing for autoSend. */
+  /** Narrows the allowlist; with a fixed template it may stand in for allowSenders. */
   allowCategories: Category[];
   perSenderPerDay: number;
+  perDay: number;
+}
+
+/** `shadow` audits what it would do; `auto` sends the request. Same shadow-first rule as auto-send replies. */
+export type UnsubscribeMode = "shadow" | "auto";
+
+/**
+ * Answers a List-Unsubscribe header (RFC 2369 mailto, RFC 8058 one-click),
+ * the one automation that may act on bulk mail. See rules/unsubscribe.ts.
+ */
+export interface UnsubscribeAction {
+  mode: UnsubscribeMode;
+  /** Optional: exact addresses or `@domain`. Empty means every message the rule matches. */
+  allowSenders: string[];
   perDay: number;
 }
 
@@ -46,9 +67,11 @@ export type RuleAction =
   | { type: "move"; folder: RuleFolder }
   | { type: "markRead" }
   | { type: "trash" }
-  | { type: "reply"; reply: ReplyAction };
+  | { type: "reply"; reply: ReplyAction }
+  | { type: "unsubscribe"; unsubscribe: UnsubscribeAction };
 
-export type RuleAuthor = "human" | "token";
+/** `bot`: written through a bot credential's `rules` scope (bot-rules.ts). Never auto-sends, never trashes. */
+export type RuleAuthor = "human" | "token" | "bot";
 
 export interface Rule {
   id: string;
@@ -98,4 +121,5 @@ export interface RuleOutcome {
   trashRuleId: string | null;
   markRead: boolean;
   reply: { rule: Rule; action: ReplyAction } | null;
+  unsubscribe: { rule: Rule; action: UnsubscribeAction } | null;
 }

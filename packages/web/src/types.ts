@@ -167,14 +167,36 @@ export function statusLabel(status: DraftStatus): string {
   }
 }
 
+export type RuleActionSummary =
+  | { type: "label" | "move" | "markRead" | "trash" }
+  | { type: "reply"; reply: { mode: "draft" | "shadow" | "autoSend"; allowSenders: string[]; allowCategories: string[]; allowAiText: boolean } }
+  | { type: "unsubscribe"; unsubscribe: { mode: "shadow" | "auto"; allowSenders: string[] } };
+
 export interface RuleSummary {
   id: string;
   name: string;
   enabled: boolean;
-  actions: Array<{ type: "label" | "move" | "markRead" | "trash" | "reply"; reply?: { mode: "draft" | "autoSend"; allowSenders: string[] } }>;
+  createdBy: "human" | "token" | "bot";
+  actions: RuleActionSummary[];
 }
 
 export interface RulesView {
   rules: { paused: boolean; killSwitch: boolean; sendKillSwitch?: boolean; trashRetentionDays: number; rules: RuleSummary[]; updatedAt: string };
+  fingerprints: Record<string, string>;
   autoSendEnabled: boolean;
+}
+
+export interface BotSummary {
+  name: string;
+  scopes: string[];
+  createdAt: string;
+  rotatedAt?: string;
+  revokedAt?: string;
+  sendLimits?: { perHour: number; perDay: number };
+}
+
+export interface BotsView {
+  killSwitch: boolean;
+  bots: BotSummary[];
+  envelopeKey: { keyId: string } | null;
 }

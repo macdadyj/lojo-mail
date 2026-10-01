@@ -171,6 +171,7 @@ function trashedByLabel(trashedBy: string | undefined): string {
   if (trashedBy?.startsWith("rule:")) return `rule ${trashedBy.slice(5)}`;
   if (trashedBy === "bridge") return "you in Thunderbird";
   if (trashedBy?.startsWith("agent:")) return `agent ${trashedBy.slice(6)}`;
+  if (trashedBy?.startsWith("bot:")) return `bot ${trashedBy.slice(4)}`;
   return "you";
 }
 

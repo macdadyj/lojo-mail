@@ -24,6 +24,8 @@ export interface ParsedInbound {
   inReplyTo?: string;
   references: string[];
   listUnsubscribe?: string;
+  /** RFC 8058: `List-Unsubscribe=One-Click` means the https URI accepts a one-click POST. */
+  listUnsubscribePost?: string;
   listId?: string;
   precedence?: string;
   autoSubmitted?: string;
@@ -158,6 +160,8 @@ export async function parseMime(raw: Buffer | string): Promise<ParsedInbound> {
   const header = (name: string) => headers.find(([key]) => key === name)?.[1];
   const listUnsubscribe = header("list-unsubscribe");
   if (listUnsubscribe) message.listUnsubscribe = listUnsubscribe;
+  const listUnsubscribePost = header("list-unsubscribe-post");
+  if (listUnsubscribePost) message.listUnsubscribePost = listUnsubscribePost;
   const listId = header("list-id");
   if (listId) message.listId = listId;
   const precedence = headerString(parsed, "precedence");

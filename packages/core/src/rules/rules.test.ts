@@ -16,8 +16,14 @@ const MINA_AUTOREPLY = {
   actions: [{ type: "reply", reply: { mode: "autoSend", template: "Hi {{first_name}}, thanks. I will get back to you soon.\n\nJon", allowSenders: ["mina@example.com"] } }],
 };
 
+/** Jon's path to a live rule: save it in shadow mode, then live (shadow first is enforced). */
+function inShadow(rules: unknown[]): unknown[] {
+  return JSON.parse(JSON.stringify(rules).replaceAll('"mode":"autoSend"', '"mode":"shadow"').replaceAll('"mode":"auto"', '"mode":"shadow"')) as unknown[];
+}
+
 async function withRules(opts: Parameters<typeof memoryWorld>[0], rules: unknown[], extra: Record<string, unknown> = {}) {
   const world = await memoryWorld(opts);
+  await world.mailbox.putRules({ rules: inShadow(rules) }, "human");
   await world.mailbox.putRules({ rules, ...extra }, "human");
   return world;
 }
@@ -198,10 +204,11 @@ test("prompt injection: an email that hijacks the reply model still cannot get t
   });
   const aiRule = {
     ...MINA_AUTOREPLY,
-    actions: [{ type: "reply", reply: { mode: "autoSend", ai: { instruction: "Say I will reply properly within two days." }, allowSenders: ["mina@example.com"] } }],
+    actions: [{ type: "reply", reply: { mode: "autoSend", ai: { instruction: "Say I will reply properly within two days." }, allowAiText: true, allowSenders: ["mina@example.com"] } }],
   };
   const world = await memoryWorld({ autoSend: true, llm });
   await world.ingest(fixture("personal.eml"));
+  await world.mailbox.putRules({ rules: inShadow([aiRule]) }, "human");
   await world.mailbox.putRules({ rules: [aiRule] }, "human");
   await world.ingest(malicious("07-autoreply-injection.eml"));
 
@@ -277,5 +284,5 @@ test("the template placeholder only ever inserts a plain first name", () => {
 
 test("config/rules.example.json is a valid rules file", () => {
   const example: unknown = JSON.parse(readFileSync(new URL("../../../../config/rules.example.json", import.meta.url), "utf8"));
-  assert.deepEqual(checkRulesFile(example), { ok: true, rules: 5 });
+  assert.deepEqual(checkRulesFile(example), { ok: true, rules: 6 });
 });

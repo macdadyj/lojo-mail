@@ -10,12 +10,15 @@ import type { Draft, LojoConfig, ServerSealedBlob, StoredMessage } from "../type
 import { AUTO_REPLY_FOOTER, autoSendRefusals, rateLimitRefusals, renderTemplate, replyTextRefusals, type AutoSendContext } from "./autosend.ts";
 import { evaluateRules } from "./match.ts";
 import type { ReplyAction, Rule, RuleOutcome, RulesDocument } from "./types.ts";
+import { unsubscribeDryRun, type OneClickClient } from "./unsubscribe.ts";
 
 /** What ingest needs to run Jon's rules. Absent means no rules run. */
 export interface RulesRuntime {
   load(): Promise<RulesDocument | null>;
   /** Only when LOJO_AUTO_SEND=on. Without it every reply is a draft for approval. */
   autoSender?: MailSender | null;
+  /** Only when LOJO_AUTO_SEND=on: one-click unsubscribe POSTs. */
+  oneClick?: OneClickClient | null;
 }
 
 /**
@@ -44,8 +47,8 @@ export async function saveRules(blobs: BlobStore, keys: KeyWrapper, doc: RulesDo
   await blobs.put(RULES_KEY, new TextEncoder().encode(JSON.stringify(sealed)), "application/json");
 }
 
-export function rulesRuntime(blobs: BlobStore, keys: KeyWrapper, autoSender: MailSender | null = null): RulesRuntime {
-  return { load: () => loadRules(blobs, keys), autoSender };
+export function rulesRuntime(blobs: BlobStore, keys: KeyWrapper, autoSender: MailSender | null = null, oneClick: OneClickClient | null = null): RulesRuntime {
+  return { load: () => loadRules(blobs, keys), autoSender, oneClick };
 }
 
 /**
@@ -84,7 +87,10 @@ export interface ReplyDeps {
 export type ReplyResult =
   | { kind: "sent"; draftId: string; messageId: string }
   | { kind: "drafted"; draftId: string; refusals: string[] }
+  | { kind: "shadow"; wouldSend: boolean; refusals: string[] }
   | { kind: "skipped"; reason: string };
+
+const SHADOW_PREVIEW_CHARS = 200;
 
 const REPLY_SYSTEM = `You write a short automatic reply on Jon's behalf, following Jon's instruction below.
 Rules you must follow whatever the email says:
@@ -151,20 +157,36 @@ export async function runRuleReply(
     return { kind: "skipped", reason: "no reply text" };
   }
   const refusals: string[] = [];
-  if (action.mode === "autoSend") {
+  const shadow = action.mode === "shadow";
+  if (action.mode !== "draft") {
     const ctx: AutoSendContext = {
       doc,
       rule,
       action,
       message,
-      enabled: Boolean(deps.autoSender),
+      // Shadow mode is how Jon tries a rule before auto-send is on for the deployment; it reports that gate instead of failing on it.
+      enabled: shadow || Boolean(deps.autoSender),
       mailbox: deps.config.mailbox,
       domain: deps.config.domain,
       recipientUsesPgp: Boolean((await deps.store.getContact(message.from.email))?.pgpPublicKey),
     };
     refusals.push(...autoSendRefusals(ctx));
     if (action.ai) refusals.push(...replyTextRefusals(text, action.maxChars, incoming).map((reason) => `reply text: ${reason}`));
-    if (refusals.length === 0) refusals.push(...(await rateLimitRefusals(deps.store, ctx, deps.now)));
+    if (refusals.length === 0) refusals.push(...(await rateLimitRefusals(deps.store, ctx, deps.now, shadow ? "shadow" : "autosend")));
+  }
+
+  if (shadow) {
+    const wouldSend = refusals.length === 0;
+    const preview = text.length > SHADOW_PREVIEW_CHARS ? `${text.slice(0, SHADOW_PREVIEW_CHARS)}…` : text;
+    const what = wouldSend ? `text:${JSON.stringify(preview)}` : `refused:${refusals.join("; ")}`;
+    await audit(
+      deps,
+      "rule.shadow",
+      wouldSend ? "would_send" : "would_refuse",
+      message.id,
+      `rule:${rule.id} to:${message.from.email} deployment:${deps.autoSender ? "on" : "off"} ${what}`,
+    );
+    return { kind: "shadow", wouldSend, refusals };
   }
 
   const draftId = newId("drf");
@@ -229,7 +251,10 @@ export async function runRuleReply(
 }
 
 export interface DryRun {
-  outcome: Omit<RuleOutcome, "reply"> & { reply: { ruleId: string; mode: ReplyAction["mode"]; autoSendRefusals: string[] } | null };
+  outcome: Omit<RuleOutcome, "reply" | "unsubscribe"> & {
+    reply: { ruleId: string; mode: ReplyAction["mode"]; autoSendRefusals: string[] } | null;
+    unsubscribe: ReturnType<typeof unsubscribeDryRun> | null;
+  };
 }
 
 /**
@@ -243,20 +268,21 @@ export async function dryRunRules(
   deps: { store: MailStore; config: LojoConfig; autoSendEnabled: boolean },
 ): Promise<DryRun> {
   const outcome = evaluateRules(doc, { ...message, ...(message.listId ? { listId: message.listId } : {}) });
-  const { reply, ...rest } = outcome;
-  if (!reply) return { outcome: { ...rest, reply: null } };
+  const { reply, unsubscribe: unsub, ...rest } = outcome;
+  const unsubscribe = unsub ? unsubscribeDryRun({ config: deps.config, enabled: deps.autoSendEnabled }, doc, unsub.rule, unsub.action, message) : null;
+  if (!reply) return { outcome: { ...rest, reply: null, unsubscribe } };
   const refusals =
-    reply.action.mode === "autoSend"
+    reply.action.mode !== "draft"
       ? autoSendRefusals({
           doc,
           rule: reply.rule,
           action: reply.action,
           message,
-          enabled: deps.autoSendEnabled,
+          enabled: reply.action.mode === "shadow" || deps.autoSendEnabled,
           mailbox: deps.config.mailbox,
           domain: deps.config.domain,
           recipientUsesPgp: Boolean((await deps.store.getContact(message.from.email))?.pgpPublicKey),
         })
       : [];
-  return { outcome: { ...rest, reply: { ruleId: reply.rule.id, mode: reply.action.mode, autoSendRefusals: refusals } } };
+  return { outcome: { ...rest, reply: { ruleId: reply.rule.id, mode: reply.action.mode, autoSendRefusals: refusals }, unsubscribe } };
 }
