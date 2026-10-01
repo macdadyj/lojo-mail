@@ -66,7 +66,11 @@ struct ThreadView: View {
                 .ignoresSafeArea()
         }
         .fileMover(isPresented: Binding(get: { saving != nil }, set: { if !$0 { cleanUpSaving() } }), file: saving) { result in
-            if case .failure(let failure) = result { error = failure.localizedDescription } else { model.toast = Toast(text: "Saved to Files", systemImage: "folder") }
+            switch result {
+            case .success: model.toast = Toast(text: "Saved to Files", systemImage: "folder")
+            case .failure(let failure as CocoaError) where failure.code == .userCancelled: break
+            case .failure(let failure): error = failure.localizedDescription
+            }
             cleanUpSaving()
         }
     }

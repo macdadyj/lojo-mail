@@ -43,6 +43,8 @@ final class ComposeModel {
     private(set) var attachments: [OutgoingAttachment] = []
     private(set) var thumbnails: [UUID: UIImage] = [:]
     var loadingAttachments = 0
+    /// Why the last file couldn't be added; shown in the Attachments section, next to the paperclip.
+    var attachmentNotice: String?
 
     private let model: AppModel
 
@@ -109,21 +111,21 @@ final class ComposeModel {
     func attach(_ file: OutgoingAttachment) -> Bool {
         guard !closed else { return false }
         if attachments.contains(where: { $0.sha256 == file.sha256 }) || serverAttachments.contains(where: { $0.sha256 == file.sha256 }) {
-            error = "\(file.filename) is already attached."
+            attachmentNotice = "\(file.filename) is already attached."
             return false
         }
         guard attachmentSizes.count < budget.maxFiles else {
-            error = "One message can carry up to \(budget.maxFiles) attachments."
+            attachmentNotice = "One message can carry up to \(budget.maxFiles) attachments."
             return false
         }
         guard budget.fits(textBytes: textBytes, attachmentSizes: attachmentSizes + [file.size]) else {
             let left = roomLeft
-            error = "\(file.filename) is \(ByteSize.format(file.size)). " + (left > 0
+            attachmentNotice = "\(file.filename) is \(ByteSize.format(file.size)). " + (left > 0
                 ? "Only \(ByteSize.format(left)) more fits in one message (\(ByteSize.format(budget.maxMessageBytes)) including encoding)."
                 : "The message is at its \(ByteSize.format(budget.maxMessageBytes)) limit.") + " Share a link for larger files."
             return false
         }
-        error = nil
+        attachmentNotice = nil
         attachments.append(file)
         if file.contentType.hasPrefix("image/"), let image = UIImage(data: file.data) {
             thumbnails[file.id] = image.preparingThumbnail(of: CGSize(width: 96, height: 96))
@@ -132,6 +134,7 @@ final class ComposeModel {
     }
 
     func detach(_ file: OutgoingAttachment) {
+        attachmentNotice = nil
         attachments.removeAll { $0.id == file.id }
         thumbnails[file.id] = nil
     }
@@ -152,15 +155,12 @@ final class ComposeModel {
                 skipped.append(meta.filename)
                 continue
             }
-            let previous = error
             if !attach(OutgoingAttachment(filename: meta.filename, contentType: meta.contentType, data: data)) {
                 skipped.append(meta.filename)
-                error = previous
             }
         }
         if !skipped.isEmpty {
-            attachmentsNotForwarded = message.attachments.filter { skipped.contains($0.filename) }
-            error = "Not forwarded: \(skipped.joined(separator: ", ")). It couldn't be opened or doesn't fit in \(ByteSize.format(budget.maxMessageBytes))."
+            attachmentNotice = "Not forwarded: \(skipped.joined(separator: ", ")). It couldn't be opened or doesn't fit in \(ByteSize.format(budget.maxMessageBytes))."
         }
     }
 

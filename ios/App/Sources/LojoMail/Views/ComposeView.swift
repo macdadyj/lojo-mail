@@ -104,7 +104,9 @@ struct ComposeView: View {
             } footer: {
                 if let warning = model.forwardWarning { Text(warning) }
             }
-            ComposeAttachmentsSection(model: model, photos: openPhotos, camera: openCamera, files: openFiles)
+            if !model.closed || model.hasAttachments {
+                ComposeAttachmentsSection(model: model, photos: openPhotos, camera: openCamera, files: openFiles)
+            }
             Section {
                 Picker("Encryption", selection: $model.fields.pgp) {
                     Text("OpenPGP when possible").tag(PgpMode.auto)
@@ -152,7 +154,13 @@ struct ComposeView: View {
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                 } footer: {
-                    Text("Sending asks the server for a one-time approval bound to exactly the recipients, subject, text and encryption shown here. Bots and Thunderbird can't do this step.")
+                    if model.attachmentsUnsendable {
+                        Text("Remove the attachments to send: this server can't send them from the app yet.").foregroundStyle(.orange)
+                    } else if model.overBudget {
+                        Text("Remove an attachment to send: the message is over \(ByteSize.format(model.budget.maxMessageBytes)).").foregroundStyle(.red)
+                    } else {
+                        Text("Sending asks the server for a one-time approval bound to exactly the recipients, subject, text\(model.hasAttachments ? ", attachments" : "") and encryption shown here. Bots and Thunderbird can't do this step.")
+                    }
                 }
             }
         }
@@ -189,7 +197,7 @@ struct ComposeView: View {
         .fileImporter(isPresented: $pickFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls): addFiles(urls, to: model)
-            case .failure(let failure): model.error = failure.localizedDescription
+            case .failure(let failure): model.attachmentNotice = failure.localizedDescription
             }
         }
         .fullScreenCover(isPresented: $takePhoto) {
@@ -203,6 +211,10 @@ struct ComposeView: View {
             }
             Button("Close without saving", role: .destructive) { dismiss() }
             Button("Keep editing", role: .cancel) {}
+        } message: {
+            if model.attachmentsUnsendable {
+                Text("Only the text is saved. This server can't store attachments yet, so they are dropped when you close.")
+            }
         }
         .confirmationDialog("Discard this draft?", isPresented: $confirmDiscard, titleVisibility: .visible) {
             Button("Discard draft", role: .destructive) {
@@ -305,7 +317,7 @@ struct ComposeView: View {
                 let file = try await Task.detached(priority: .userInitiated) { try AttachmentImport.photo(data, name: name, room: room) }.value
                 model.attach(file)
             } catch {
-                model.error = error.localizedDescription
+                model.attachmentNotice = error.localizedDescription
             }
         }
     }
@@ -315,7 +327,7 @@ struct ComposeView: View {
         do {
             model.attach(try AttachmentImport.photo(image, name: name, room: model.roomLeft))
         } catch {
-            model.error = error.localizedDescription
+            model.attachmentNotice = error.localizedDescription
         }
     }
 
@@ -324,7 +336,7 @@ struct ComposeView: View {
             do {
                 model.attach(try AttachmentImport.file(at: url, room: model.roomLeft))
             } catch {
-                model.error = error.localizedDescription
+                model.attachmentNotice = error.localizedDescription
             }
         }
     }

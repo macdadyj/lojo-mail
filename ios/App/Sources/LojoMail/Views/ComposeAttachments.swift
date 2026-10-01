@@ -49,6 +49,11 @@ struct ComposeAttachmentsSection: View {
                     remove: { model.detach(file) }
                 )
             }
+            if let notice = model.attachmentNotice {
+                Label(notice, systemImage: "exclamationmark.circle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
             if model.loadingAttachments > 0 {
                 HStack(spacing: 10) {
                     ProgressView()
@@ -82,7 +87,7 @@ struct ComposeAttachmentsSection: View {
             Text("Attachments")
         } footer: {
             if !model.hasAttachments {
-                Text("Up to \(ByteSize.format(model.budget.maxMessageBytes)) per message including encoding, about \(ByteSize.format(model.budget.maxMessageBytes * 3 / 4 - 50_000)) of files. Photos are sent as JPEG without location data.")
+                Text("Up to \(ByteSize.format(model.budget.maxMessageBytes)) per message including encoding, about \(ByteSize.format(model.roomLeft)) of files. Photos are sent as JPEG without location data.")
             }
         }
     }
