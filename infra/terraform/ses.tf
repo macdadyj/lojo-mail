@@ -104,3 +104,46 @@ resource "aws_ses_active_receipt_rule_set" "main" {
 
   depends_on = [aws_ses_receipt_rule.store]
 }
+
+# Additional receiving domains (for example lojo.engineering). Identity only:
+# DKIM tokens are output for the owner to publish; no DNS is written, and no
+# MAIL FROM is configured. A same-named EMAIL_ADDRESS identity, if any, is a
+# separate SES resource and is left alone.
+resource "aws_sesv2_email_identity" "extra" {
+  for_each       = toset(var.extra_receiving_domains)
+  email_identity = each.value
+
+  dkim_signing_attributes {
+    next_signing_key_length = "RSA_2048_BIT"
+  }
+}
+
+# One rule per extra domain, separate from "store-raw", so the cyberphysical.us
+# rule is never edited and rollback is deleting this rule. Same bucket, prefix,
+# TLS and scan settings; the same processor ingests it into the same mailbox.
+resource "aws_ses_receipt_rule" "store_extra" {
+  for_each = var.receiving_stage == "live" ? toset(var.extra_receiving_domains) : toset([])
+
+  name          = "store-raw-${replace(each.value, ".", "-")}"
+  rule_set_name = aws_ses_receipt_rule_set.main.rule_set_name
+  recipients    = [for a in var.extra_receiving_addresses : a if endswith(a, "@${each.value}")]
+  enabled       = true
+  scan_enabled  = true
+  tls_policy    = "Require"
+  after         = aws_ses_receipt_rule.store.name
+
+  s3_action {
+    position          = 1
+    bucket_name       = aws_s3_bucket.mail.bucket
+    object_key_prefix = "raw/"
+  }
+
+  depends_on = [
+    aws_ses_receipt_rule.store,
+    aws_kms_key.mail,
+    aws_s3_bucket_server_side_encryption_configuration.mail,
+    aws_s3_bucket_policy.mail,
+    aws_lambda_permission.s3_invoke,
+    aws_s3_bucket_notification.raw,
+  ]
+}

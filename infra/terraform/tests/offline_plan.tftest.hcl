@@ -38,6 +38,8 @@ variables {
   bridge_trash_enabled            = true
   bridge_send_enabled             = true
   send_from_addresses             = []
+  extra_receiving_domains         = []
+  extra_receiving_addresses       = []
   trash_purge_mode                = "report"
   web_hosting_enabled             = false
   web_app_label                   = "app"
@@ -1180,5 +1182,48 @@ run "web_hosting_applies_with_a_zone" {
   assert {
     condition     = strcontains(aws_cloudfront_response_headers_policy.app[0].security_headers_config[0].content_security_policy[0].content_security_policy, "frame-ancestors 'none'")
     error_message = "the app's CSP comes from the web build's _headers"
+  }
+}
+
+run "extra_receiving_domain_gets_its_own_rule_and_leaves_the_main_rule_alone" {
+  command = plan
+
+  variables {
+    receiving_stage           = "live"
+    extra_receiving_domains   = ["lojo.engineering"]
+    extra_receiving_addresses = ["jon@lojo.engineering"]
+  }
+
+  assert {
+    condition     = toset(aws_ses_receipt_rule.store.recipients) == toset(["lojo@cyberphysical.us", "dmarc@cyberphysical.us"])
+    error_message = "the cyberphysical.us rule must not change"
+  }
+
+  assert {
+    condition = (
+      toset(aws_ses_receipt_rule.store_extra["lojo.engineering"].recipients) == toset(["jon@lojo.engineering"]) &&
+      aws_ses_receipt_rule.store_extra["lojo.engineering"].tls_policy == "Require" &&
+      aws_ses_receipt_rule.store_extra["lojo.engineering"].scan_enabled
+    )
+    error_message = "the extra rule accepts exactly jon@lojo.engineering with the same TLS and scan settings"
+  }
+
+  assert {
+    condition     = aws_sesv2_email_identity.extra["lojo.engineering"].email_identity == "lojo.engineering"
+    error_message = "the extra domain gets an SES domain identity"
+  }
+}
+
+run "extra_receiving_rules_wait_for_live_stage" {
+  command = plan
+
+  variables {
+    extra_receiving_domains   = ["lojo.engineering"]
+    extra_receiving_addresses = ["jon@lojo.engineering"]
+  }
+
+  assert {
+    condition     = length(aws_ses_receipt_rule.store_extra) == 0
+    error_message = "no extra receipt rule before live"
   }
 }

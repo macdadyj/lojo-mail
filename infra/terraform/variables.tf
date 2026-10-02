@@ -446,3 +446,25 @@ variable "web_hosting_publish_tls_rpt" {
   description = "Publish the _smtp._tls TXT record (v=TLSRPTv1; rua=mailto:<dmarc_rua_local_part>@<domain>)."
   default     = true
 }
+
+variable "extra_receiving_domains" {
+  type        = list(string)
+  description = "Additional domains to receive mail for into this same mailbox. Each gets its own SES domain identity with Easy DKIM (no custom MAIL FROM, no DNS written). Receiving also needs the addresses in extra_receiving_addresses and the domain's MX pointed at inbound-smtp.<region>.amazonaws.com."
+  default     = []
+
+  validation {
+    condition     = alltrue([for d in var.extra_receiving_domains : can(regex("^[a-z0-9.-]+\\.[a-z]{2,}$", d)) && d != var.domain])
+    error_message = "extra_receiving_domains must be bare DNS names, different from domain."
+  }
+}
+
+variable "extra_receiving_addresses" {
+  type        = list(string)
+  description = "Extra addresses (for example jon@lojo.engineering) the receipt rule accepts in live stage, stored in the same mailbox. Only these exact addresses; other local parts at those domains never match a rule."
+  default     = []
+
+  validation {
+    condition     = alltrue([for a in var.extra_receiving_addresses : can(regex("^[a-z0-9._+-]+@[a-z0-9.-]+\\.[a-z]{2,}$", a))])
+    error_message = "extra_receiving_addresses must be lowercase email addresses."
+  }
+}

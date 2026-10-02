@@ -46,3 +46,9 @@ bridge_send_enabled = true
 # Extra SES-verified From addresses for Thunderbird identities.
 # send_from_addresses = ["jon@lojo.engineering"]
 # client_send_limits = { per_day = 200, per_10_minutes = 30, recipients_per_day = 500, max_recipients = 50 }
+
+# Also receive for another domain into the same mailbox. Creates an SES domain
+# identity with Easy DKIM (no DNS, no MAIL FROM) and one extra receipt rule
+# "store-raw-<domain>" for exactly these addresses (live stage only).
+# extra_receiving_domains   = ["lojo.engineering"]
+# extra_receiving_addresses = ["jon@lojo.engineering"]

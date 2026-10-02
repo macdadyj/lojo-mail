@@ -82,3 +82,8 @@ output "web_hosting" {
     mta_sts_distribution_id = aws_cloudfront_distribution.mta_sts[0].id
   } : null
 }
+
+output "extra_domain_dkim_tokens" {
+  description = "Easy DKIM tokens per extra receiving domain. Publish <token>._domainkey.<domain> CNAME -> <token>.dkim.amazonses.com."
+  value       = { for d, i in aws_sesv2_email_identity.extra : d => nonsensitive(tolist(i.dkim_signing_attributes[0].tokens)) }
+}
