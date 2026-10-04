@@ -151,17 +151,19 @@ test("bot rules need the rules scope and stay away from Jon's rules", async () =
   });
   const plain = String((await app.call("/v1/bots", { token: session, body: { name: "plain" } })).json.token);
   const ruler = String((await app.call("/v1/bots", { token: session, body: { name: "ruler", scopes: ["read", "write", "rules"] } })).json.token);
-  const rule = { name: "News", match: { bulk: true }, actions: [{ type: "move", folder: "archive" }] };
+  const rule = { name: "News", match: { bulk: true }, actions: [{ type: "move", folder: "archive" }], why: "file newsletters" };
   assert.equal((await app.call("/v1/rules/bot-rules/news", { method: "PUT", token: plain, body: rule })).status, 403);
   assert.equal((await app.call("/v1/rules/bot-rules/news", { method: "PUT", token: "admin-token", body: rule })).status, 403);
+  assert.equal((await app.call("/v1/rules/bot-rules/news", { method: "PUT", token: "agent-token", body: rule })).status, 403);
   const saved = await app.call("/v1/rules/bot-rules/news", { method: "PUT", token: ruler, body: rule });
   assert.equal(saved.status, 200, saved.text);
   assert.equal((await app.call("/v1/rules/bot-rules/jon", { method: "PUT", token: ruler, body: rule })).status, 403);
-  assert.equal((await app.call("/v1/rules/bot-rules/jon/delete", { token: ruler, body: {} })).status, 403);
+  assert.equal((await app.call("/v1/rules/bot-rules/jon/delete", { token: ruler, body: { why: "remove jon" } })).status, 403);
   assert.equal((await app.call("/v1/rules/jon/disable", { token: ruler, body: {} })).status, 200);
-  const auto = { name: "A", match: { from: ["a@b.example"] }, actions: [{ type: "reply", reply: { mode: "autoSend", template: "hi", allowSenders: ["a@b.example"] } }] };
+  const auto = { name: "A", match: { from: ["a@b.example"] }, actions: [{ type: "reply", reply: { mode: "autoSend", template: "hi", allowSenders: ["a@b.example"] } }], why: "send it" };
   assert.equal((await app.call("/v1/rules/bot-rules/auto", { method: "PUT", token: ruler, body: auto })).status, 403);
-  assert.equal((await app.call("/v1/rules/bot-rules/news/delete", { token: ruler, body: {} })).status, 200);
+  assert.equal((await app.call("/v1/rules/bot-rules/news/delete", { token: ruler, body: {} })).status, 400);
+  assert.equal((await app.call("/v1/rules/bot-rules/news/delete", { token: ruler, body: { why: "not needed" } })).status, 200);
   const upserts = (await app.store.listAudit(100)).filter((event) => event.action === "rules.bot_upsert");
   assert.ok(upserts.every((event) => event.actor === "bot:ruler"));
 });
@@ -201,6 +203,7 @@ test("a bot proposes automation disabled; only Jon enables it, by fingerprint, s
     enabled: true,
     match: { from: ["@shop.example"] },
     actions: [{ type: "reply", reply: { mode: "shadow", template: "Thanks, received.", allowSenders: ["@shop.example"] } }],
+    why: "shadow a receipt reply",
   };
   const saved = await app.call("/v1/rules/bot-rules/ack", { method: "PUT", token: ruler, body: proposal });
   assert.equal(saved.status, 200, saved.text);

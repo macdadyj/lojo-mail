@@ -92,6 +92,62 @@ test("a write token can pause, engage the kill switch and disable a rule, but on
   assert.equal(mina?.createdBy, "human", "disabling does not change who wrote the rule");
 });
 
+test("an agent token with rules can trash, list and undo; it cannot edit Jon's rules or auto-send", async () => {
+  const t = await testApp();
+  const session = await t.login();
+  await t.call("/v1/rules", {
+    method: "PUT",
+    token: session,
+    body: { rules: [{ id: "jon", name: "Jon", match: { from: ["@shop.example"] }, actions: [{ type: "label", labels: ["receipts"] }] }] },
+  });
+  const trash = {
+    name: "Bin noise",
+    match: { from: ["@news.example"] },
+    actions: [{ type: "trash" }],
+    why: "newsletters to trash",
+  };
+  assert.equal((await t.call("/v1/rules/bot-rules/noise", { method: "PUT", token: "agent-token", body: trash })).status, 403);
+  assert.equal((await t.call("/v1/rules/bot-rules/noise", { method: "PUT", token: "admin-token", body: trash })).status, 403);
+  assert.equal((await t.call("/v1/rules/undo", { token: "agent-rules-token", body: { why: "nothing yet" } })).status, 404);
+  const saved = await t.call("/v1/rules/bot-rules/noise", { method: "PUT", token: "agent-rules-token", body: trash });
+  assert.equal(saved.status, 200, saved.text);
+  const rules = (saved.json.rules as { rules: Array<{ id: string; createdBy: string; enabled: boolean }> }).rules;
+  assert.deepEqual(
+    rules.map((rule) => [rule.id, rule.createdBy, rule.enabled]),
+    [
+      ["jon", "human", true],
+      ["noise", "bot", true],
+    ],
+  );
+  assert.equal((await t.call("/v1/rules/bot-rules/jon", { method: "PUT", token: "agent-rules-token", body: { ...trash, why: "take jon's" } })).status, 403);
+  const live = { name: "Send", match: { from: ["a@b.example"] }, actions: [{ type: "reply", reply: { mode: "autoSend", template: "hi", allowSenders: ["a@b.example"] } }], why: "send" };
+  assert.equal((await t.call("/v1/rules/bot-rules/send", { method: "PUT", token: "agent-rules-token", body: live })).status, 403);
+
+  const pushed = await t.call("/v1/rules", {
+    method: "PUT",
+    token: session,
+    body: { rules: [{ id: "jon", name: "Jon", match: { from: ["@shop.example"] }, actions: [{ type: "label", labels: ["home"] }] }] },
+  });
+  const afterPush = (pushed.json.rules as { rules: Array<{ id: string; createdBy: string }> }).rules;
+  assert.deepEqual(afterPush.map((rule) => [rule.id, rule.createdBy]), [
+    ["jon", "human"],
+    ["noise", "bot"],
+  ]);
+
+  const undone = await t.call("/v1/rules/undo", { token: "agent-rules-token", body: { why: "too broad" } });
+  assert.equal(undone.status, 200, undone.text);
+  assert.deepEqual(
+    (undone.json.rules as { rules: Array<{ id: string }> }).rules.map((rule) => rule.id),
+    ["jon"],
+  );
+  const changes = await t.call("/v1/rules/changes", { token: "read-token" });
+  assert.equal((changes.json.changes as unknown[]).length, 0);
+  const audit = (await t.store.listAudit(30)).filter((event) => event.action === "rules.bot_upsert" || event.action === "rules.undone");
+  assert.equal(audit[0]?.actor, "agent:mail");
+  assert.match(audit.map((event) => event.detail).join("\n"), /why:newsletters to trash/);
+  assert.match(audit.map((event) => event.detail).join("\n"), /why:too broad/);
+});
+
 test("dry run reports hits and auto-send refusals without side effects", async () => {
   const t = await testApp();
   const session = await t.login();

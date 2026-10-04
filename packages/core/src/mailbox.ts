@@ -45,8 +45,9 @@ import { embedForStorage, embeddingInput, ingestRaw, refreshThread } from "./ing
 import { newId, normalizeMessageId, sha256, utcDay } from "./ids.ts";
 import { buildMimeEntity, buildRawMessage, cleanEmail, cleanHeaderValue } from "./mime/compose.ts";
 import { encryptMimeEntity, encryptText, type PgpSigningKey } from "./openpgp/mail.ts";
-import { deleteBotRule, upsertBotRule } from "./rules/bot-rules.ts";
-import { dryRunRules, loadRules, saveRules, type DryRun } from "./rules/engine.ts";
+import { deleteBotRule, preserveBotRules, upsertBotRule } from "./rules/bot-rules.ts";
+import { pushRevision, ruleWhy, undoRevision, type RuleRevision } from "./rules/history.ts";
+import { dryRunRules, loadRuleHistory, loadRules, saveRuleHistory, saveRules, type DryRun } from "./rules/engine.ts";
 import type { RuleAuthor, RulesDocument } from "./rules/types.ts";
 import { enableRule, setAutomationMode, type AutomationMode } from "./rules/promote.ts";
 import { assertShadowedFirst, automationModes, emptyRules, parseRulesDocument, ruleFingerprint, rulesHash } from "./rules/validate.ts";
@@ -1099,10 +1100,13 @@ export class Mailbox {
   async putRules(input: unknown, actor: Actor): Promise<RulesDocument> {
     if (actor !== "human") throw new MailError("Only a signed-in human can change mail rules", "forbidden");
     const previous = await loadRules(this.deps.blobs, this.deps.keys);
-    const doc = parseRulesDocument(input, "human", this.now(), previous);
+    const doc = parseRulesDocument(preserveBotRules(previous, input), "human", this.now(), previous);
     assertShadowedFirst(previous, doc);
     await saveRules(this.deps.blobs, this.deps.keys, doc);
-    await this.audit("rules.updated", "ok", { detail: `sha256:${rulesHash(doc)} rules:${doc.rules.length} ${automationSummary(doc)} killSwitch:${doc.killSwitch} paused:${doc.paused}` });
+    const kept = doc.rules.filter((rule) => rule.createdBy === "bot").map((rule) => rule.id);
+    await this.audit("rules.updated", "ok", {
+      detail: `sha256:${rulesHash(doc)} rules:${doc.rules.length} keptBot:${kept.join(",") || "none"} ${automationSummary(doc)} killSwitch:${doc.killSwitch} paused:${doc.paused}`,
+    });
     return doc;
   }
 
@@ -1161,20 +1165,81 @@ export class Mailbox {
     return next;
   }
 
-  /** A bot's own rule (bot-rules.ts): never auto-send, never trash, never one of Jon's rules. */
-  async putBotRule(input: unknown): Promise<RulesDocument> {
-    const next = upsertBotRule(await this.getRules(), input, this.now());
-    await saveRules(this.deps.blobs, this.deps.keys, next);
+  /**
+   * An assistant's own rule. Filing actions, including trash, apply on the next
+   * delivery. Auto-send is refused. `why` is stored on the undo stack and the audit log.
+   */
+  async putBotRule(input: unknown, why: unknown): Promise<RulesDocument> {
+    const reason = ruleWhy(why);
+    const previous = await this.getRules();
     const id = String((input as { id?: unknown }).id);
-    await this.audit("rules.bot_upsert", "ok", { detail: `rule:${id} sha256:${rulesHash(next)}` });
+    const before = previous.rules.find((rule) => rule.id === id) ?? null;
+    const index = previous.rules.findIndex((rule) => rule.id === id);
+    const next = upsertBotRule(previous, input, this.now());
+    const written = next.rules.find((rule) => rule.id === id);
+    if (!written) throw new Error(`rule ${id} vanished`);
+    await this.recordRuleChange(next, {
+      at: next.updatedAt,
+      actor: this.changeActor(),
+      why: reason,
+      op: "upsert",
+      ruleId: id,
+      before,
+      afterHash: ruleFingerprint(written),
+      index: index < 0 ? previous.rules.length : index,
+    });
+    await this.audit("rules.bot_upsert", "ok", { detail: `rule:${id} why:${reason} sha256:${rulesHash(next)}` });
     return next;
   }
 
-  async deleteBotRule(ruleId: string): Promise<RulesDocument> {
-    const next = deleteBotRule(await this.getRules(), ruleId, this.now());
-    await saveRules(this.deps.blobs, this.deps.keys, next);
-    await this.audit("rules.bot_delete", "ok", { detail: `rule:${ruleId} sha256:${rulesHash(next)}` });
+  async deleteBotRule(ruleId: string, why: unknown): Promise<RulesDocument> {
+    const reason = ruleWhy(why);
+    const previous = await this.getRules();
+    const index = previous.rules.findIndex((rule) => rule.id === ruleId);
+    const before = index < 0 ? null : previous.rules[index] ?? null;
+    const next = deleteBotRule(previous, ruleId, this.now());
+    await this.recordRuleChange(next, {
+      at: next.updatedAt,
+      actor: this.changeActor(),
+      why: reason,
+      op: "delete",
+      ruleId,
+      before,
+      afterHash: "",
+      index: Math.max(0, index),
+    });
+    await this.audit("rules.bot_delete", "ok", { detail: `rule:${ruleId} why:${reason} sha256:${rulesHash(next)}` });
     return next;
+  }
+
+  /** Reverses the latest assistant edit. Jon's file push is not on this stack. */
+  async undoLastRuleChange(why: unknown): Promise<RulesDocument> {
+    const reason = ruleWhy(why);
+    const previous = await this.getRules();
+    const history = await loadRuleHistory(this.deps.blobs, this.deps.keys);
+    const undone = undoRevision(previous, history, this.now());
+    await saveRules(this.deps.blobs, this.deps.keys, undone.doc);
+    await saveRuleHistory(this.deps.blobs, this.deps.keys, undone.history);
+    await this.audit("rules.undone", "ok", {
+      detail: `rule:${undone.undone.ruleId} op:${undone.undone.op} why:${reason} undid:${undone.undone.why} sha256:${rulesHash(undone.doc)}`,
+    });
+    return undone.doc;
+  }
+
+  /** Newest first. What `undo_last_change` can still reverse. */
+  async ruleChanges(): Promise<RuleRevision[]> {
+    const history = await loadRuleHistory(this.deps.blobs, this.deps.keys);
+    return [...history.revisions].reverse();
+  }
+
+  private changeActor(): string {
+    return this.deps.auditActor?.() ?? "assistant";
+  }
+
+  private async recordRuleChange(doc: RulesDocument, revision: RuleRevision): Promise<void> {
+    const history = await loadRuleHistory(this.deps.blobs, this.deps.keys);
+    await saveRules(this.deps.blobs, this.deps.keys, doc);
+    await saveRuleHistory(this.deps.blobs, this.deps.keys, pushRevision(history, revision));
   }
 
   /** The `test-send` scope: one message to LOJO_TEST_RECIPIENT, nobody else (bots/test-send.ts). */

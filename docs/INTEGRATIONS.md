@@ -36,7 +36,7 @@ shred -u agent-tokens.json
 
 Rules the API enforces when it loads the list:
 
-- Scopes are limited to `read`, `write`, `body`, and `trash`. `send`, `admin`, `compose`, and `client-send` are refused for agent tokens.
+- Scopes are limited to `read`, `write`, `body`, `trash`, and `rules`. `send`, `admin`, `compose`, and `client-send` are refused for agent tokens. `rules` edits that assistant's filing rules (including recoverable trash) and does not allow auto-send.
 - Tokens are at least 32 characters. Labels are 1–32 lowercase letters, digits, or dashes, and unique. A token acts as `agent:<label>`.
 - If any entry breaks a rule, **no** agent token works, and the API logs `agent_tokens_invalid` with the reason (never the token). The web app and the main API token keep working, so a typo cannot lock Jon out.
 - The API reloads its parameters every 5 minutes (`LOJO_CONFIG_TTL_MS`), so adding or revoking a token takes effect within 5 minutes. To apply it at once, force a cold start: `aws lambda update-function-configuration --function-name lojo-mail-api --description "rotate $(date +%s)"`.

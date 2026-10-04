@@ -8,10 +8,11 @@ import type { Sessions } from "./session.ts";
  * the bridge gets it with LOJO_BRIDGE_TRASH=on, an agent token only when Jon
  * lists it for that agent. `client-send` is Jon pressing Send in Thunderbird:
  * only the bridge token can hold it, only with LOJO_BRIDGE_SEND=on. `rules`
- * (bot-authored rules), `test-send` (mail to lojo-test only), `send-approved`
- * (replies Jon approved in chat) and `send-new` (a new message to anyone,
- * off unless Jon grants it, plus those replies to new recipients) exist only
- * on bot credentials (bots.ts). `admin` implies none of these.
+ * (assistant filing rules, including trash; also an agent token when Jon lists
+ * it), `test-send` (mail to lojo-test only), `send-approved` (replies Jon
+ * approved in chat) and `send-new` (a new message to anyone, off unless Jon
+ * grants it). `test-send`, `send-approved` and `send-new` exist only on bot
+ * credentials. `admin` implies none of these.
  */
 export type Scope =
   | "read"
@@ -63,7 +64,7 @@ function knownScope(value: string): Scope | null {
   }
 }
 
-/** Never in LOJO_API_SCOPES/LOJO_SEND_SCOPES. `trash` is still open to agent tokens (AGENT_SCOPES); `rules`, `test-send`, `send-approved` and `send-new` to bots. */
+/** Never in LOJO_API_SCOPES/LOJO_SEND_SCOPES. `trash` and `rules` are open to agent tokens (AGENT_SCOPES); `test-send`, `send-approved` and `send-new` to bots. */
 const BRIDGE_ONLY_SCOPES: readonly Scope[] = ["trash", "client-send", "rules", "test-send", "send-approved", "send-new"];
 
 export function parseScopes(value: string | undefined, fallback: Scope[]): Scope[] {
@@ -136,7 +137,7 @@ export interface AgentToken {
   scopes: Scope[];
 }
 
-const AGENT_SCOPES: readonly Scope[] = ["read", "write", "body", "trash"];
+const AGENT_SCOPES: readonly Scope[] = ["read", "write", "body", "trash", "rules"];
 const MIN_AGENT_TOKEN_CHARS = 32;
 
 /**
@@ -144,9 +145,10 @@ const MIN_AGENT_TOKEN_CHARS = 32;
  * each can be revoked alone. JSON: `[{ "label": "grok", "token": "...", "scopes": ["read"] }]`.
  * send, client-send, compose and admin are refused here: sending needs Jon's
  * approval token or Jon at Thunderbird, and admin implies send. `trash` is
- * allowed (soft delete, capped per agent per day).
- */
-/**
+ * allowed (soft delete, capped per agent per day). `rules` lets that assistant
+ * edit its own mail rules, including trash; it does not allow auto-send, and
+ * admin does not imply it.
+ *
  * A malformed agent-token list disables every agent token and keeps the API up,
  * so a typo in one entry cannot lock Jon out of the web app.
  */

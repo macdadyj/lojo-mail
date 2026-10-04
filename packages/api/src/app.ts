@@ -454,6 +454,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const rules = await mailbox.getRules();
     return c.json({ rules, fingerprints: ruleFingerprints(rules), autoSendEnabled: deps.info.autoSendEnabled ?? false });
   });
+  /** Newest first: assistant edits `undo_last_change` can still reverse. The audit log keeps the rest. */
+  app.get("/v1/rules/changes", need("read"), async (c) => c.json({ changes: await mailbox.ruleChanges() }));
+  /** An assistant token with `rules`. Reverses the latest assistant edit, not Jon's file push. */
+  app.post("/v1/rules/undo", need("rules"), async (c) => {
+    const input = await body<{ why: string }>(c);
+    return c.json({ rules: await mailbox.undoLastRuleChange(input.why) });
+  });
   /** Replaces the whole document. Human sessions only; tokens can only make rules safer (below). */
   app.put("/v1/rules", need("human"), async (c) => c.json({ rules: await mailbox.putRules(await body<unknown>(c), actorOf(c.get("principal"))) }));
   app.post("/v1/rules/switches", need("write"), async (c) => {

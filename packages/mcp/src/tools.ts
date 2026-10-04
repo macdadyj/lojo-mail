@@ -36,6 +36,10 @@ export interface MailClient {
   restore(messageId: string): Promise<unknown>;
   actionItems(): Promise<unknown>;
   exportIndex(): Promise<unknown>;
+  listRules(): Promise<unknown>;
+  upsertRule(rule: Record<string, unknown>, why: string): Promise<unknown>;
+  deleteRule(ruleId: string, why: string): Promise<unknown>;
+  undoLastRuleChange(why: string): Promise<unknown>;
 }
 
 export interface ToolContext {
@@ -99,6 +103,17 @@ const SPENDS: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, i
 const CHANGES: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 /** Moves mail out of Jon's view until he restores it; the purge deletes it after the retention window. */
 const SOFT_DELETES: ToolAnnotations = { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false };
+
+const whySchema = z.string().trim().min(1).max(200);
+const ruleIdSchema = z.object({ ruleId: z.string().min(1), why: whySchema });
+const upsertRuleSchema = z.object({
+  why: whySchema,
+  rule: z
+    .object({
+      id: z.string().min(1),
+    })
+    .passthrough(),
+});
 
 export const tools = [
   {
@@ -231,6 +246,42 @@ export const tools = [
     description: "Export a metadata index of the mailbox (no bodies). A full export is only available to Jon in the web app.",
     schema: z.object({}),
     run: (_args: Record<string, never>, ctx: ToolContext) => ctx.mailbox.exportIndex(),
+  },
+  {
+    name: "list_rules",
+    annotations: READ_ONLY,
+    scopes: ["read"],
+    description:
+      "List mail rules, who wrote each one (human or assistant), and the pause and kill switches. Does not change them.",
+    schema: z.object({}),
+    run: (_args: Record<string, never>, ctx: ToolContext) => ctx.mailbox.listRules(),
+  },
+  {
+    name: "upsert_rule",
+    annotations: CHANGES,
+    scopes: ["rules"],
+    description:
+      "Add or replace one assistant rule by id. It takes effect on the next delivery. Match on sender, subject, and the other metadata fields. Actions: label, move to inbox/archive/spam, markRead, or trash. Trash is a soft delete: mail stays in Trash, restorable for the retention window (usually 30 days). " +
+      "why is a short reason, stored in the audit log. Cannot edit Jon's rules, cannot auto-send, and cannot turn a live unsubscribe on. A shadow reply or shadow unsubscribe is saved disabled until Jon enables it.",
+    schema: upsertRuleSchema,
+    run: (args: z.infer<typeof upsertRuleSchema>, ctx: ToolContext) => ctx.mailbox.upsertRule(args.rule, args.why),
+  },
+  {
+    name: "delete_rule",
+    annotations: CHANGES,
+    scopes: ["rules"],
+    description: "Delete one assistant rule. Jon's rules cannot be deleted this way; disable them instead. why is a short reason for the audit log.",
+    schema: ruleIdSchema,
+    run: (args: z.infer<typeof ruleIdSchema>, ctx: ToolContext) => ctx.mailbox.deleteRule(args.ruleId, args.why),
+  },
+  {
+    name: "undo_last_change",
+    annotations: CHANGES,
+    scopes: ["rules"],
+    description:
+      "Undo the latest assistant rule edit (the last upsert or delete). Refuses if that rule has changed since. Does not undo Jon's rules file. why is a short reason for the audit log.",
+    schema: z.object({ why: whySchema }),
+    run: (args: { why: string }, ctx: ToolContext) => ctx.mailbox.undoLastRuleChange(args.why),
   },
 ];
 

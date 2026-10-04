@@ -139,7 +139,7 @@ To reject a draft, delete it in Thunderbird. It is discarded (audited), never se
 
 Agent tokens never send. (A `lojo-bot` credential with `send-approved` can send replies Jon approved in chat, and with `send-new` a new message he granted; see [BOT.md](BOT.md#chat-approved-replies-send-approved). Neither is automatic.) The only automatic sending is a **rule** Jon writes himself, with `mode: "autoSend"` or an unsubscribe in `mode: "auto"`:
 
-- Only Jon's signed-in session can write rules (`npm run rules -- push`, passphrase and a typed `yes`), enable them, or take them live. No token, including `admin`, the bridge, and every agent token, can write rules or turn auto-send on. Agents can only pause rules, engage the kill switches, or disable a rule.
+- Only Jon's signed-in session can write his rules file (`npm run rules -- push`, passphrase and a typed `yes`), enable a send rule, or take it live. A push keeps assistant rules. No token can turn auto-send on. An assistant Jon grants `rules` can create, edit, delete and undo its own filing rules, including trash (soft delete, restorable). Agents can also pause rules, engage the kill switches, or disable a rule. Only Jon can resume or release a kill switch.
 - A rule runs in `shadow` mode first (logs what it would send, sends nothing); a save that goes straight to live is refused.
 - Terraform `auto_send_enabled = true` is also required (default false).
 - Each auto-send rule needs an explicit `allowSenders` list (only those authenticated, DMARC-pass senders get answers), or a fixed template limited to `allowCategories`. Model-written text needs `allowAiText: true` on the rule.

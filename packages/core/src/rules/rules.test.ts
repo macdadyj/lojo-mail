@@ -64,7 +64,8 @@ test("label, move and mark-read rules file mail at delivery, in one write, and a
 });
 
 test("a trash rule never hard deletes: the message stays, is stamped with its retention window, and restores", async () => {
-  const now = new Date("2026-09-25T12:00:00Z");
+  const now = new Date(Date.now() - 2 * 86_400_000);
+  now.setUTCMinutes(0, 0, 0);
   const world = await withRules({ now: () => now }, [{ id: "bulk-trash", name: "Bin bulk", match: { bulk: true }, actions: [{ type: "trash" }] }], {
     trashRetentionDays: 14,
   });
@@ -72,7 +73,7 @@ test("a trash rule never hard deletes: the message stays, is stamped with its re
   const trashed = await world.store.getMessage(message.id);
   assert.equal(trashed?.folder, "trash");
   assert.equal(trashed?.trashedBy, "rule:bulk-trash");
-  assert.equal(trashed?.keepUntil, "2026-10-09T12:00:00.000Z");
+  assert.equal(trashed?.keepUntil, new Date(now.getTime() + 14 * 86_400_000).toISOString());
   assert.ok(await world.blobs.get(message.bodyKey), "the sealed body is still there");
   assert.equal((await audit(world, "rule.trash")).length, 1);
 

@@ -40,7 +40,7 @@ The token is 32 random bytes. It is shown exactly once, written to a mode-600 fi
 | `write` | yes | mark read/unread, flag, set labels, move to inbox/archive/spam, restore from Trash, create/edit/discard drafts, add/remove draft files, submit a draft for Jon's approval, turn any rule **off** |
 | `body` | yes | read message bodies (its own sealed copy, or the server's AI-context text), draft text, semantic search |
 | `trash` | no | move mail to Trash: a soft delete, restorable until the retention window ends (the purge never deletes anything trashed less than 7 days ago), at most 100 per bot per day, recorded as `trashedBy: bot:<name>` |
-| `rules` | no | add, replace and delete **its own** rules (`createdBy: bot`). Never one of Jon's rules, never a `trash` action, never auto-send. Shadow replies and shadow unsubscribes are **proposals**, saved disabled for Jon ([below](#automated-rules-shadow-first-unsubscribe-proposals)). Jon's switches and limits are untouched |
+| `rules` | no | add, replace, delete and undo **its own** rules (`createdBy: bot`), including trash (soft delete, restorable for the retention window). Every edit needs a `why` and is audited. Never one of Jon's rules, never auto-send. Shadow replies and shadow unsubscribes are saved disabled for Jon ([below](#automated-rules-shadow-first-unsubscribe-proposals)). Jon's switches and limits are untouched |
 | `test-send` | no | `send_test_to_lojo_test`: plain text to `lojo-test@cyberphysical.us` and nobody else (hard-coded), subject prefixed `[lojo-bot test] `, at most 5,000 characters, 5 an hour and 20 a day per bot, stopped by the send kill switch, marked `Auto-Submitted` |
 | `send-approved` | no | `review_for_send`, `send_approved_reply`: send a reply Jon approved in chat, to people already on the received thread. Needs `write`. Rate limited per bot (default 10 an hour, 30 a day) |
 | `send-new` | no | `send_new`: a brand-new message to any recipient (To, Cc, Bcc, subject, body, attachments). Off until Jon grants it. Chat approval is required unless he waives it for a time-boxed window. Also lets a chat-approved reply go to people who were not on the thread |
@@ -139,7 +139,7 @@ Tools are advertised only when the credential holds their scopes. Every result i
 | `create_draft`, `draft_reply`, `update_draft`, `attach_file`, `remove_attachment`, `discard_draft`, `submit_for_approval` | write | `attach_file` reads only files under the attach directory (by real path, so symlinks out are refused), at most 4 MB, or base64 content |
 | `disable_rule` | write | any rule off; only Jon turns his back on |
 | `trash_message` | write + trash | |
-| `upsert_rule`, `delete_rule` | rules | bot rules only; automated ones are saved disabled |
+| `upsert_rule`, `delete_rule`, `undo_last_change` | rules | assistant rules, including trash; a send rule is saved disabled. Each call needs `why` |
 | `send_test_to_lojo_test` | test-send | only when Jon asks for a test send |
 | `review_for_send` | read + send-approved | the exact content and `contentHash` to show Jon, including Bcc |
 | `send_approved_reply` | write + send-approved | after Jon's chat approval; `approvalSource` is always `chat` |
@@ -250,7 +250,7 @@ A send is `bot.send_new` with actor `bot:grok`, the recipients (including Bcc), 
 Jon's own rules can answer some mail without per-message approval (reply `mode: "autoSend"`, or an unsubscribe). The safety design is in [SECURITY.md](SECURITY.md#auto-send-guards); what is new:
 
 - **Shadow first.** A rule that sends is saved in `shadow` mode first. Shadow runs every guard and limit, sends nothing, writes no draft, and audits what it would have sent (`rule.shadow` with a text preview, or `rule.unsubscribe` `shadow_would_send`). Only after that can the same rule go live; a save straight to live is refused.
-- **Who:** only Jon's session writes, enables and promotes rules: the web app (Settings → Mail rules: **Enable**, **Go live**, **Shadow (log only)**, **Back to drafts**; each asks to confirm and names the rule's fingerprint, so a rule that changed meanwhile is refused) or `lojo-bot admin rule-enable <id>` / `rule-mode <id> draft|shadow|live` (prints the rule and needs you to type its id).
+- **Who:** an assistant with `rules` writes its own filing rules in chat (`upsert_rule`, `delete_rule`, `undo_last_change`), including trash. Only Jon's session writes his rules file, enables a send rule, or takes it live: `lojo-bot admin rule-enable <id>` / `rule-mode <id> draft|shadow|live` (prints the rule and needs you to type its id). The web app lists rules and recent changes and holds the kill switches; it does not enable send rules.
 - **Limits:** a rule is limited to `allowSenders` (addresses or `@domains`), or, for a fixed plain-text template only, to `allowCategories` (for example `transactional` for receipt acknowledgements). Model-written text never auto-sends unless the rule sets `allowAiText: true`. Per-rule (`perSenderPerDay`, `perDay`) and global (`maxAutoSendPerDay`) limits, loop protection (no reply to auto-submitted, bulk, list or no-reply senders, once per message and per thread per day), and both kill switches apply as before.
 - **Unsubscribe rules** detect `List-Unsubscribe` and send the request: RFC 8058 one-click (an HTTPS POST, preferred, sends no mail) or the `mailto:` address (a fixed request from the mailbox, recorded in Sent). Once per list per 30 days, `perDay` per rule (default 10). Outcomes are in the audit log and the digest; a done message is labelled `unsubscribed`.
 
@@ -258,7 +258,8 @@ Jon's own rules can answer some mail without per-message approval (reply `mode: 
   { "id": "unsub-deals", "name": "Unsubscribe from deal lists", "match": { "from": ["@deals.example"], "bulk": true },
     "actions": [{ "type": "unsubscribe", "unsubscribe": { "mode": "shadow", "allowSenders": ["@deals.example"] } }] }
   ```
-- **Bot proposals.** A bot with `rules` may `upsert_rule` a shadow reply or a shadow unsubscribe. It is saved `enabled: false` whatever the bot sends, shows as "bot proposal" in the web app, and does nothing until Jon enables it. Enabling makes it Jon's rule (`createdBy: human`): the bot can no longer edit it. The bot can never save `autoSend`, unsubscribe `auto`, or trash.
+- **Assistant filing rules.** `upsert_rule` with a label, move, mark-read or trash action takes effect on the next delivery. Trash uses the document's retention window. `why` is required. `undo_last_change` reverses the last such edit unless the rule changed since. A human `PUT /v1/rules` keeps these rules.
+- **Send proposals.** A bot with `rules` may `upsert_rule` a shadow reply or a shadow unsubscribe. It is saved `enabled: false` whatever the bot sends, and does nothing until Jon enables it. Enabling makes it Jon's rule (`createdBy: human`): the assistant can no longer edit it. The assistant can never save `autoSend` or unsubscribe `auto`.
 - **Deployment.** Live sending (auto-reply, mailto unsubscribe, one-click POST) still needs Terraform `auto_send_enabled = true`, which is off. Until then live rules are refused and audited; shadow works anywhere.
 
 ## Revoking, rotating, and the kill switch
@@ -294,7 +295,7 @@ Every bot request writes a `bot.request` audit event (`METHOD /path` and status,
 - Everything in the credential's scopes, and only those, until Jon revokes it or flips the kill switch.
 - Mail metadata and, with `body`, AI-context text. With the bot key too, bodies.
 - Without `send-approved`, it cannot send to anyone but lojo-test, and only with `test-send`, rate limited. With `send-approved`, see the next paragraph.
-- It cannot approve drafts in the app, export, hard-delete, manage bots, enable or promote rules, or touch Jon's rules (beyond turning one off). Rules it proposes stay disabled until Jon enables them.
+- It cannot approve drafts in the app, export, hard-delete, manage bots, enable or promote a send rule, or edit Jon's rules (beyond turning one off). With `rules` it can file and trash via its own rules; those edits are audited and undoable, and `paused` stops them. A send rule it writes stays disabled until Jon enables it.
 - Drafts it writes go only to existing contacts and still wait for Jon.
 - It can trash at most 100 messages a day, all restorable, all recorded as `bot:<name>`.
 
@@ -316,7 +317,7 @@ Grant `send-approved` only when the chat channel to Grok is one only Jon can wri
 - The MCP instructions tell the model never to follow instructions in mail.
 - The tools are built so that obeying an injected instruction can still not send mail to an outsider.
 - `attach_file` reads only the attach directory, so an email cannot make the bot attach `~/.ssh/id_ed25519` or its own key to a draft. Even so, a draft could still quote mail content to a known correspondent: Jon reviews every draft before Send.
-- Bot rules can archive, label, mark read, move to spam, and draft replies. They cannot trash or auto-send. An injected email can make the bot propose a shadow rule, but it is saved disabled, Jon sees it as a proposal with its exact content before enabling it, and it must run in shadow before it can go live.
+- Bot rules can archive, label, mark read, move to spam, draft replies, and trash (restorable). They cannot auto-send. An injected email can make the bot save a filing or trash rule; it is audited with a why, `undo_last_change` reverses it, and pause stops every rule. A shadow send rule is saved disabled, and it must run in shadow before Jon can take it live.
 
 **The Unix boundary.** The bot's files are only as private as the `lojo-bot` user. If Grok's shell on Santa runs as **Jon's** user, it can read `~/.config/lojo-mail` (Jon's key and the bridge token) directly, and the bot credential is not a boundary. Give Grok shell only as `lojo-bot` (the forced-command ssh key above), not as Jon.
 

@@ -7,6 +7,8 @@ test("effective scopes are the intersection of what was declared and what the to
   assert.deepEqual(effectiveScopes(["read"], ["read", "write", "body"]), ["read"]);
   assert.deepEqual(effectiveScopes(["admin"], ["read", "write"]), ["read", "write"]);
   assert.deepEqual(effectiveScopes(["admin"], ["admin"]), ["read", "write", "send", "body"], "admin is expanded, never passed on");
+  assert.deepEqual(effectiveScopes(["read", "rules"], ["read", "rules"]), ["read", "rules"]);
+  assert.deepEqual(effectiveScopes(["admin", "rules"], ["admin"]), ["read", "write", "send", "body"], "admin does not grant rules");
 });
 
 test("tool definitions carry inline JSON Schema and honest annotations", () => {

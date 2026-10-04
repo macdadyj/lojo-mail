@@ -9,7 +9,8 @@ const USAGE = `Usage:
   npm run rules -- push <file> --api https://mail.example/api (asks for your passphrase)
 
 Rules are saved only with a signed-in human session: push signs in with your
-passphrase, shows what the file turns on, and asks you to confirm.`;
+passphrase, shows what the file turns on, and asks you to confirm. A push
+replaces your rules and keeps rules an assistant wrote.`;
 
 function flag(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);

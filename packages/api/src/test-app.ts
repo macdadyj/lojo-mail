@@ -22,6 +22,7 @@ export async function testApp(opts: WorldOptions & { dev?: boolean; now?: () => 
   tokens.add("bridge-token", { label: BRIDGE_LABEL, scopes: bridgeScopes({ trash: opts.bridgeTrash ?? false, send: opts.bridgeSend ?? false }) });
   tokens.add("agent-token", { label: "agent:grok", scopes: ["read", "write", "body"] });
   tokens.add("agent-trash-token", { label: "agent:cursor", scopes: ["read", "write", "body", "trash"] });
+  tokens.add("agent-rules-token", { label: "agent:mail", scopes: ["read", "write", "rules"] });
   const sessions = new Sessions({
     secret: randomBytes(32),
     passphraseHash: cachedHash,
