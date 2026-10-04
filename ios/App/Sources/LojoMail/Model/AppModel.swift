@@ -67,6 +67,8 @@ final class AppModel {
     var notificationsEnabled: Bool { didSet { UserDefaults.standard.set(notificationsEnabled, forKey: "notificationsEnabled") } }
     var notificationSubjects: Bool { didSet { UserDefaults.standard.set(notificationSubjects, forKey: "notificationSubjects") } }
     var appLockEnabled: Bool { didSet { UserDefaults.standard.set(appLockEnabled, forKey: "appLockEnabled") } }
+    /// Senders whose links open on a tap (when the sender also passed DMARC). Same default list as the web app.
+    var trustedLinkDomains: [String] { didSet { UserDefaults.standard.set(trustedLinkDomains, forKey: "trustedLinkDomains") } }
 
     let launch = LaunchOptions.current
     let notificationRouter = NotificationRouter()
@@ -82,6 +84,7 @@ final class AppModel {
         notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
         notificationSubjects = defaults.bool(forKey: "notificationSubjects")
         appLockEnabled = defaults.bool(forKey: "appLockEnabled")
+        trustedLinkDomains = (defaults.stringArray(forKey: "trustedLinkDomains") ?? MessageLinks.defaultTrustedDomains).compactMap(MessageLinks.normalizeDomain)
         apiBase = defaults.string(forKey: "apiBase").flatMap(APIClient.validatedBaseURL) ?? APIClient.defaultBaseURL
         lastBackgroundCheck = defaults.object(forKey: "lastBackgroundCheck") as? Date
         for folder in Folder.allCases {
@@ -422,6 +425,16 @@ final class AppModel {
         if !body.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return body.text }
         if let html = body.html, !html.isEmpty { return MailText.plainText(fromHTML: html) }
         return ""
+    }
+
+    /// Text and links of an opened message, as the web app's reader draws them (HTML preferred, nothing remote loaded).
+    func bodyParts(_ message: Message) -> [MessagePart]? {
+        guard case .opened(let body) = bodies[message.id] else { return nil }
+        return MessageLinks.messageParts(text: body.text, html: body.html)
+    }
+
+    func linksOpenDirectly(_ message: Message) -> Bool {
+        MessageLinks.linksOpenDirectly(message, trusted: trustedLinkDomains)
     }
 
     /// Decrypts an attachment on the phone and writes it to a temporary, file-protected location for Quick Look.

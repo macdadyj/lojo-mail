@@ -199,15 +199,65 @@ extension Date {
 }
 
 /// Plain text with links made tappable. No HTML, no remote content.
-func linkified(_ text: String) -> AttributedString {
+func linkified(_ text: String, schemes: Set<String> = ["http", "https", "mailto"]) -> AttributedString {
     var attributed = AttributedString(text)
     guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return attributed }
     let ns = text as NSString
     for match in detector.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
-        guard let url = match.url, let scheme = url.scheme?.lowercased(), ["http", "https", "mailto"].contains(scheme),
+        guard let url = match.url, let scheme = url.scheme?.lowercased(), schemes.contains(scheme),
               let range = Range(match.range, in: text), let lower = AttributedString.Index(range.lowerBound, within: attributed),
               let upper = AttributedString.Index(range.upperBound, within: attributed) else { continue }
         attributed[lower..<upper].link = url
     }
     return attributed
+}
+
+/// A link in a message that waits for a confirmation. Carried through `Text` as a private-scheme URL so the
+/// `openURL` handler can tell it from a link that opens directly.
+struct GuardedLink: Identifiable {
+    static let scheme = "lojo-confirm"
+
+    let url: URL
+    var id: String { url.absoluteString }
+    var domain: String { url.host ?? url.absoluteString }
+
+    init?(url: URL) {
+        guard let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" else { return nil }
+        self.url = url
+    }
+
+    init?(marker: URL) {
+        guard marker.scheme == Self.scheme,
+              let target = URLComponents(url: marker, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "u" })?.value,
+              let url = URL(string: target) else { return nil }
+        self.init(url: url)
+    }
+
+    var marker: URL? {
+        var components = URLComponents()
+        components.scheme = Self.scheme
+        components.host = "open"
+        components.queryItems = [URLQueryItem(name: "u", value: url.absoluteString)]
+        return components.url
+    }
+}
+
+/// Message text with its links. Links from a verified, trusted sender open on tap; every other http(s) link asks first.
+/// A button-style link (short text, no URL in it) is bold so it reads as the action in the mail.
+func messageAttributedString(_ parts: [MessagePart], direct: Bool) -> AttributedString {
+    var result = AttributedString()
+    for part in parts {
+        switch part {
+        case .text(let text):
+            result += linkified(text, schemes: ["mailto"])
+        case .link(let link):
+            var run = AttributedString(link.text)
+            if let url = URL(string: link.href) {
+                run.link = direct ? url : (GuardedLink(url: url)?.marker ?? nil)
+            }
+            if link.button { run.inlinePresentationIntent = .stronglyEmphasized }
+            result += run
+        }
+    }
+    return result
 }

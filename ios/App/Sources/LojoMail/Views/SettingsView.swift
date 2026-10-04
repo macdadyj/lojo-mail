@@ -10,6 +10,8 @@ struct SettingsView: View {
     @State private var notificationStatus = "Checking…"
     @State private var apiText = ""
     @State private var apiError: String?
+    @State private var trustedText = ""
+    @State private var trustedError: String?
 
     var body: some View {
         @Bindable var model = model
@@ -97,6 +99,27 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    TextEditor(text: $trustedText)
+                        .font(.footnote.monospaced())
+                        .frame(minHeight: 96)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityLabel("Trusted link domains")
+                    if trustedText != model.trustedLinkDomains.joined(separator: "\n") {
+                        Button("Save domains") { saveTrusted() }
+                    }
+                    Button("Use the built-in list") {
+                        trustedText = MessageLinks.defaultTrustedDomains.joined(separator: "\n")
+                        saveTrusted()
+                    }
+                    if let trustedError { Text(trustedError).font(.footnote).foregroundStyle(.red) }
+                } header: {
+                    Text("Links")
+                } footer: {
+                    Text("A message from one of these domains, or a subdomain, opens its links when you tap them, if the sender passed DMARC and wasn't marked spam or virus. Every other link asks first. Remote images are never loaded. Same list as the web app, kept on this iPhone.")
+                }
+
+                Section {
                     TextField("API URL", text: $apiText)
                         .font(.footnote.monospaced())
                         .textInputAutocapitalization(.never)
@@ -148,6 +171,7 @@ struct SettingsView: View {
             }
             .task {
                 apiText = model.apiBase.absoluteString
+                trustedText = model.trustedLinkDomains.joined(separator: "\n")
                 await refreshNotificationStatus()
                 await model.refreshSettings()
             }
@@ -172,6 +196,17 @@ struct SettingsView: View {
         case .ephemeral: "Temporary"
         @unknown default: "Unknown"
         }
+    }
+
+    private func saveTrusted() {
+        let parsed = MessageLinks.parseTrustedDomainList(trustedText)
+        if let error = parsed.error {
+            trustedError = error
+            return
+        }
+        trustedError = nil
+        model.trustedLinkDomains = parsed.domains
+        trustedText = parsed.domains.joined(separator: "\n")
     }
 
     private func applyAPI() {

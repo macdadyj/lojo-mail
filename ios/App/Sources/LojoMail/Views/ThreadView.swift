@@ -1,6 +1,7 @@
 import LojoMailCore
 import QuickLook
 import SwiftUI
+import UIKit
 
 struct ThreadView: View {
     @Environment(AppModel.self) private var model
@@ -92,6 +93,8 @@ struct ThreadView: View {
                         message: message,
                         bodyState: model.bodies[message.id],
                         text: model.bodyText(message),
+                        parts: model.bodyParts(message),
+                        linksOpenDirectly: model.linksOpenDirectly(message),
                         expanded: expanded.contains(message.id) || message.id == latest?.id,
                         opening: opening,
                         onToggle: { toggle(message) },
@@ -301,11 +304,15 @@ struct MessageCard: View {
     var message: Message
     var bodyState: BodyState?
     var text: String?
+    var parts: [MessagePart]?
+    var linksOpenDirectly: Bool
     var expanded: Bool
     var opening: String?
     var onToggle: () -> Void
     var onUnlock: () -> Void
     var onAttachment: (AttachmentMeta, AttachmentAction) -> Void
+
+    @State private var pendingLink: GuardedLink?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -323,6 +330,28 @@ struct MessageCard: View {
         .padding(14)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.primary.opacity(0.06)))
+        .environment(\.openURL, OpenURLAction { url in
+            if let guarded = GuardedLink(marker: url) {
+                pendingLink = guarded
+                return .handled
+            }
+            if let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" {
+                UIApplication.shared.open(url)
+                return .handled
+            }
+            return .systemAction
+        })
+        .confirmationDialog(
+            pendingLink?.domain ?? "Open link?",
+            isPresented: Binding(get: { pendingLink != nil }, set: { if !$0 { pendingLink = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingLink
+        ) { link in
+            Button("Open in Safari") { UIApplication.shared.open(link.url) }
+            Button("Cancel", role: .cancel) {}
+        } message: { link in
+            Text("\(link.url.absoluteString)\n\nThis sender isn't on your trusted list, or its sender checks didn't pass. Nothing is loaded until you open it.")
+        }
     }
 
     private var header: some View {
@@ -374,7 +403,12 @@ struct MessageCard: View {
     private var bodyView: some View {
         switch bodyState {
         case .opened:
-            if let text, !text.isEmpty {
+            if let parts, !parts.isEmpty {
+                Text(messageAttributedString(parts, direct: linksOpenDirectly))
+                    .font(.body)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if let text, !text.isEmpty {
                 Text(linkified(text))
                     .font(.body)
                     .textSelection(.enabled)
