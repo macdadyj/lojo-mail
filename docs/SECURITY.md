@@ -89,6 +89,10 @@ With 150 bits, the wrapped key alone is safe to store anywhere; scrypt only adds
 - **Lock:** manual (rail button), idle (5, 15, 60 or 240 minutes; default 15), a 12-hour hard cap from unlock, and sign-out. Timers are re-checked on every interaction and when the tab becomes visible, since browsers throttle timers in background tabs. Locking drops the `CryptoKey` and purges decrypted messages from the page.
 - **What this does not stop:** script running in the page while unlocked (an XSS, a malicious extension) can use the key to open mail, though it cannot export it. The CSP and the no-third-party-scripts rule are the defense. A compromised device can capture the key passphrase as it is typed.
 
+### Links in the reader
+
+The reader does not render a message's HTML. Tags are walked for text and for `<a href>`; `<img>`, style, and script are dropped, so a remote image is never requested by opening the mail. A link becomes a normal button or anchor only when two checks pass: SES recorded `dmarc=pass` (and neither spam nor virus is `FAIL`), and the sender's domain is on the trusted list. The built-in list is `apple.com`, `email.apple.com`, `testflight.apple.com`, and `github.com`. Settings stores edits to that list in this browser only. Any other sender's link is plain until a long-press, then an Open link step that names the destination host and waits for a second tap. `http` and `https` with a public hostname are the only schemes; credentials, IP addresses, and `localhost` are not links. A tracking redirect is replaced with the inner URL only when that URL is already written in the query or path (Outlook Safe Links, Google `/url`, Proofpoint urldefense, Amazon SES `awstrack.me`, Apple click hosts, and `href.li`). Opaque shorteners such as `t.co` are left as they are, because unwrapping them would mean fetching them. Nothing is fetched to resolve a redirect.
+
 ### Envelope (`lojo-env-v2`)
 
 1. Generate an ephemeral P-256 key.

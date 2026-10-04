@@ -201,6 +201,7 @@ export async function openMessage(message: Message): Promise<Message> {
     ...message,
     locked: false,
     text: body.text,
+    html: body.html,
     summary: body.ai?.summary,
     threadSummary: body.ai?.threadSummary,
     actionItems: body.ai?.actionItems,
