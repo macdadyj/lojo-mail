@@ -132,13 +132,50 @@ ul.rules li .chip { overflow-wrap: anywhere; }
   padding-bottom: 16px;
   border-bottom: 1px solid var(--line);
 }
-.message pre {
+.mail-body {
   white-space: pre-wrap;
   font-family: "Iowan Old Style", Palatino, Georgia, serif;
   font-size: 17px;
   line-height: 1.45;
   margin: 10px 0 0;
 }
+a.mail-link, button.mail-link {
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+  white-space: normal;
+}
+a.mail-button, button.mail-button {
+  display: inline-block;
+  margin: 8px 0;
+  border-radius: 999px;
+  padding: 8px 14px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: white;
+  text-decoration: none;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 15px;
+  white-space: normal;
+}
+.guarded-link { white-space: normal; }
+.link-pop {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  white-space: normal;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 14px;
+}
+.link-pop .muted { word-break: break-all; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 0 22px; }
 .actions.flush { padding: 16px 0; }
 button.primary, button.ghost, a.button {

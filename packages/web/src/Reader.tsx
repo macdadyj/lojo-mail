@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./api.ts";
+import { MessageBody } from "./MessageBody.tsx";
 import { person, when, type ActionItem, type AttachmentMeta, type Message } from "./types.ts";
 import { downloadAttachment, onKeyChange, openMessage } from "./unlock.ts";
 
@@ -126,11 +127,11 @@ export function Reader({ threadId, onChanged }: { threadId: string; onChanged: (
           <strong>{person(message.from)}</strong>
           <div className="muted">{when(message.date)} · {message.from.email}</div>
           {message.pgpEncrypted ? <div className="chip">OpenPGP</div> : null}
-          <pre>
-            {message.locked
-              ? "Locked. Unlock the envelope key in Settings, or with Unlock in the menu, to read this message in this browser."
-              : message.text}
-          </pre>
+          {message.locked ? (
+            <p className="mail-body">Locked. Unlock the envelope key in Settings, or with Unlock in the menu, to read this message in this browser.</p>
+          ) : (
+            <MessageBody message={message} />
+          )}
           {message.attachments.length > 0 ? (
             <ul className="attachments">
               {message.attachments.map((attachment) => (

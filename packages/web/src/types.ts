@@ -54,6 +54,8 @@ export interface Message {
   ai: AiPublic | null;
   locked: boolean;
   text?: string;
+  /** Original HTML, when the body is open. The reader extracts links from it and does not render it. */
+  html?: string;
   summary?: string;
   threadSummary?: string;
   actionItems?: ActionItem[];

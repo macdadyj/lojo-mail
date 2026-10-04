@@ -36,6 +36,8 @@ const SEED: Array<[string, MessageOrigin]> = [
   ["phish.eml", "inbound"],
   ["attachment.eml", "inbound"],
   ["html-only.eml", "inbound"],
+  ["testflight.eml", "inbound"],
+  ["link-other.eml", "inbound"],
 ];
 
 export async function seedDemo(deps: IngestDeps): Promise<void> {
