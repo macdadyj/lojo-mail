@@ -175,14 +175,14 @@ test("sorting ops, scope checks, bot rules and the lojo-test send", async () => 
   await runOp("restore_message", { messageId: message.id }, ctx);
   assert.equal((await app.mailbox.getMessage(message.id)).folder, "inbox");
 
-  await runOp("upsert_rule", { rule: { id: "news", name: "News", match: { bulk: true }, actions: [{ type: "move", folder: "archive" }] } }, ctx);
+  await runOp("upsert_rule", { why: "file newsletters", rule: { id: "news", name: "News", match: { bulk: true }, actions: [{ type: "move", folder: "archive" }] } }, ctx);
   const listed = (await runOp("list_rules", {}, ctx)) as { rules: { rules: Array<{ id: string; createdBy?: string }> } };
   assert.equal(listed.rules.rules.find((rule) => rule.id === "news")?.createdBy, "bot");
   await assert.rejects(
-    runOp("upsert_rule", { rule: { id: "bin", name: "Bin", match: { bulk: true }, actions: [{ type: "move", folder: "trash" }] } }, ctx),
+    runOp("upsert_rule", { why: "bin bulk", rule: { id: "bin", name: "Bin", match: { bulk: true }, actions: [{ type: "move", folder: "trash" }] } }, ctx),
     /403|400/,
   );
-  await runOp("delete_rule", { ruleId: "news" }, ctx);
+  await runOp("delete_rule", { ruleId: "news", why: "not needed" }, ctx);
 
   const sent = (await runOp("send_test_to_lojo_test", { subject: "ping", text: "hello", to: ["jon@elsewhere.example"] }, ctx)) as { to: string };
   assert.equal(sent.to, LOJO_TEST_RECIPIENT);
@@ -260,7 +260,7 @@ test("the MCP server advertises only the tools the credential may call, results 
 
 test("every op name required by the plan exists", () => {
   const names = ops.map((item) => item.name);
-  for (const required of ["list_inbox", "read_message", "search", "digest", "draft_reply", "create_draft", "attach_file", "list_drafts", "discard_draft", "move_message", "trash_message", "list_rules", "upsert_rule", "delete_rule", "health", "audit_log", "settings", "send_test_to_lojo_test", "send_new"]) {
+  for (const required of ["list_inbox", "read_message", "search", "digest", "draft_reply", "create_draft", "attach_file", "list_drafts", "discard_draft", "move_message", "trash_message", "list_rules", "upsert_rule", "delete_rule", "undo_last_change", "health", "audit_log", "settings", "send_test_to_lojo_test", "send_new"]) {
     assert.ok(names.includes(required), required);
   }
   assert.equal(
@@ -340,7 +340,7 @@ test("admin send-limits, and rule-enable / rule-mode only after Jon types the ru
   await assert.rejects(admin(app, "send-limits", ["grok"], { "per-hour": "2" }), /--per-day/);
 
   const proposal = { id: "ack", name: "Ack", enabled: true, match: { from: ["mina@example.com"] }, actions: [{ type: "reply", reply: { mode: "shadow", template: "Got it.", allowSenders: ["mina@example.com"] } }] };
-  await runOp("upsert_rule", { rule: proposal }, ctx);
+  await runOp("upsert_rule", { why: "shadow a receipt reply", rule: proposal }, ctx);
   const rule = async () => ((await app.mailbox.getRules()).rules.find((item) => item.id === "ack"));
   assert.equal((await rule())?.enabled, false);
 

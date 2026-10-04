@@ -167,14 +167,14 @@ export function registerBotRoutes(app: Hono<Env>, deps: BotRouteDeps): void {
     return c.json({ id: c.req.param("id"), ...(await readBotCopy(mailbox.store, mailbox.blobs, c.req.param("id"))) });
   });
   app.put("/v1/rules/bot-rules/:id", need("rules"), async (c) => {
-    requireBot(c);
     const input = await body<Record<string, unknown>>(c);
     if (input.id !== undefined && input.id !== c.req.param("id")) throw new MailError("The rule id in the body must match the path", "invalid");
-    return c.json({ rules: await mailbox.putBotRule({ ...input, id: c.req.param("id") }) });
+    const { why, ...rule } = input;
+    return c.json({ rules: await mailbox.putBotRule({ ...rule, id: c.req.param("id") }, why) });
   });
   app.post("/v1/rules/bot-rules/:id/delete", need("rules"), async (c) => {
-    requireBot(c);
-    return c.json({ rules: await mailbox.deleteBotRule(c.req.param("id")) });
+    const input = await body<{ why: string }>(c);
+    return c.json({ rules: await mailbox.deleteBotRule(c.req.param("id"), input.why) });
   });
   app.post("/v1/bots/:name/send-limits", need("human"), async (c) => c.json(await admin.setSendLimits(c.req.param("name"), await body<unknown>(c))));
   app.post("/v1/bots/:name/send-window", need("human"), async (c) => c.json(await admin.setSendWindow(c.req.param("name"), await body<unknown>(c))));

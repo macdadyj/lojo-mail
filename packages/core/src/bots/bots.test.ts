@@ -143,42 +143,78 @@ test("backfill: Jon re-seals older mail for the current key", async () => {
   assert.deepEqual((await botBackfillCandidates(w.store, 10)).messageIds, []);
 });
 
-test("bot rules: add, edit and delete their own; never Jon's, never auto-send or trash", async () => {
+test("bot rules: add, edit, trash and delete their own; never Jon's, never auto-send", async () => {
   const w = await memoryWorld();
   await w.mailbox.putRules(
     { rules: [{ id: "jon-receipts", name: "Receipts", match: { from: ["@shop.example"] }, actions: [{ type: "label", labels: ["receipts"] }] }] },
     "human",
   );
-  const doc = await w.mailbox.putBotRule({ id: "news", name: "Newsletters", match: { bulk: true }, actions: [{ type: "move", folder: "archive" }] });
+  const doc = await w.mailbox.putBotRule({ id: "news", name: "Newsletters", match: { bulk: true }, actions: [{ type: "move", folder: "archive" }] }, "file newsletters");
   assert.equal(doc.rules.find((rule) => rule.id === "news")?.createdBy, "bot");
   assert.equal(doc.rules.find((rule) => rule.id === "jon-receipts")?.createdBy, "human");
 
-  await w.mailbox.putBotRule({ id: "news", name: "Newsletters", match: { bulk: true }, actions: [{ type: "label", labels: ["news"] }] });
+  await w.mailbox.putBotRule({ id: "news", name: "Newsletters", match: { bulk: true }, actions: [{ type: "label", labels: ["news"] }] }, "label instead");
   const saved = await loadRules(w.blobs, w.keys);
   assert.deepEqual(saved?.rules.find((rule) => rule.id === "news")?.actions, [{ type: "label", labels: ["news"] }]);
 
-  await assert.rejects(w.mailbox.putBotRule({ id: "jon-receipts", name: "x", match: { bulk: true }, actions: [{ type: "markRead" }] }), /is Jon's/);
-  await assert.rejects(w.mailbox.deleteBotRule("jon-receipts"), /is Jon's/);
-  await assert.rejects(w.mailbox.putBotRule({ id: "bin", name: "Bin", match: { bulk: true }, actions: [{ type: "trash" }] }), /cannot move mail to Trash/);
+  const trashed = await w.mailbox.putBotRule({ id: "bin", name: "Bin", match: { bulk: true }, actions: [{ type: "trash" }] }, "bulk mail to trash");
+  assert.equal(trashed.rules.find((rule) => rule.id === "bin")?.actions[0]?.type, "trash");
+  assert.equal(trashed.trashRetentionDays, 30);
+
+  await assert.rejects(w.mailbox.putBotRule({ id: "jon-receipts", name: "x", match: { bulk: true }, actions: [{ type: "markRead" }] }, "nope"), /is Jon's/);
+  await assert.rejects(w.mailbox.deleteBotRule("jon-receipts", "nope"), /is Jon's/);
   await assert.rejects(
-    w.mailbox.putBotRule({
-      id: "auto",
-      name: "Auto",
-      match: { from: ["a@b.example"] },
-      actions: [{ type: "reply", reply: { mode: "autoSend", template: "hi", allowSenders: ["a@b.example"] } }],
-    }),
+    w.mailbox.putBotRule(
+      {
+        id: "auto",
+        name: "Auto",
+        match: { from: ["a@b.example"] },
+        actions: [{ type: "reply", reply: { mode: "autoSend", template: "hi", allowSenders: ["a@b.example"] } }],
+      },
+      "send it",
+    ),
     /cannot auto-send/,
   );
-  await assert.rejects(w.mailbox.putBotRule({ id: "x", name: "x", match: {}, actions: [{ type: "markRead" }] }), MailError);
+  await assert.rejects(w.mailbox.putBotRule({ id: "x", name: "x", match: {}, actions: [{ type: "markRead" }] }, "bad"), MailError);
+  await assert.rejects(w.mailbox.putBotRule({ id: "news", name: "Newsletters", match: { bulk: true }, actions: [{ type: "markRead" }] }, "  "), /why/);
 
-  const after = await w.mailbox.deleteBotRule("news");
-  assert.deepEqual(after.rules.map((rule) => rule.id), ["jon-receipts"]);
+  const after = await w.mailbox.deleteBotRule("news", "label was wrong");
+  assert.deepEqual(after.rules.map((rule) => rule.id), ["jon-receipts", "bin"]);
+  const undone = await w.mailbox.undoLastRuleChange("put the label rule back");
+  assert.ok(undone.rules.some((rule) => rule.id === "news"));
+  const events = (await w.store.listAudit(20)).filter((event) => event.action.startsWith("rules.bot") || event.action === "rules.undone");
+  assert.ok(events.some((event) => event.detail?.includes("why:file newsletters")));
+  assert.ok(events.some((event) => event.detail?.includes("why:put the label rule back")));
+});
+
+test("a human rules file keeps assistant rules and drops omitted human rules", async () => {
+  const w = await memoryWorld();
+  await w.mailbox.putRules(
+    {
+      rules: [
+        { id: "keep", name: "Keep", match: { from: ["@shop.example"] }, actions: [{ type: "label", labels: ["receipts"] }] },
+        { id: "drop", name: "Drop", match: { from: ["@old.example"] }, actions: [{ type: "markRead" }] },
+      ],
+    },
+    "human",
+  );
+  await w.mailbox.putBotRule({ id: "news", name: "News", match: { bulk: true }, actions: [{ type: "trash" }] }, "bulk to trash");
+  const pushed = await w.mailbox.putRules(
+    { paused: true, rules: [{ id: "keep", name: "Keep", match: { from: ["@shop.example"] }, actions: [{ type: "label", labels: ["home"] }] }, { id: "news", name: "Stolen", match: { bulk: true }, actions: [{ type: "markRead" }] }] },
+    "human",
+  );
+  const news = pushed.rules.find((rule) => rule.id === "news");
+  assert.equal(news?.createdBy, "bot");
+  assert.equal(news?.actions[0]?.type, "trash", "the file cannot overwrite an assistant rule");
+  assert.equal(pushed.rules.find((rule) => rule.id === "keep")?.createdBy, "human");
+  assert.equal(pushed.rules.some((rule) => rule.id === "drop"), false);
+  assert.equal(pushed.paused, true);
 });
 
 test("a bot rule cannot touch the switches or limits", async () => {
   const w = await memoryWorld();
   await w.mailbox.setRuleSwitches({ killSwitch: true, sendKillSwitch: true }, "agent");
-  const doc = await w.mailbox.putBotRule({ id: "n", name: "n", match: { bulk: true }, actions: [{ type: "markRead" }] });
+  const doc = await w.mailbox.putBotRule({ id: "n", name: "n", match: { bulk: true }, actions: [{ type: "markRead" }] }, "mark newsletters read");
   assert.equal(doc.killSwitch, true);
   assert.equal(doc.sendKillSwitch, true);
 });

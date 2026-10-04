@@ -70,7 +70,11 @@ export type RuleAction =
   | { type: "reply"; reply: ReplyAction }
   | { type: "unsubscribe"; unsubscribe: UnsubscribeAction };
 
-/** `bot`: written through a bot credential's `rules` scope (bot-rules.ts). Never auto-sends, never trashes. */
+/**
+ * `bot`: written by an assistant token (a bot credential or an agent token with
+ * `rules`). Filing rules, including trash, take effect immediately. Auto-send
+ * stays human-only. `human`: Jon's session or rules file.
+ */
 export type RuleAuthor = "human" | "token" | "bot";
 
 export interface Rule {

@@ -29,7 +29,7 @@ export { cosineInt8, packVector, rankVectors, unpackVector, vectorTag } from "./
 export type { VectorRow } from "./ai/vectors.ts";
 export type { Embedder, EmbedPurpose, LlmClient, LlmCompletion, LlmEmbedding, LlmRequest, ProviderSecrets } from "./ai/types.ts";
 export { APPROVAL_TTL_MS, approvalContentHash, hashApprovalToken, newApprovalToken, sameHash } from "./approval.ts";
-export { FsBlobStore, MemoryBlobStore, RULES_KEY, aiContextKey, attachmentKey, bodyKey, botCopyKey, draftAttachmentKey } from "./blob/store.ts";
+export { FsBlobStore, MemoryBlobStore, RULES_HISTORY_KEY, RULES_KEY, aiContextKey, attachmentKey, bodyKey, botCopyKey, draftAttachmentKey } from "./blob/store.ts";
 export { BotAdmin, botScopes } from "./bots/admin.ts";
 export {
   applySendGrantExpiry,
@@ -122,12 +122,14 @@ export type { PgpSigningKey } from "./openpgp/mail.ts";
 export { wkdAdvancedUrl, wkdLocalPartHash, zBase32Encode } from "./openpgp/wkd.ts";
 export { AUTO_REPLY_FOOTER, autoSendRefusals, rateLimitRefusals, renderTemplate, replyBlockers, replyTextRefusals } from "./rules/autosend.ts";
 export type { AutoSendContext, LoopHeaders } from "./rules/autosend.ts";
-export { deleteBotRule, isProposal, upsertBotRule } from "./rules/bot-rules.ts";
+export { deleteBotRule, isProposal, preserveBotRules, upsertBotRule } from "./rules/bot-rules.ts";
+export { emptyRuleHistory, pushRevision, ruleWhy, undoRevision } from "./rules/history.ts";
+export type { RuleHistory, RuleRevision } from "./rules/history.ts";
 export { enableRule, isAutomationMode, ruleFingerprints, setAutomationMode } from "./rules/promote.ts";
 export type { AutomationMode } from "./rules/promote.ts";
 export { fetchOneClick, parseListUnsubscribe, parseMailto, runUnsubscribe, safeOneClickUrl } from "./rules/unsubscribe.ts";
 export type { OneClickClient, UnsubscribeResult, UnsubscribeTarget } from "./rules/unsubscribe.ts";
-export { dryRunRules, fileByRules, loadRules, rulesRuntime, runRuleReply, saveRules } from "./rules/engine.ts";
+export { dryRunRules, fileByRules, loadRuleHistory, loadRules, rulesRuntime, runRuleReply, saveRuleHistory, saveRules } from "./rules/engine.ts";
 export type { DryRun, ReplyResult, RulesRuntime } from "./rules/engine.ts";
 export { evaluateRules, ruleMatches, senderMatches } from "./rules/match.ts";
 export { RULE_FOLDERS } from "./rules/types.ts";

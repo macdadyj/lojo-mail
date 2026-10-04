@@ -3,20 +3,20 @@ import type { Rule, RulesDocument } from "./types.ts";
 import { automationModes, parseRulesDocument } from "./validate.ts";
 
 /**
- * Bots sort mail with rules of their own. They can add, edit and delete only
- * rules a bot wrote; Jon's rules are read-only to them apart from disabling.
- * A bot rule can label, move, mark read, or reply as a draft for Jon to approve,
- * never auto-send and never trash. It may also propose an automated rule (a
- * shadow auto-reply or unsubscribe): that is always saved disabled, and only
- * Jon's session can enable it or make it live (POST /v1/rules/:id/enable, /automation).
- * The document's switches and limits are untouched.
+ * Assistants sort mail with rules of their own. A bot credential or an agent
+ * token with `rules` can add, edit and delete only rules an assistant wrote
+ * (`createdBy: bot`); Jon's rules stay read-only apart from disabling.
+ * Filing actions, including trash, take effect immediately. Trash is the
+ * engine's soft delete: the message stays restorable for `trashRetentionDays`.
+ * Auto-send and live unsubscribe are refused. A shadow reply or shadow
+ * unsubscribe is saved disabled, and only Jon's session can enable it or make
+ * it live. The document's switches and limits are untouched.
  */
 function refusals(rule: Rule): string[] {
   const out: string[] = [];
   for (const action of rule.actions) {
-    if (action.type === "trash") out.push("bot rules cannot move mail to Trash; use the trash tool, which is capped per day");
-    if (action.type === "reply" && action.reply.mode === "autoSend") out.push("bot rules cannot auto-send; propose it with mode shadow and Jon makes it live");
-    if (action.type === "unsubscribe" && action.unsubscribe.mode === "auto") out.push("bot rules cannot unsubscribe by themselves; propose it with mode shadow and Jon makes it live");
+    if (action.type === "reply" && action.reply.mode === "autoSend") out.push("assistant rules cannot auto-send; use mode shadow and Jon makes it live");
+    if (action.type === "unsubscribe" && action.unsubscribe.mode === "auto") out.push("assistant rules cannot unsubscribe by themselves; use mode shadow and Jon makes it live");
   }
   return out;
 }
@@ -29,8 +29,33 @@ export function isProposal(rule: Rule): boolean {
 function ownedByBot(previous: RulesDocument, ruleId: string): void {
   const prior = previous.rules.find((rule) => rule.id === ruleId);
   if (prior && prior.createdBy !== "bot") {
-    throw new MailError(`Rule ${ruleId} is Jon's. Bots can only disable it (POST /v1/rules/${ruleId}/disable).`, "forbidden");
+    throw new MailError(`Rule ${ruleId} is Jon's. Assistants can only disable it (POST /v1/rules/${ruleId}/disable).`, "forbidden");
   }
+}
+
+/**
+ * A human rules file is the source of truth for Jon's rules only. Assistant
+ * rules (`createdBy: bot`) are kept, in their previous order, after the file's
+ * rules. An id in the file that an assistant already owns is ignored, so a
+ * push cannot overwrite or delete those rules.
+ */
+export function preserveBotRules(previous: RulesDocument | null, input: unknown): unknown {
+  if (!previous || !input || typeof input !== "object" || Array.isArray(input)) return input;
+  const body = input as Record<string, unknown>;
+  if (!Array.isArray(body.rules)) return input;
+  const botOwned = previous.rules.filter((rule) => rule.createdBy === "bot");
+  if (botOwned.length === 0) return input;
+  const ids = new Set(botOwned.map((rule) => rule.id));
+  const human = body.rules.filter((rule) => {
+    if (!rule || typeof rule !== "object") return true;
+    const id = (rule as { id?: unknown }).id;
+    return typeof id !== "string" || !ids.has(id);
+  });
+  const kept = botOwned.map((rule) => {
+    const { createdBy: _createdBy, updatedAt: _updatedAt, ...rest } = rule;
+    return rest;
+  });
+  return { ...body, rules: [...human, ...kept] };
 }
 
 /** Adds or replaces one rule by id. Returns the new document; the caller saves it. */

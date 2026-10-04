@@ -111,10 +111,13 @@ test("client-send comes only from LOJO_BRIDGE_SEND=on, on the bridge token; neve
   assert.ok(!book.principal(`Bearer ${"s".repeat(40)}`)?.scopes.includes("client-send"));
 });
 
-test("agent tokens may hold trash (Jon opts in per agent) and are labelled per agent", () => {
+test("agent tokens may hold trash and rules (Jon opts in per agent) and are labelled per agent", () => {
   const [agent] = parseAgentTokens(JSON.stringify([{ label: "cursor", token: "c".repeat(40), scopes: ["read", "write", "body", "trash"] }]), true);
   assert.deepEqual(agent?.scopes, ["read", "write", "body", "trash"]);
   assert.equal(agent?.label, "agent:cursor");
+  const [mail] = parseAgentTokens(JSON.stringify([{ label: "mail", token: "m".repeat(40), scopes: ["read", "rules"] }]), true);
+  assert.deepEqual(mail?.scopes, ["read", "rules"]);
+  assert.equal(hasScope(["admin"], "rules"), false, "admin does not imply rules");
 });
 
 test("the bridge with the trash scope soft-deletes: Trash with a retention window, audited, restorable", async () => {

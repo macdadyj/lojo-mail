@@ -119,4 +119,21 @@ export class HttpMailClient implements MailClient {
   exportIndex(): Promise<unknown> {
     return this.request("GET", "/v1/export/index");
   }
+
+  listRules(): Promise<unknown> {
+    return this.request("GET", "/v1/rules");
+  }
+
+  upsertRule(rule: Record<string, unknown>, why: string): Promise<unknown> {
+    const id = typeof rule.id === "string" ? rule.id : "";
+    return this.request("PUT", `/v1/rules/bot-rules/${this.id(id)}`, { ...rule, why });
+  }
+
+  deleteRule(ruleId: string, why: string): Promise<unknown> {
+    return this.request("POST", `/v1/rules/bot-rules/${this.id(ruleId)}/delete`, { why });
+  }
+
+  undoLastRuleChange(why: string): Promise<unknown> {
+    return this.request("POST", "/v1/rules/undo", { why });
+  }
 }

@@ -351,21 +351,29 @@ export const ops: Op[] = [
   op({
     name: "upsert_rule",
     description:
-      "Add or replace one bot rule by id: match (from, to, subjectContains, listId, categories, priorities, aiLabels, bulk, hasAttachment) and actions (label, move to inbox/archive/spam, markRead, reply as a draft). " +
-      'To propose an automated reply or an unsubscribe for Jon, use reply mode "shadow" (fixed template, allowSenders) or {type:"unsubscribe", unsubscribe:{mode:"shadow"}}: it is saved disabled, and only Jon enables it and later takes it live. ' +
-      "Never auto-send, never trash, never one of Jon's rules.",
+      "Add or replace one assistant rule by id. It takes effect on the next delivery. Match (from, to, subjectContains, listId, categories, priorities, aiLabels, bulk, hasAttachment) and actions (label, move to inbox/archive/spam, markRead, trash, reply as a draft). " +
+      "Trash is a soft delete: mail stays restorable for the retention window. why is a short reason for the audit log. " +
+      'A shadow reply or shadow unsubscribe is saved disabled, and only Jon enables it and later takes it live. Never auto-send, never one of Jon\'s rules.',
     scopes: ["rules"],
     annotations: CHANGES,
-    schema: z.object({ rule: z.object({ id: z.string() }).passthrough() }),
-    run: (args, ctx) => ctx.api.put(`/v1/rules/bot-rules/${id(args.rule.id)}`, args.rule),
+    schema: z.object({ why: z.string().trim().min(1).max(200), rule: z.object({ id: z.string() }).passthrough() }),
+    run: (args, ctx) => ctx.api.put(`/v1/rules/bot-rules/${id(args.rule.id)}`, { ...args.rule, why: args.why }),
   }),
   op({
     name: "delete_rule",
-    description: "Delete one bot rule. Jon's rules cannot be deleted by a bot; disable_rule them instead.",
+    description: "Delete one assistant rule. Jon's rules cannot be deleted this way; disable_rule them instead. why is a short reason for the audit log.",
     scopes: ["rules"],
     annotations: CHANGES,
-    schema: z.object({ ruleId: z.string().min(1) }),
-    run: (args, ctx) => ctx.api.post(`/v1/rules/bot-rules/${id(args.ruleId)}/delete`),
+    schema: z.object({ ruleId: z.string().min(1), why: z.string().trim().min(1).max(200) }),
+    run: (args, ctx) => ctx.api.post(`/v1/rules/bot-rules/${id(args.ruleId)}/delete`, { why: args.why }),
+  }),
+  op({
+    name: "undo_last_change",
+    description: "Undo the latest assistant rule edit. Refuses if that rule changed since. Does not undo Jon's rules file. why is a short reason for the audit log.",
+    scopes: ["rules"],
+    annotations: CHANGES,
+    schema: z.object({ why: z.string().trim().min(1).max(200) }),
+    run: (args, ctx) => ctx.api.post("/v1/rules/undo", { why: args.why }),
   }),
   op({
     name: "disable_rule",

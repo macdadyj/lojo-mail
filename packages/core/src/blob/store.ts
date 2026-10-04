@@ -35,6 +35,9 @@ export function aiContextKey(messageId: string): string {
 /** Jon's mail rules, KMS-sealed under `rulesContext()`. */
 export const RULES_KEY = "rules/current.bin";
 
+/** Undo stack for assistant rule edits, sealed the same way. The processor never loads it. */
+export const RULES_HISTORY_KEY = "rules/history.bin";
+
 export class MemoryBlobStore implements BlobStore {
   readonly objects = new Map<string, Uint8Array>();
 

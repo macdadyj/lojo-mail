@@ -9,6 +9,7 @@ test("the tool list has no send, approve, hard delete, settings change, or full 
   assert.deepEqual(names.sort(), [
     "archive_message",
     "create_draft",
+    "delete_rule",
     "draft_reply",
     "export_mailbox",
     "get_action_items",
@@ -16,6 +17,7 @@ test("the tool list has no send, approve, hard delete, settings change, or full 
     "list_drafts",
     "list_folder",
     "list_inbox",
+    "list_rules",
     "move_message",
     "read_thread",
     "restore_message",
@@ -23,12 +25,18 @@ test("the tool list has no send, approve, hard delete, settings change, or full 
     "submit_for_approval",
     "summarize_thread",
     "trash_message",
+    "undo_last_change",
+    "upsert_rule",
   ]);
-  assert.ok(tools.every((tool) => tool.scopes.every((scope) => scope === "read" || scope === "write" || scope === "body" || scope === "trash")));
+  assert.ok(tools.every((tool) => tool.scopes.every((scope) => scope === "read" || scope === "write" || scope === "body" || scope === "trash" || scope === "rules")));
   assert.deepEqual(tools.find((tool) => tool.name === "trash_message")?.scopes, ["write", "trash"]);
   assert.deepEqual(tools.find((tool) => tool.name === "search_mail")?.scopes, ["read"]);
   assert.deepEqual(tools.find((tool) => tool.name === "summarize_thread")?.scopes, ["write", "body"]);
   assert.deepEqual(tools.find((tool) => tool.name === "get_action_items")?.scopes, ["read", "body"]);
+  assert.deepEqual(tools.find((tool) => tool.name === "list_rules")?.scopes, ["read"]);
+  assert.deepEqual(tools.find((tool) => tool.name === "upsert_rule")?.scopes, ["rules"]);
+  assert.deepEqual(tools.find((tool) => tool.name === "delete_rule")?.scopes, ["rules"]);
+  assert.deepEqual(tools.find((tool) => tool.name === "undo_last_change")?.scopes, ["rules"]);
 });
 
 test("a write token without body cannot get message text through a thread summary", async () => {
@@ -85,6 +93,32 @@ test("write scope can label, archive, and move to spam but not trash", async () 
   assert.match(await callTool("move_message", { messageId: message.id, folder: "inbox" }, w.ctx), /inbox/);
   await assert.rejects(() => callTool("move_message", { messageId: message.id, folder: "trash" }, w.ctx));
   assert.equal((await w.store.getMessage(message.id))?.folder, "inbox");
+});
+
+test("upsert_rule needs the rules scope, files trash as a rule, and still cannot auto-send", async () => {
+  const plain = await agentWorld(["read", "write"]);
+  const rule = { id: "bin", name: "Bin", match: { bulk: true }, actions: [{ type: "trash" }] };
+  await assert.rejects(() => callTool("upsert_rule", { why: "bin bulk", rule }, plain.ctx), /Missing rules scope/);
+  const ruler = await agentWorld(["read", "write", "rules"]);
+  assert.match(await callTool("list_rules", {}, ruler.ctx), /rules/);
+  assert.match(await callTool("upsert_rule", { why: "bin bulk", rule }, ruler.ctx), /"id": "bin"/);
+  await assert.rejects(
+    () =>
+      callTool(
+        "upsert_rule",
+        {
+          why: "send it",
+          rule: { id: "send", name: "Send", match: { from: ["a@b.example"] }, actions: [{ type: "reply", reply: { mode: "autoSend", template: "hi", allowSenders: ["a@b.example"] } }] },
+        },
+        ruler.ctx,
+      ),
+    /cannot auto-send/,
+  );
+  assert.match(await callTool("undo_last_change", { why: "too broad" }, ruler.ctx), /"rules"/);
+  const listed = JSON.parse((await callTool("list_rules", {}, ruler.ctx)).split("<untrusted-mail-content>")[1]?.split("</untrusted-mail-content>")[0] ?? "{}") as {
+    rules: { rules: Array<{ id: string }> };
+  };
+  assert.equal(listed.rules.rules.some((item) => item.id === "bin"), false);
 });
 
 test("includeContext needs the body scope", async () => {

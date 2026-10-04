@@ -169,16 +169,37 @@ export function statusLabel(status: DraftStatus): string {
 }
 
 export type RuleActionSummary =
-  | { type: "label" | "move" | "markRead" | "trash" }
+  | { type: "label"; labels: string[] }
+  | { type: "move"; folder: string }
+  | { type: "markRead" }
+  | { type: "trash" }
   | { type: "reply"; reply: { mode: "draft" | "shadow" | "autoSend"; allowSenders: string[]; allowCategories: string[]; allowAiText: boolean } }
   | { type: "unsubscribe"; unsubscribe: { mode: "shadow" | "auto"; allowSenders: string[] } };
+
+export interface RuleMatchSummary {
+  from?: string[];
+  to?: string[];
+  subjectContains?: string[];
+  listId?: string[];
+  bulk?: boolean;
+  categories?: string[];
+}
 
 export interface RuleSummary {
   id: string;
   name: string;
   enabled: boolean;
   createdBy: "human" | "token" | "bot";
+  match: RuleMatchSummary;
   actions: RuleActionSummary[];
+}
+
+export interface RuleAuditEvent {
+  at: string;
+  action: string;
+  actor?: string;
+  detail?: string;
+  outcome: string;
 }
 
 export interface RulesView {

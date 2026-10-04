@@ -10,6 +10,7 @@ const TOKEN_FOR: Record<string, string> = {
   "read,send,write": "send-token",
   "body,read": "body-token",
   admin: "admin-token",
+  "read,rules,write": "agent-rules-token",
 };
 
 /** An MCP agent wired to the real API over an in-process fetch, holding an API token like it would in production. */

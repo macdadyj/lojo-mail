@@ -1,5 +1,5 @@
 import type { LlmClient } from "../ai/types.ts";
-import { RULES_KEY, type BlobStore } from "../blob/store.ts";
+import { RULES_HISTORY_KEY, RULES_KEY, type BlobStore } from "../blob/store.ts";
 import { draftContext, rulesContext, serverOpen, serverSeal, type KeyWrapper } from "../crypto/server-seal.ts";
 import { MailError } from "../errors.ts";
 import { newId, sha256, utcDay } from "../ids.ts";
@@ -9,6 +9,7 @@ import type { MailStore } from "../store/types.ts";
 import type { Draft, LojoConfig, ServerSealedBlob, StoredMessage } from "../types.ts";
 import { AUTO_REPLY_FOOTER, autoSendRefusals, rateLimitRefusals, renderTemplate, replyTextRefusals, type AutoSendContext } from "./autosend.ts";
 import { evaluateRules } from "./match.ts";
+import { emptyRuleHistory, type RuleHistory } from "./history.ts";
 import type { ReplyAction, Rule, RuleOutcome, RulesDocument } from "./types.ts";
 import { unsubscribeDryRun, type OneClickClient } from "./unsubscribe.ts";
 
@@ -45,6 +46,31 @@ export async function loadRules(blobs: BlobStore, keys: KeyWrapper): Promise<Rul
 export async function saveRules(blobs: BlobStore, keys: KeyWrapper, doc: RulesDocument): Promise<void> {
   const sealed = await serverSeal(doc, rulesContext(), keys);
   await blobs.put(RULES_KEY, new TextEncoder().encode(JSON.stringify(sealed)), "application/json");
+}
+
+/** A missing history is an empty undo stack. AccessDenied is a 503, same as the rules document. */
+export async function loadRuleHistory(blobs: BlobStore, keys: KeyWrapper): Promise<RuleHistory> {
+  let bytes: Uint8Array | null;
+  try {
+    bytes = await blobs.get(RULES_HISTORY_KEY);
+  } catch (error) {
+    if (error instanceof Error && error.name === "AccessDenied") {
+      throw new MailError(
+        `Rule history is unreadable: S3 denied ${RULES_HISTORY_KEY}. The role needs s3:GetObject on rules/* and s3:ListBucket on the rules/ prefix`,
+        "unavailable",
+      );
+    }
+    throw error;
+  }
+  if (!bytes) return emptyRuleHistory();
+  const sealed = JSON.parse(new TextDecoder().decode(bytes)) as ServerSealedBlob;
+  const history = await serverOpen<RuleHistory>(sealed, rulesContext(), keys);
+  return history.version === 1 && Array.isArray(history.revisions) ? history : emptyRuleHistory();
+}
+
+export async function saveRuleHistory(blobs: BlobStore, keys: KeyWrapper, history: RuleHistory): Promise<void> {
+  const sealed = await serverSeal(history, rulesContext(), keys);
+  await blobs.put(RULES_HISTORY_KEY, new TextEncoder().encode(JSON.stringify(sealed)), "application/json");
 }
 
 export function rulesRuntime(blobs: BlobStore, keys: KeyWrapper, autoSender: MailSender | null = null, oneClick: OneClickClient | null = null): RulesRuntime {
