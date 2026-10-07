@@ -45,6 +45,7 @@ The web app's threat model (`docs/SECURITY.md`) still applies. This covers what 
   re-encoded as JPEG, which drops EXIF location. Files from Files are sent as they are. Each file is uploaded to the
   draft with its SHA-256 and the approval names those hashes in order, so a bot can't swap a file after Jon reviewed it ([API-ATTACHMENTS.md](API-ATTACHMENTS.md)). The camera permission is only asked when you tap
   Take Photo.
+- **Links in a message** follow the web reader (`docs/SECURITY.md`, "Links in the reader"), ported to `MessageLinks.swift` and tested against the same cases. The app never renders a message's HTML (no web view): the tags are walked for text and `<a href>`, images and scripts are dropped, so nothing remote loads when a message opens. A link is tappable only when SES recorded `dmarc=pass` (and spam/virus are not `FAIL`, not quarantined) **and** the sender's domain is on the trusted list (Settings > Links; default `apple.com`, `email.apple.com`, `testflight.apple.com`, `github.com`). Tapping it opens the unwrapped destination with `UIApplication.open`, which hands Apple invites to TestFlight or Safari. Every other http(s) link shows a confirmation naming the host and the full URL before it opens. Tracking hops are unwrapped only when the next URL is written inside the link; nothing is fetched to resolve one. Only `http` and `https` to a public hostname without credentials become links.
 - Optional **Face ID lock** covers the UI when the app returns from the background.
 
 ## Sending
