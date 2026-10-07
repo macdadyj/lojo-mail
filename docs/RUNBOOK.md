@@ -17,7 +17,7 @@ Keep the two files in step with those policies. `scripts/apply-policy.test.mjs` 
 
 `grok-rw` is the right user later for the DNS edits in the plan output (DMARC `rua`, TLS-RPT, MTA-STS) and for Route 53 Domains. It cannot create the DNSSEC signing key.
 
-Other SES identities in the account, `cyberdevsec.com` and `jon@lojo.engineering`, are out of scope. Do not import them and do not point this receipt rule at them.
+Other SES identities in the account, `cyberdevsec.com` and the `jon@lojo.engineering` address identity, are out of scope for the main rule. Do not import them and do not point `store-raw` at them. Receiving for `lojo.engineering` is a separate, additive rule: see [Receiving a second domain](#receiving-a-second-domain).
 
 ## 0. Tools
 
@@ -370,3 +370,14 @@ npm run dev
 API on `http://127.0.0.1:8787`, web app on `http://127.0.0.1:5173`, in-memory mailbox with synthetic messages, mock LLM unless you set `LOJO_LLM_PROVIDER`. Both bind to `127.0.0.1`. The API log prints the web sign-in passphrase (`lojo-dev-passphrase` unless `LOJO_HUMAN_PASSPHRASE` is set) and the local API tokens. The dev passphrase and tokens are refused if `NODE_ENV=production`.
 
 To browse an imported mailbox instead, start the API with `LOJO_STORE_FILE=data/mailbox.json`. That store is locked: load `data/mailbox.json.private.jwk` in Settings to read bodies.
+
+## Receiving a second domain
+
+`extra_receiving_domains = ["lojo.engineering"]` and `extra_receiving_addresses = ["jon@lojo.engineering"]` (live stage) add, without touching `store-raw`:
+
+- an SES **domain** identity with Easy DKIM (3 CNAME tokens in `terraform output extra_domain_dkim_tokens`; no MAIL FROM, no DNS written);
+- a second receipt rule `store-raw-lojo-engineering` on the same rule set, same bucket/`raw/` prefix, TLS `Require`, spam/virus scan, recipient exactly `jon@lojo.engineering`.
+
+The processor does not filter by recipient, so mail to that address lands in the same mailbox. Mail starts flowing only when the domain's MX points at `10 inbound-smtp.us-east-1.amazonaws.com`. Existing DKIM (for example Tuta's `s1`/`s2._domainkey`) and SPF stay until sending through the old provider is retired.
+
+Rollback: remove the two variables and apply (destroys the rule and the domain identity), or `aws ses delete-receipt-rule --rule-set-name lojo-mail --rule-name store-raw-lojo-engineering` and `aws sesv2 delete-email-identity --email-identity lojo.engineering`. Point the MX back first if it was switched.
