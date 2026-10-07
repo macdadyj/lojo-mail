@@ -51,6 +51,8 @@ import { dryRunRules, loadRuleHistory, loadRules, saveRuleHistory, saveRules, ty
 import type { RuleAuthor, RulesDocument } from "./rules/types.ts";
 import { enableRule, setAutomationMode, type AutomationMode } from "./rules/promote.ts";
 import { assertShadowedFirst, automationModes, emptyRules, parseRulesDocument, ruleFingerprint, rulesHash } from "./rules/validate.ts";
+import { proposeSiFilter, siReplyPrompt, undoSiChange, unblockSender, listBlocked, applySiFilter, type SiHost } from "./si/run.ts";
+import type { SiApplyResult, SiBlock, SiFilterResult, SiReplyInput } from "./si/types.ts";
 import { sesRfcId, type MailSender, type OutboundAttachment, type OutboundMessage } from "./send.ts";
 import type { MailStore } from "./store/types.ts";
 import type {
@@ -1130,8 +1132,11 @@ export class Mailbox {
   }
 
   /** Anyone with `write` can make the rules safer (pause, kill switch on, disable a rule); only Jon can undo it. */
-  async setRuleSwitches(input: { paused?: boolean; killSwitch?: boolean; sendKillSwitch?: boolean }, actor: Actor): Promise<RulesDocument> {
-    if (actor !== "human" && (input.paused === false || input.killSwitch === false || input.sendKillSwitch === false)) {
+  async setRuleSwitches(
+    input: { paused?: boolean; killSwitch?: boolean; sendKillSwitch?: boolean; siKillSwitch?: boolean },
+    actor: Actor,
+  ): Promise<RulesDocument> {
+    if (actor !== "human" && (input.paused === false || input.killSwitch === false || input.sendKillSwitch === false || input.siKillSwitch === false)) {
       throw new MailError("Only a signed-in human can resume rules or release a kill switch", "forbidden");
     }
     const doc = await this.getRules();
@@ -1140,12 +1145,13 @@ export class Mailbox {
       ...(input.paused !== undefined ? { paused: input.paused } : {}),
       ...(input.killSwitch !== undefined ? { killSwitch: input.killSwitch } : {}),
       ...(input.sendKillSwitch !== undefined ? { sendKillSwitch: input.sendKillSwitch } : {}),
+      ...(input.siKillSwitch !== undefined ? { siKillSwitch: input.siKillSwitch } : {}),
       updatedAt: this.now().toISOString(),
       updatedBy: authorOf(actor),
     };
     await saveRules(this.deps.blobs, this.deps.keys, next);
     await this.audit("rules.switches", "ok", {
-      detail: `by:${actor} paused:${next.paused} killSwitch:${next.killSwitch} sendKillSwitch:${next.sendKillSwitch === true}`,
+      detail: `by:${actor} paused:${next.paused} killSwitch:${next.killSwitch} sendKillSwitch:${next.sendKillSwitch === true} siKillSwitch:${next.siKillSwitch === true}`,
     });
     return next;
   }
@@ -1418,6 +1424,114 @@ export class Mailbox {
       if (context) mailboxText.push(context);
     }
     return mailboxText;
+  }
+
+  private siHost(): SiHost {
+    return {
+      now: () => this.now(),
+      llm: this.deps.llm ?? null,
+      config: this.deps.config,
+      store: this.deps.store,
+      blobs: this.deps.blobs,
+      keys: this.deps.keys,
+      getRules: () => this.getRules(),
+      trash: (messageId) => this.trash(messageId, "human"),
+      move: (messageId, folder) => this.move(messageId, folder, "human"),
+      setLabels: (messageId, labels) => this.setLabels(messageId, labels),
+      setUnread: (messageId, unread) => this.setUnread(messageId, unread),
+      audit: (action, outcome, extra) => this.audit(action, outcome, extra),
+    };
+  }
+
+  /** One-off classification. Does not change mail. */
+  async siPropose(input: unknown): Promise<SiFilterResult> {
+    return proposeSiFilter(this.siHost(), input);
+  }
+
+  /** Applies the actions Jon confirmed. Trash stays recoverable. Returns an undo id. */
+  async siApply(input: unknown): Promise<SiApplyResult> {
+    return applySiFilter(this.siHost(), input);
+  }
+
+  /** Reverses one apply or unblock. Does not purge anything. */
+  async siUndo(changeId: string): Promise<{ changeId: string; restored: number }> {
+    return undoSiChange(this.siHost(), changeId);
+  }
+
+  async siBlocked(): Promise<SiBlock[]> {
+    return listBlocked(this.siHost());
+  }
+
+  async siUnblock(ruleId: string): Promise<{ blocked: SiBlock[]; changeId: string }> {
+    return unblockSender(this.siHost(), ruleId);
+  }
+
+  /**
+   * Writes a suggested reply from the thread and an optional instruction.
+   * The draft is sealed like any other draft. This never sends.
+   */
+  async siReply(input: SiReplyInput): Promise<Draft> {
+    const target = await this.replyTarget(await this.requireMessage(input.messageId));
+    const source = (await this.serverText(target)) ?? (typeof input.sourceText === "string" ? input.sourceText : null);
+    if (source === null) {
+      throw new MailError("No text for this message. Reply with SI from the phone, which sends the text it opened.", "locked");
+    }
+    const thread = await this.deps.store.listThreadMessages(target.threadId);
+    const earlier =
+      typeof input.threadText === "string" && input.threadText.trim()
+        ? input.threadText
+        : thread
+            .filter((message) => message.id !== target.id)
+            .map((message) => `From: ${message.from.email}\nSubject: ${message.subject}\n${message.snippet ?? ""}`)
+            .join("\n\n");
+    const prompt = siReplyPrompt({
+      tone: input.tone,
+      instruction: input.instruction,
+      from: target.from.email,
+      subject: target.subject,
+      sourceText: source,
+      threadText: earlier,
+    });
+    const llm = this.requireLlm();
+    await this.requireBudget();
+    const completion = await this.callModel("si.reply", () => llm.complete({ system: prompt.system, user: prompt.user, maxTokens: 600 }));
+    await this.spend("si.reply", llm, target.id, completion, sha256(`${prompt.system}\n${prompt.user}`));
+    const reply = completion.text.trim();
+    if (!reply || reply.startsWith("{")) throw new MailError("SI returned no usable reply. Nothing was sent.", "upstream");
+    const now = this.now().toISOString();
+    const open = (await this.deps.store.listDrafts()).find((draft) => draft.inReplyTo === target.rfcMessageId && EDITABLE.has(draft.status));
+    if (open) {
+      const updated: Draft = {
+        ...withoutApproval(open),
+        status: "suggested",
+        lastEditedBy: "ai",
+        aiGenerated: true,
+        sealed: await this.sealDraftText(open.id, reply),
+        updatedAt: now,
+      };
+      await this.deps.store.putDraft(updated);
+      return updated;
+    }
+    const recipients = this.isSelf(target.from) ? target.to.filter((item) => !this.isSelf(item)) : [target.from];
+    const id = newId("drf");
+    const draft: Draft = {
+      id,
+      threadId: target.threadId,
+      inReplyTo: target.rfcMessageId,
+      references: [...target.references, target.rfcMessageId],
+      to: recipients.length > 0 ? recipients : [target.from],
+      cc: [],
+      subject: replySubject(target.subject),
+      status: "suggested",
+      origin: "ai",
+      aiGenerated: true,
+      pgp: "auto",
+      sealed: await this.sealDraftText(id, reply),
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.deps.store.putDraft(draft);
+    return draft;
   }
 
   async testRules(messageId: string): Promise<DryRun> {

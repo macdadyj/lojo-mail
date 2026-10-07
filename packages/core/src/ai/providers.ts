@@ -23,6 +23,22 @@ export class MockLlm implements LlmClient {
         outputTokens: 12,
       };
     }
+    if (request.system.startsWith("You are SI, sorting")) {
+      const items = [...request.user.matchAll(/messageId: (\S+)/g)].map((match) => {
+        const haystack = request.user.slice(match.index ?? 0, (match.index ?? 0) + 500).toLowerCase();
+        const actions: Array<Record<string, unknown>> = [];
+        if (/unsubscribe|newsletter|roundup/.test(haystack)) actions.push({ type: "label", labels: ["newsletters"] });
+        if (/receipt|invoice/.test(haystack)) actions.push({ type: "label", labels: ["receipts"] });
+        if (/verify your account|password expires|urgent action/.test(haystack)) actions.push({ type: "spam" });
+        return { messageId: match[1], reason: actions.length ? "Mock SI filing" : "Leave it", actions, saveRule: false };
+      });
+      const text = JSON.stringify({ items });
+      return { text, inputTokens: estimateTokens(request.system + request.user), outputTokens: estimateTokens(text) };
+    }
+    if (request.system.startsWith("You are SI, writing")) {
+      const text = "Hi,\n\nTuesday works. I will be there.\n\nJon";
+      return { text, inputTokens: estimateTokens(request.system + request.user), outputTokens: estimateTokens(text) };
+    }
     const haystack = request.user.toLowerCase();
     const phishing = /verify your account|password expires|suspended/.test(haystack);
     const newsletter = /unsubscribe|newsletter/.test(haystack);

@@ -101,6 +101,11 @@ export interface RulesDocument {
    * auto-send. A token may engage it; only Jon can release it.
    */
   sendKillSwitch: boolean;
+  /**
+   * SI filter rules (ids starting with `si-`) do not run, and one-off apply is
+   * refused. A token may engage it; only Jon can release it. Older documents omit it.
+   */
+  siKillSwitch?: boolean;
   /** Mail a rule trashes stays restorable at least this long. */
   trashRetentionDays: number;
   /** Across all rules, per UTC day. */

@@ -53,7 +53,7 @@ struct ComposeView: View {
                     HStack(spacing: 6) {
                         Chip(text: draft.status.label, systemImage: draft.status == .pendingApproval ? "hourglass" : "doc", tint: draft.status == .pendingApproval ? .orange : .secondary)
                         Chip(text: draft.origin.chip, systemImage: draft.origin.isBot ? "sparkles" : "person", tint: draft.origin.isBot ? Theme.ai : Theme.accent)
-                        if draft.aiGenerated == true && draft.origin != .ai { Chip(text: "AI text", systemImage: "sparkles", tint: Theme.ai) }
+                        if draft.aiGenerated == true && draft.origin != .ai { Chip(text: "SI text", systemImage: "sparkles", tint: Theme.ai) }
                         Spacer()
                         if let updated = ISODate.parse(draft.updatedAt) {
                             Text(updated.mailListStamp).font(.caption).foregroundStyle(.secondary)
@@ -65,7 +65,7 @@ struct ComposeView: View {
                 }
             }
             if model.preparing {
-                Section { HStack { ProgressView(); Text("The AI is drafting a reply…").foregroundStyle(.secondary) } }
+                Section { HStack { ProgressView(); Text("SI is writing a reply…").foregroundStyle(.secondary) } }
             }
             if let conflict = model.conflict {
                 Section {
@@ -122,7 +122,7 @@ struct ComposeView: View {
             }
             if app.rules?.rules.sendKillSwitch == true {
                 Section {
-                    Label("Stop all sending is on in AI Rules, so the server will refuse to send. You can still save to the approval queue.", systemImage: "xmark.octagon.fill")
+                    Label("Stop all sending is on in Rules, so the server will refuse to send. You can still save to the approval queue.", systemImage: "xmark.octagon.fill")
                         .font(.footnote)
                         .foregroundStyle(.red)
                 }
@@ -231,12 +231,12 @@ struct ComposeView: View {
         } message: {
             Text("It is marked discarded on the server and leaves the approval queue.")
         }
-        .alert("Rewrite with AI", isPresented: $askCustom) {
+        .alert("Rewrite with SI", isPresented: $askCustom) {
             TextField("Instruction", text: $customInstruction)
             Button("Rewrite") { Task { await model.rewrite(customInstruction) } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The AI rewrites the draft. It stays a draft until you approve it.")
+            Text("SI rewrites the draft. It stays a draft until you approve it.")
         }
     }
 
@@ -278,7 +278,7 @@ struct ComposeView: View {
                         }
                         Button("Custom…") { askCustom = true }
                     } label: {
-                        Label("Rewrite with AI", systemImage: "sparkles")
+                        Label("Rewrite with SI", systemImage: "sparkles")
                     }
                     if model.draft != nil {
                         Divider()
@@ -349,7 +349,7 @@ struct ComposeView: View {
         case .new: return "New message"
         case .reply(_, let all): return all ? "Reply all" : "Reply"
         case .forward: return "Forward"
-        case .aiReply: return "AI reply"
+        case .aiReply: return "Reply with SI"
         case .draft: return model.closed ? "Draft" : "Edit draft"
         }
     }

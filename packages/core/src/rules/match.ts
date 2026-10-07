@@ -1,4 +1,5 @@
 import { assertNever } from "../errors.ts";
+import { isSiRuleId } from "../si/ids.ts";
 import type { StoredMessage } from "../types.ts";
 import type { Rule, RuleHit, RuleMatch, RuleOutcome, RulesDocument } from "./types.ts";
 
@@ -42,6 +43,7 @@ export function evaluateRules(doc: RulesDocument, input: MatchInput): RuleOutcom
   const labels = new Set<string>();
   for (const rule of doc.rules) {
     if (!rule.enabled || !ruleMatches(rule.match, input)) continue;
+    if (doc.siKillSwitch === true && isSiRuleId(rule.id)) continue;
     outcome.hits.push(hitOf(rule));
     for (const action of rule.actions) {
       switch (action.type) {

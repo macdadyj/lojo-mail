@@ -123,6 +123,7 @@ const documentSchema = z
     paused: z.boolean().default(false),
     killSwitch: z.boolean().default(false),
     sendKillSwitch: z.boolean().default(false),
+    siKillSwitch: z.boolean().optional(),
     trashRetentionDays: z.number().int().min(RETENTION_MIN_DAYS).max(RETENTION_MAX_DAYS).default(30),
     maxAutoSendPerDay: z.number().int().min(1).max(GLOBAL_PER_DAY_MAX).default(20),
     rules: z.array(ruleSchema).max(MAX_RULES),
@@ -155,7 +156,13 @@ export function parseRulesDocument(input: unknown, author: RuleAuthor, at: Date,
     const unchanged = prior && ruleFingerprint(prior) === ruleFingerprint({ ...rule, createdBy: prior.createdBy, updatedAt: prior.updatedAt });
     return { ...rule, createdBy: unchanged ? prior.createdBy : author, updatedAt: unchanged ? prior.updatedAt : now } as Rule;
   });
-  return { ...parsed.data, rules, updatedAt: now, updatedBy: author };
+  return {
+    ...parsed.data,
+    siKillSwitch: parsed.data.siKillSwitch ?? previous?.siKillSwitch ?? false,
+    rules,
+    updatedAt: now,
+    updatedBy: author,
+  };
 }
 
 /** Parses without stamping, for `npm run rules -- validate` and dry runs. */
@@ -221,6 +228,7 @@ export function emptyRules(at: Date): RulesDocument {
     paused: false,
     killSwitch: false,
     sendKillSwitch: false,
+    siKillSwitch: false,
     trashRetentionDays: 30,
     maxAutoSendPerDay: 20,
     rules: [],

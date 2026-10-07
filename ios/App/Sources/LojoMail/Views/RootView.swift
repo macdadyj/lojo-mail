@@ -77,7 +77,7 @@ struct RootView: View {
                 .badge(model.reviewCount)
                 .tag(Tab.review)
             RulesView()
-                .tabItem { Label("AI Rules", systemImage: "wand.and.stars") }
+                .tabItem { Label("Rules", systemImage: "wand.and.stars") }
                 .tag(Tab.rules)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }

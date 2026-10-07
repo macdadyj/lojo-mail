@@ -199,7 +199,7 @@ public enum DraftAuthor: String, Codable, Sendable {
         switch self {
         case .human: nil
         case .agent: "An assistant"
-        case .ai: "The AI"
+        case .ai: "SI"
         case .client: "Your desktop mail client"
         case .rule: "One of your mail rules"
         }
@@ -209,7 +209,7 @@ public enum DraftAuthor: String, Codable, Sendable {
         switch self {
         case .human: "You"
         case .agent: "Assistant"
-        case .ai: "AI"
+        case .ai: "SI"
         case .client: "Mail client"
         case .rule: "Rule"
         }
@@ -245,7 +245,7 @@ public struct Draft: Codable, Sendable, Hashable, Identifiable {
     /// Files on the draft, in the order they will be sent (`packages/core/src/draft-attachments.ts`).
     public var attachments: [DraftAttachment]?
 
-    /// Same wording as `authorNotice` in `packages/web/src/review.ts`: depends on who wrote the content, never on status.
+    /// Who wrote the draft. SI is LOJO's own model. The web app still says "the AI" until that copy is updated.
     public var authorNotice: String? {
         let author = origin.writer
         let editor = lastEditedBy.flatMap { $0 != origin ? $0.writer : nil }
@@ -357,6 +357,8 @@ public struct RulesDocument: Codable, Sendable, Hashable {
     public var killSwitch: Bool
     /// Stops every send: approved human sends, bridge sends and auto-send. Older servers omit it.
     public var sendKillSwitch: Bool?
+    /// Stops SI filter rules and one-off apply. Older servers omit it.
+    public var siKillSwitch: Bool?
     public var trashRetentionDays: Int?
     public var maxAutoSendPerDay: Int?
     public var rules: [Rule]

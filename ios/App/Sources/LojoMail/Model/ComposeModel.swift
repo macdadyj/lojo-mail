@@ -208,7 +208,7 @@ final class ComposeModel {
             let sourceText = message.locked ? model.bodyText(message) : nil
             let view = try await model.call { try await $0.draftReply(messageId: message.id, sourceText: sourceText) }
             show(view)
-            status = "The AI wrote this draft. Nothing is sent until you approve it."
+            status = "SI wrote this draft. Nothing is sent until you approve it."
         } catch {
             self.error = error.localizedDescription
             fields.to = message.from.email
@@ -284,7 +284,7 @@ final class ComposeModel {
             let id = try await save()
             let view = try await model.call { try await $0.rewrite(id, instruction: instruction) }
             show(view)
-            status = "Rewritten by the AI. Still a draft."
+            status = "Rewritten by SI. Still a draft."
         }
     }
 

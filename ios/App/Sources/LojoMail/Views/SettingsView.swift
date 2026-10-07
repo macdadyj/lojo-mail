@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var apiError: String?
     @State private var trustedText = ""
     @State private var trustedError: String?
+    @State private var siFilter: SiFilterRequest?
 
     var body: some View {
         @Bindable var model = model
@@ -137,8 +138,8 @@ struct SettingsView: View {
                     }
                     if let apiError { Text(apiError).font(.footnote).foregroundStyle(.red) }
                     if let settings = model.serverSettings {
-                        LabeledContent("AI provider", value: settings.llmProvider)
-                        LabeledContent("AI budget today", value: "\(settings.budgetUsed.formatted()) / \(settings.dailyTokenBudget.formatted()) tokens")
+                        LabeledContent("Model", value: settings.llmProvider)
+                        LabeledContent("SI budget today", value: "\(settings.budgetUsed.formatted()) / \(settings.dailyTokenBudget.formatted()) tokens")
                         LabeledContent("Attachments from the app") {
                             Text(settings.draftAttachments.map { "Up to \($0.maxFiles ?? AttachmentBudget.defaultMaxFiles) files, \(ByteSize.format($0.maxMessageBytes)) per message" } ?? "Not supported by this server")
                                 .foregroundStyle(settings.draftAttachments == nil ? .orange : .secondary)
@@ -149,6 +150,24 @@ struct SettingsView: View {
                     Text("Server")
                 } footer: {
                     Text("HTTPS only. The web app lives at app.cyberphysical.us.")
+                }
+
+                Section {
+                    Toggle("Stop SI filters", isOn: Binding(
+                        get: { model.rules?.rules.siKillSwitch == true },
+                        set: { on in Task { await model.setSiKillSwitch(on) } }
+                    ))
+                    .accessibilityIdentifier("si.kill-switch")
+                    Button("Filter the inbox with SI") {
+                        siFilter = SiFilterRequest(messageIds: [], folder: Folder.inbox.rawValue, texts: model.siTexts(for: model.state(.inbox).messages))
+                    }
+                    .accessibilityIdentifier("si.filter.settings")
+                    NavigationLink("Blocked") { BlockedSendersView() }
+                    NavigationLink("Saved SI filters") { SiRulesView() }
+                } header: {
+                    Text("SI")
+                } footer: {
+                    Text("Filter with SI proposes a label, junk, Trash, or a block. Trash is kept and can be restored. Saved filters run on new mail until you turn this switch on. Unblock a sender from Blocked. Reply with SI only writes a draft.")
                 }
 
                 Section("About") {
@@ -162,6 +181,10 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .sheet(isPresented: $showKeySetup) { KeySetupView() }
+            .sheet(item: $siFilter) { request in
+                NavigationStack { SiFilterView(request: request) }
+            }
+            .task { await model.refreshRules() }
             .onAppear { if model.launch.screen == .key { showKeySetup = true } }
             .confirmationDialog("Remove the envelope key?", isPresented: $confirmRemoveKey, titleVisibility: .visible) {
                 Button("Remove key", role: .destructive) { model.removeKey() }

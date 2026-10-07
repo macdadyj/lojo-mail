@@ -464,12 +464,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
   /** Replaces the whole document. Human sessions only; tokens can only make rules safer (below). */
   app.put("/v1/rules", need("human"), async (c) => c.json({ rules: await mailbox.putRules(await body<unknown>(c), actorOf(c.get("principal"))) }));
   app.post("/v1/rules/switches", need("write"), async (c) => {
-    const input = await body<{ paused: boolean; killSwitch: boolean; sendKillSwitch: boolean }>(c);
-    const switches: { paused?: boolean; killSwitch?: boolean; sendKillSwitch?: boolean } = {};
+    const input = await body<{ paused: boolean; killSwitch: boolean; sendKillSwitch: boolean; siKillSwitch: boolean }>(c);
+    const switches: { paused?: boolean; killSwitch?: boolean; sendKillSwitch?: boolean; siKillSwitch?: boolean } = {};
     if (typeof input.paused === "boolean") switches.paused = input.paused;
     if (typeof input.killSwitch === "boolean") switches.killSwitch = input.killSwitch;
     if (typeof input.sendKillSwitch === "boolean") switches.sendKillSwitch = input.sendKillSwitch;
-    if (Object.keys(switches).length === 0) throw new MailError("Send paused, killSwitch and/or sendKillSwitch as true or false", "invalid");
+    if (typeof input.siKillSwitch === "boolean") switches.siKillSwitch = input.siKillSwitch;
+    if (Object.keys(switches).length === 0) throw new MailError("Send paused, killSwitch, sendKillSwitch and/or siKillSwitch as true or false", "invalid");
     return c.json({ rules: await mailbox.setRuleSwitches(switches, actorOf(c.get("principal"))) });
   });
   app.post("/v1/rules/:id/disable", need("write"), async (c) => c.json({ rules: await mailbox.disableRule(c.req.param("id"), actorOf(c.get("principal"))) }));
@@ -483,6 +484,40 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const input = await body<{ mode: string; sha256: string }>(c);
     if (!isAutomationMode(input.mode)) throw new MailError("mode must be draft, shadow or live", "invalid");
     return c.json({ rules: await mailbox.setRuleAutomation(c.req.param("id"), input.mode, input.sha256, actorOf(c.get("principal"))) });
+  });
+  /**
+   * SI classifies mail Jon picked, or the inbox. The phone may send text it
+   * already decrypted. This does not change mail.
+   */
+  app.post("/v1/si/filter", need("write"), async (c) => c.json(await mailbox.siPropose(await body<unknown>(c))));
+  /** Jon confirms proposed actions. Trash is recoverable. The response carries an undo id. */
+  app.post("/v1/si/filter/apply", need("human"), async (c) => c.json(await mailbox.siApply(await body<unknown>(c))));
+  app.post("/v1/si/filter/undo", need("human"), async (c) => {
+    const input = await body<{ changeId: string }>(c);
+    if (typeof input.changeId !== "string") throw new MailError("changeId is required", "invalid");
+    return c.json(await mailbox.siUndo(input.changeId));
+  });
+  app.get("/v1/si/blocked", need("read"), async (c) => c.json({ blocked: await mailbox.siBlocked() }));
+  app.post("/v1/si/blocked/remove", need("human"), async (c) => {
+    const input = await body<{ ruleId: string }>(c);
+    if (typeof input.ruleId !== "string" || !input.ruleId) throw new MailError("ruleId is required", "invalid");
+    return c.json(await mailbox.siUnblock(input.ruleId));
+  });
+  /**
+   * A reply draft from the thread, an optional instruction, and a tone.
+   * Opens nothing by itself: the client puts the draft in Compose. Never sends.
+   */
+  app.post("/v1/si/reply", need("write"), async (c) => {
+    const input = await body<{ messageId: string; tone: string; instruction: string; sourceText: string; threadText: string }>(c);
+    if (typeof input.messageId !== "string" || !input.messageId) throw new MailError("messageId is required", "invalid");
+    const draft = await mailbox.siReply({
+      messageId: input.messageId,
+      ...(typeof input.tone === "string" ? { tone: input.tone } : {}),
+      ...(typeof input.instruction === "string" ? { instruction: input.instruction } : {}),
+      ...(typeof input.sourceText === "string" ? { sourceText: input.sourceText } : {}),
+      ...(typeof input.threadText === "string" ? { threadText: input.threadText } : {}),
+    });
+    return c.json(await mailbox.getDraft(draft.id, { withText: canReadText(c.get("principal")) }), 201);
   });
   app.post("/v1/rules/test", need("read"), async (c) => {
     const input = await body<{ messageId: string }>(c);

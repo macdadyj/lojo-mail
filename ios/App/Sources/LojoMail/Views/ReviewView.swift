@@ -21,7 +21,7 @@ struct ReviewView: View {
                     Banner(text: "Offline", systemImage: "wifi.slash", tint: .orange).listRowSeparator(.hidden)
                 }
                 section("Waiting for your approval", waiting, systemImage: "hourglass")
-                section("Written by AI and assistants", bots, systemImage: "sparkles")
+                section("Written by SI and assistants", bots, systemImage: "sparkles")
                 section("Your drafts", mine, systemImage: "doc")
                 if !done.isEmpty {
                     Section {
@@ -49,7 +49,7 @@ struct ReviewView: View {
                         StateView(
                             title: "Nothing to review",
                             systemImage: "checkmark.seal",
-                            message: "Drafts the AI, your assistants or your mail rules write land here. Nothing they write is sent until you open it here and tap Approve and send."
+                            message: "Drafts SI, your assistants or your mail rules write land here. Nothing they write is sent until you open it here and tap Approve and send."
                         )
                     }
                 }
@@ -184,7 +184,7 @@ struct RulesView: View {
                     }
                 }
             }
-            .navigationTitle("AI Rules")
+            .navigationTitle("Rules")
             .refreshable { await model.refreshRules() }
             .overlay {
                 if doc == nil {

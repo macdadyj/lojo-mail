@@ -27,6 +27,8 @@ struct Toast: Identifiable, Equatable {
 enum UndoAction {
     case restore([String])
     case moveBack([String], Folder)
+    /// One Filter with SI apply, or an unblock. The server puts mail and rules back.
+    case siChange(String)
 }
 
 enum BodyState: Equatable {
@@ -727,6 +729,15 @@ final class AppModel {
         case .moveBack(let ids, let folder):
             for id in ids { try? await call { try await $0.move(id, to: folder) } }
             await refresh(folder)
+        case .siChange(let changeId):
+            do {
+                try await call { try await $0.siUndo(changeId) }
+                toast = Toast(text: "Undid the SI filter", systemImage: "arrow.uturn.backward.circle.fill")
+            } catch {
+                report(error)
+            }
+            for folder in Folder.allCases { await refresh(folder) }
+            await refreshRules()
         }
     }
 
@@ -804,6 +815,29 @@ final class AppModel {
         } catch {
             report(error)
         }
+    }
+
+    func setSiKillSwitch(_ on: Bool) async {
+        do {
+            let doc = try await call { try await $0.setRuleSwitches(siKillSwitch: on) }
+            rules?.rules = doc
+            toast = Toast(text: on ? "SI filters stopped" : "SI filters on", systemImage: on ? "hand.raised.fill" : "checkmark.circle.fill")
+        } catch {
+            report(error)
+        }
+    }
+
+    var mailLabels: [String] {
+        let labels = folders.values.flatMap(\.messages).flatMap(\.labels)
+        return Array(Set(labels)).filter { $0 != Message.starLabel && $0 != "flagged" }.sorted()
+    }
+
+    func siTexts(for messages: [Message]) -> [String: String] {
+        var texts: [String: String] = [:]
+        for message in messages {
+            if let text = bodyText(message), !text.isEmpty { texts[message.id] = String(text.prefix(1500)) }
+        }
+        return texts
     }
 
     func disableRule(_ id: String) async {

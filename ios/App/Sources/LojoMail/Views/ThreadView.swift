@@ -20,6 +20,9 @@ struct ThreadView: View {
     @State private var opening: String?
     @State private var showKeySetup = false
     @State private var confirmTrash = false
+    @State private var siReply = false
+    @State private var siFilter: SiFilterRequest?
+    @State private var pendingSiDraft: DraftView?
 
     private var latest: Message? { messages.last }
     private var replyTarget: Message? { messages.last(where: { $0.origin != "sent" }) ?? messages.last }
@@ -55,6 +58,21 @@ struct ThreadView: View {
         .refreshable { await load() }
         .sheet(item: $compose) { request in
             NavigationStack { ComposeView(request: request, presentedAsSheet: true) }
+        }
+        .sheet(isPresented: $siReply, onDismiss: {
+            if let pendingSiDraft {
+                compose = .draft(pendingSiDraft)
+                self.pendingSiDraft = nil
+            }
+        }) {
+            NavigationStack {
+                if let target = replyTarget {
+                    SiReplyView(message: target, threadText: threadContext(except: target)) { pendingSiDraft = $0 }
+                }
+            }
+        }
+        .sheet(item: $siFilter) { request in
+            NavigationStack { SiFilterView(request: request) }
         }
         .sheet(isPresented: $showKeySetup, onDismiss: { Task { await model.openBodies(messages) } }) { KeySetupView() }
         .quickLookPreview($preview)
@@ -122,7 +140,7 @@ struct ThreadView: View {
         let items = opened.flatMap { $0.ai?.actionItems ?? [] }
         if let summary {
             VStack(alignment: .leading, spacing: 8) {
-                Label("AI summary", systemImage: "sparkles").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ai)
+                Label("SI summary", systemImage: "sparkles").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ai)
                 Text(summary).font(.subheadline)
                 if !items.isEmpty {
                     ForEach(Array(Set(items.map(\.text))).sorted(), id: \.self) { item in
@@ -184,8 +202,11 @@ struct ThreadView: View {
                         } label: { Label(target.title, systemImage: target.systemImage) }
                     }
                 }
-                if let target = replyTarget {
-                    Button { compose = .aiReply(target) } label: { Label("AI draft a reply", systemImage: "sparkles") }
+                if replyTarget != nil {
+                    Button { siReply = true } label: { Label("Reply with SI", systemImage: "sparkles") }
+                        .accessibilityIdentifier("si.reply")
+                    Button { filterThisThread() } label: { Label("Filter with SI", systemImage: "line.3.horizontal.decrease.circle") }
+                        .accessibilityIdentifier("si.filter.message")
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -233,16 +254,28 @@ struct ThreadView: View {
                     Button { compose = .reply(target, all: false) } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }
                     Button { compose = .reply(target, all: true) } label: { Label("Reply All", systemImage: "arrowshape.turn.up.left.2") }
                     Button { compose = .forward(latest ?? target) } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") }
-                    Button { compose = .aiReply(target) } label: { Label("AI draft a reply", systemImage: "sparkles") }
+                    Button { siReply = true } label: { Label("Reply with SI", systemImage: "sparkles") }
+                        .accessibilityIdentifier("si.reply")
                 } label: {
                     Label("Reply", systemImage: "arrowshape.turn.up.left")
                 } primaryAction: {
                     compose = .reply(target, all: false)
                 }
                 .accessibilityLabel("Reply")
-                .accessibilityHint("Hold for Reply All, Forward and AI reply")
+                .accessibilityHint("Hold for Reply All, Forward and Reply with SI")
             }
         }
+    }
+
+    private func threadContext(except target: Message) -> String {
+        messages.filter { $0.id != target.id }.compactMap { message -> String? in
+            guard let text = model.bodyText(message), !text.isEmpty else { return nil }
+            return "From: \(message.from.email)\nSubject: \(message.subject)\n\(text)"
+        }.joined(separator: "\n\n")
+    }
+
+    private func filterThisThread() {
+        siFilter = SiFilterRequest(messageIds: messages.map(\.id), folder: nil, texts: model.siTexts(for: messages))
     }
 
     private func toggle(_ message: Message) {

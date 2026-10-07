@@ -253,14 +253,60 @@ public struct APIClient: Sendable {
         try await send("GET", "/v1/rules")
     }
 
-    public func setRuleSwitches(paused: Bool? = nil, killSwitch: Bool? = nil, sendKillSwitch: Bool? = nil) async throws -> RulesDocument {
+    public func setRuleSwitches(paused: Bool? = nil, killSwitch: Bool? = nil, sendKillSwitch: Bool? = nil, siKillSwitch: Bool? = nil) async throws -> RulesDocument {
         struct Reply: Decodable { var rules: RulesDocument }
         var body: [String: Any] = [:]
         if let paused { body["paused"] = paused }
         if let killSwitch { body["killSwitch"] = killSwitch }
         if let sendKillSwitch { body["sendKillSwitch"] = sendKillSwitch }
+        if let siKillSwitch { body["siKillSwitch"] = siKillSwitch }
         let reply: Reply = try await send("POST", "/v1/rules/switches", json: body)
         return reply.rules
+    }
+
+    // MARK: SI
+
+    /// Classifies messages, or the inbox when `messageIds` is empty. Does not change mail.
+    public func siFilter(messageIds: [String], folder: String?, texts: [String: String]) async throws -> SiFilterResult {
+        var body: [String: Any] = ["texts": texts]
+        if !messageIds.isEmpty { body["messageIds"] = messageIds }
+        if let folder { body["folder"] = folder }
+        return try await send("POST", "/v1/si/filter", json: body)
+    }
+
+    /// Applies the actions Jon confirmed. The server keeps a recoverable undo.
+    public func siApply(_ proposals: [SiProposal]) async throws -> SiApplyResult {
+        let items: [[String: Any]] = proposals.map { proposal in
+            let actions: [[String: Any]] = proposal.forApply.actions.map { action in
+                var row: [String: Any] = ["type": action.type]
+                if let labels = action.labels { row["labels"] = labels }
+                return row
+            }
+            return ["messageId": proposal.messageId, "saveRule": proposal.saveRule, "actions": actions]
+        }
+        return try await send("POST", "/v1/si/filter/apply", json: ["items": items])
+    }
+
+    public func siUndo(_ changeId: String) async throws {
+        struct Reply: Decodable { var changeId: String; var restored: Int }
+        let _: Reply = try await send("POST", "/v1/si/filter/undo", json: ["changeId": changeId])
+    }
+
+    public func siBlocked() async throws -> [SiBlock] {
+        let page: SiBlockedPage = try await send("GET", "/v1/si/blocked")
+        return page.blocked
+    }
+
+    public func siUnblock(_ ruleId: String) async throws -> String? {
+        let page: SiBlockedPage = try await send("POST", "/v1/si/blocked/remove", json: ["ruleId": ruleId])
+        return page.changeId
+    }
+
+    /// A suggested reply. It is not sent. `sourceText` is the body this phone decrypted.
+    public func siReply(messageId: String, tone: SiTone, instruction: String, sourceText: String?, threadText: String) async throws -> DraftView {
+        var body: [String: Any] = ["messageId": messageId, "tone": tone.rawValue, "instruction": instruction, "threadText": threadText]
+        if let sourceText { body["sourceText"] = sourceText }
+        return try await send("POST", "/v1/si/reply", json: body)
     }
 
     public func disableRule(_ id: String) async throws -> RulesDocument {
