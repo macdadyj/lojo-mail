@@ -12,7 +12,7 @@ IOS="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=phone-lib.sh
 source "$IOS/scripts/phone-lib.sh"
 lojo_pick_phone || exit 1
-BUNDLE="${LOJO_BUNDLE:-XTL-HG9HAYXW44.com.lojo.Mail}"
+BUNDLE="$(lojo_mail_bundle)"
 WAIT="${LOJO_SHOT_WAIT:-10}"
 
 args=()

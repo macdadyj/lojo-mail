@@ -74,11 +74,28 @@ struct MailboxView: View {
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
+            if model.sendTestMode {
+                Button { model.sendTestMode = false } label: {
+                    Banner(text: "Test mode is on. Sending only goes to \(AppModel.testAddress). Tap to turn it off.", systemImage: "testtube.2", tint: .orange)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("testmode.off")
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            }
             if model.keyMismatch {
                 Button { showKeySetup = true } label: {
                     Banner(text: "The key on this iPhone doesn't match this mailbox, so mail won't open. Tap to replace it.", systemImage: "exclamationmark.lock.fill", tint: .red)
                 }
                 .buttonStyle(.plain)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            } else if model.key == nil && model.keyReadUnavailable {
+                Button { model.restoreAfterForeground() } label: {
+                    Banner(text: "Your envelope key is still in the Keychain. Unlock this iPhone and tap to try again.", systemImage: "lock.fill", tint: .orange)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("unlock.retry-keychain")
                 .listRowSeparator(.hidden)
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             } else if model.key == nil {

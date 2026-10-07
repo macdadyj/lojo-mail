@@ -26,10 +26,13 @@ struct RootView: View {
                     .transition(.opacity)
             }
         }
-        .onChange(of: scenePhase) { old, phase in
+        .onChange(of: scenePhase) { _, phase in
             obscured = phase != .active
             if phase == .background && model.appLockEnabled { locked = true }
-            if phase == .active && locked { Task { await unlock() } }
+            if phase == .active {
+                model.restoreAfterForeground()
+                if locked { Task { await unlock() } }
+            }
         }
         .onAppear {
             if model.appLockEnabled { locked = true; Task { await unlock() } }

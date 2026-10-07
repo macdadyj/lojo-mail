@@ -220,7 +220,8 @@ test("a bot rule cannot touch the switches or limits", async () => {
 });
 
 test("test-send goes only to lojo-test, honours the send kill switch and is rate limited", async () => {
-  let now = new Date("2026-10-01T10:00:00Z");
+  // Stay inside the 7-day audit window. The later jump is still a different hour, so the rate limit resets.
+  let now = new Date(Date.now() - 2 * 3_600_000);
   const w = await memoryWorld({ now: () => now, deps: {} });
   const sent = await w.mailbox.botTestSend({ bot: "bot:grok", subject: "hello", text: "checking the pipe" });
   assert.equal(sent.to, LOJO_TEST_RECIPIENT);
@@ -235,7 +236,7 @@ test("test-send goes only to lojo-test, honours the send kill switch and is rate
 
   for (let i = 0; i < 4; i += 1) await w.mailbox.botTestSend({ bot: "bot:grok", subject: `n${i}`, text: "x" });
   await assert.rejects(w.mailbox.botTestSend({ bot: "bot:grok", subject: "6th", text: "x" }), /limited/);
-  now = new Date("2026-10-01T12:00:00Z");
+  now = new Date(now.getTime() + 2 * 3_600_000);
   await w.mailbox.botTestSend({ bot: "bot:grok", subject: "next hour", text: "x" });
 
   await w.mailbox.setRuleSwitches({ sendKillSwitch: true }, "agent");

@@ -3,15 +3,10 @@ import LojoMailCore
 
 /// USB provisioning from Santa Computa (`ios/scripts/provision-phone.sh`): the script pushes files into this
 /// app's container with house_arrest, which only a trusted, paired host can do for a development-signed app.
-/// On launch they are moved into the Keychain and deleted. Nothing here is reachable from the Files app.
+/// Launch and the "USB from Santa Computa" button move them into the Keychain and delete the files.
+/// Nothing here is reachable from the Files app.
 enum Provisioning {
-    struct Imported {
-        var session: Session?
-        var key: Envelope.PrivateKey?
-        var apiURL: URL?
-    }
-
-    static let files = ["provision-session.json", "provision-envelope.private.jwk", "provision-api-url.txt"]
+    static let files = USBProvision.fileNames
 
     /// Files handed to the app ("Open in LOJO Mail", AirDrop) are copied into Documents/Inbox. Only key files arrive
     /// there, so nothing in it is kept.
@@ -28,22 +23,11 @@ enum Provisioning {
         try? FileManager.default.removeItem(at: url)
     }
 
-    static func importPending() -> Imported {
-        var out = Imported()
-        guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return out }
-        defer { for name in files { try? FileManager.default.removeItem(at: dir.appendingPathComponent(name)) } }
-        if let data = try? Data(contentsOf: dir.appendingPathComponent("provision-session.json")),
-           let session = try? JSONDecoder().decode(Session.self, from: data), session.isValid() {
-            out.session = session
+    static func importPending() -> USBProvision.Files {
+        guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return USBProvision.Files()
         }
-        if let text = try? String(contentsOf: dir.appendingPathComponent("provision-envelope.private.jwk"), encoding: .utf8),
-           let key = try? Envelope.PrivateKey(pasted: text) {
-            out.key = key
-        }
-        if let text = try? String(contentsOf: dir.appendingPathComponent("provision-api-url.txt"), encoding: .utf8) {
-            out.apiURL = APIClient.validatedBaseURL(text)
-        }
-        return out
+        return USBProvision.consume(directory: dir)
     }
 }
 

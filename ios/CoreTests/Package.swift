@@ -18,7 +18,10 @@ let package = Package(
         ),
         .testTarget(
             name: "LojoMailCoreTests",
-            dependencies: ["LojoMailCore"]
+            dependencies: [
+                "LojoMailCore",
+                .product(name: "Crypto", package: "swift-crypto"),
+            ]
         ),
     ]
 )

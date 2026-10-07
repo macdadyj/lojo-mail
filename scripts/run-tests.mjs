@@ -19,7 +19,7 @@ function walk(dir, out = []) {
   return out;
 }
 
-const files = [...walk("packages"), ...walk("scripts")];
+const files = [...walk("packages"), ...walk("scripts"), ...walk("ios")];
 if (files.length === 0) {
   console.error("no tests found");
   process.exit(1);

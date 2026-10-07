@@ -6,7 +6,7 @@ The web app's threat model (`docs/SECURITY.md`) still applies. This covers what 
 
 | What | Where | Accessibility |
 | --- | --- | --- |
-| Envelope private key (`envelope.private.jwk`) | Keychain, service `com.lojo.Mail` | `WhenUnlockedThisDeviceOnly`: never in backups, never migrates to a new phone, unreadable while locked |
+| Envelope private key (`envelope.private.jwk`) | Keychain, service `com.lojo.Mail` | `AfterFirstUnlock`: still readable after the first unlock since boot, including while the screen is locked, so an app update does not look like the key vanished. Not a file in the app sandbox. |
 | Session token (`hs_…`, 12 h) | Keychain | `AfterFirstUnlockThisDeviceOnly` so background refresh can list mail |
 | Web passphrase (only with "Keep me signed in") | Keychain | `AfterFirstUnlockThisDeviceOnly` |
 
@@ -24,8 +24,11 @@ The web app's threat model (`docs/SECURITY.md`) still applies. This covers what 
 - **Passphrase field**: `SecureField` with `textContentType(.password)` next to a `.username` field, autocorrect,
   autocapitalisation and spell-check off, show/hide toggle that resets on backgrounding. No associated domains (free
   account), so iOS won't offer to save the passphrase from the app; it can still be filled from the password manager.
-- Because the key is `WhenUnlocked`, background refresh can't decrypt; notifications use list metadata only
-  (sender and subject, which the server already stores in the clear for listing).
+- A keychain read that fails because the phone is locked is not treated as "no key", and it does not delete the item.
+  The old `WhenUnlockedThisDeviceOnly` class failed that way, so the unlock screen came back after a locked launch
+  or a background refresh. Session expiry deletes the session token only. The envelope key stays.
+- Background refresh still lists metadata only (sender and subject, which the server already stores in the clear).
+  It does not need the envelope key, and it does not remove it.
 - The app never logs: there is no `print`, `os_log` or `Logger` in the sources. `URLSession` is ephemeral (no cookie
   store, no URL cache).
 - Only HTTPS base URLs are accepted (plain HTTP only for loopback, for the local demo). No ATS exceptions.
@@ -50,8 +53,10 @@ The web app's threat model (`docs/SECURITY.md`) still applies. This covers what 
   to/cc/subject/text/pgp, then `approve-and-send` with the one-time token. If a bot edited the draft between review and
   tap, the server refuses (409), the app shows which fields changed and disarms the button for 3 seconds.
 - Every send goes through a confirmation that names the recipients and the From address.
-- **Test mode is on by default**: the app refuses any recipient other than `lojo-test@cyberphysical.us` before it
-  calls the server. Jon turns it off in Settings when he is ready to send real mail from the phone.
+- **Test mode is off unless Jon turns it on.** A missing preference is off. It used to register a default of on,
+  so a new app container (reinstall, or a new `XTL-<team>` bundle id after switching signing teams) silently
+  limited sending to `lojo-test@cyberphysical.us`. The choice is stored in UserDefaults and the Keychain. The
+  inbox and Compose show **Turn off test mode** while it is on. Screenshot launch variables do not enable it.
 - The app never uses `/v1/client/send` (a bridge-only scope); attachments go through the same approval flow.
 
 ## Kill switches and rules
@@ -66,8 +71,10 @@ for confirmation first. Disabling a rule is always allowed; the app has no way t
 `provision-phone.sh` signs in on Santa Computa, then uses `house_arrest` to drop `provision-session.json` and
 `provision-envelope.private.jwk` into the app's own container. Only a paired, trusted host can reach a
 development-signed app's container; `UIFileSharingEnabled` is off, so the files are not visible in the Files app or
-Finder. The app imports them into the Keychain and deletes them on its next launch. The host copies live in a
-`mktemp` directory that is removed on exit. The script prints nothing secret.
+Finder. The bundle id is discovered with `pymobiledevice3 apps list` (`XTL-*.com.lojo.Mail`); it is not hardcoded.
+The app imports the files into the Keychain when it becomes active and when **USB from Santa Computa** is tapped,
+then deletes them. Launching the app over USB is best-effort, because iOS 17+ needs a tunnel for that step.
+The host copies live in a `mktemp` directory that is removed on exit. The script prints nothing secret.
 
 ## In git
 

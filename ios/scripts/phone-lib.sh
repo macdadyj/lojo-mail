@@ -33,3 +33,26 @@ sys.exit(1)
   export LOJO_UDID="$picked"
   export PYMOBILEDEVICE3_UDID="$picked"
 }
+
+# Installed LOJO Mail bundle (XTL-*.com.lojo.Mail). LOJO_BUNDLE overrides. Never hardcodes a team id.
+# Reads `pymobiledevice3 apps list`.
+lojo_mail_bundle() {
+  if [[ -n "${LOJO_BUNDLE:-}" ]]; then
+    printf '%s\n' "$LOJO_BUNDLE"
+    return 0
+  fi
+  local ios
+  ios="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  pymobiledevice3 apps list | python3 "$ios/mail-bundle.py"
+}
+
+# iOS 17+ `core-device launch-application` needs a tunnel (sudo tunneld). Missing that must not
+# fail provisioning: the files are already in the app container.
+lojo_launch_best_effort() {
+  local bundle="$1"
+  if pymobiledevice3 developer core-device launch-application --userspace --kill-existing "$bundle" '' >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "warning: open LOJO Mail on the phone to finish import" >&2
+  return 0
+}

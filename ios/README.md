@@ -61,8 +61,9 @@ ios/scripts/provision-phone.sh          # hand the app a fresh session + the env
 ```
 
 With more than one iPhone on USB the scripts refuse to guess: pick one with `LOJO_PHONE="14 Pro Max"` (or `"11"`;
-the error lists what is attached), or `LOJO_UDID`. The UDID is read from USB at run time and never written to the repo. The installed bundle
-ID is `XTL-HG9HAYXW44.com.lojo.Mail` (xtool prefixes the team ID).
+the error lists what is attached), or `LOJO_UDID`. The UDID is read from USB at run time and never written to the repo. xtool
+installs the app as `XTL-<team>.com.lojo.Mail`. The phone scripts find that id with `pymobiledevice3 apps list`
+and do not hardcode a team id. Set `LOJO_BUNDLE` only when more than one match is installed.
 
 ### Signing in on the phone
 
@@ -88,7 +89,10 @@ After sign-in the app asks for `envelope.private.jwk` (later: **Settings → Dec
 - **Paste**: copy the JWK text and tap *Paste*; the clipboard is cleared once the key is saved.
 - **By hand**: type or paste into the hidden field (eye to check), then *Save to Keychain*.
 - **USB from Santa Computa**: `ios/scripts/provision-phone.sh` signs in on the host and pushes the session and the key
-  into the app's private container; the app moves both into the Keychain and deletes the files on its next launch.
+  into the app's private container. That button imports them immediately (launch and the next time the app is
+  active do the same) and deletes the files. If no key is waiting, it explains how to run the script and offers Try again.
+  Launching the app from the computer is best-effort: on iOS 17+ that step needs a tunnel, and the script tells you
+  to open LOJO Mail on the phone to finish the import instead of failing.
 
 AirDrop, share and "Open in" copy the file into the app's Documents/Inbox. The app reads it, deletes that copy at once,
 shows the key's fingerprint (and whether it matches the mailbox's published fingerprint) and asks before storing or

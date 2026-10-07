@@ -146,7 +146,8 @@ test("both kill switches stop send-new, and the hourly cap is enforced", async (
 });
 
 test("a waived approval is time-boxed, sends without a quote, and reverts on its own", async () => {
-  let now = new Date("2026-10-01T12:00:00.000Z");
+  // Stay inside the 7-day audit window. The grant still expires when the clock jumps past it.
+  let now = new Date(Date.now() - 2 * 3_600_000);
   const app = await testApp({ now: () => now });
   const session = await app.login();
   const created = await app.call("/v1/bots", { token: session, body: { name: "grok", scopes: ["read", "write", "body", "send-approved"] } });

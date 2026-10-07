@@ -121,7 +121,8 @@ test("agent tokens may hold trash and rules (Jon opts in per agent) and are labe
 });
 
 test("the bridge with the trash scope soft-deletes: Trash with a retention window, audited, restorable", async () => {
-  const now = new Date("2026-09-30T12:00:00Z");
+  // Audit reads the last 7 days of the real clock. A frozen date outside that window looks like "no audit".
+  const now = new Date();
   const t = await testApp({ bridgeTrash: true, now: () => now });
   const { message } = await t.ingest(fixture("personal.eml"));
   const res = await t.call(`/v1/messages/${message.id}/move`, { token: "bridge-token", body: { folder: "trash" } });

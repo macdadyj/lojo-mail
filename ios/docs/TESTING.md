@@ -2,9 +2,11 @@
 
 ## Automated (Linux, `ios/scripts/test-core.sh`)
 
-`CoreTests` builds `LojoMailCore` with swift-crypto on Santa Computa. 23 tests:
+`CoreTests` builds `LojoMailCore` with swift-crypto on Santa Computa. Offline tests include the unlock buttons,
+USB import, test mode staying off unless chosen, and the envelope key surviving session expiry, an app update,
+and relaunch (`UnlockAndPersistenceTests`). CI runs `ios/scripts/test-core.sh` and `ios/scripts/provision-phone.test.mjs`.
 
-- **Offline (18)**: envelopes sealed by `packages/core/src/envelope.ts` open in Swift (body, 70 KB attachment); wrong
+- **Offline**: envelopes sealed by `packages/core/src/envelope.ts` open in Swift (body, 70 KB attachment); wrong
   AAD, wrong key and tampering are refused; JWK validation; fingerprint equals `keyFingerprint` from `packages/core`; model decoding (messages, drafts, rules
   including `sendKillSwitch`, session expiry); key files as Files/AirDrop/paste deliver them (BOM,
   pretty-printed, newlines dropped by a secure field, extra JWK members) and the wrong ones refused (public key,

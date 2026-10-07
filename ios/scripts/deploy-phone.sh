@@ -7,7 +7,6 @@
 set -euo pipefail
 
 IOS="$(cd "$(dirname "$0")/.." && pwd)"
-BUNDLE="${LOJO_BUNDLE:-XTL-HG9HAYXW44.com.lojo.Mail}"
 
 # shellcheck disable=SC1091
 source "$HOME/.config/ios-dev/env"
@@ -29,5 +28,9 @@ fi
 
 xtool dev run --usb --udid "$LOJO_UDID"
 sleep 1
-pymobiledevice3 developer core-device launch-application --userspace "$BUNDLE" '' >/dev/null
-echo "installed + launched $BUNDLE"
+if BUNDLE="$(lojo_mail_bundle)"; then
+  lojo_launch_best_effort "$BUNDLE"
+  echo "installed $BUNDLE"
+else
+  echo "warning: open LOJO Mail on the phone to finish import" >&2
+fi

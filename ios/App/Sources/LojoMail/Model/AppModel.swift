@@ -63,7 +63,20 @@ final class AppModel {
     var openThreadRequest: String?
     var lastBackgroundCheck: Date?
 
-    var sendTestMode: Bool { didSet { UserDefaults.standard.set(sendTestMode, forKey: "sendTestMode") } }
+    /// Off unless Jon turns it on. The choice is stored in UserDefaults and the Keychain.
+    /// A missing value is off: the old registered default of `true` turned test mode on by itself
+    /// whenever the app container was new (reinstall, or a new `XTL-<team>` bundle id).
+    var sendTestMode: Bool {
+        didSet {
+            UserDefaults.standard.set(sendTestMode, forKey: Self.testModeDefaultsKey)
+            _ = Keychain.set(Data([sendTestMode ? 1 : 0]), for: .testMode)
+        }
+    }
+
+    /// Set when the envelope key could not be read (phone locked). Not the same as "no key".
+    var keyReadUnavailable = false
+
+    private static let testModeDefaultsKey = "sendTestMode"
     var notificationsEnabled: Bool { didSet { UserDefaults.standard.set(notificationsEnabled, forKey: "notificationsEnabled") } }
     var notificationSubjects: Bool { didSet { UserDefaults.standard.set(notificationSubjects, forKey: "notificationSubjects") } }
     var appLockEnabled: Bool { didSet { UserDefaults.standard.set(appLockEnabled, forKey: "appLockEnabled") } }
@@ -77,8 +90,21 @@ final class AppModel {
 
     init() {
         let defaults = UserDefaults.standard
-        defaults.register(defaults: ["sendTestMode": true, "notificationsEnabled": false, "notificationSubjects": false, "appLockEnabled": false])
-        sendTestMode = defaults.bool(forKey: "sendTestMode")
+        defaults.register(defaults: ["notificationsEnabled": false, "notificationSubjects": false, "appLockEnabled": false])
+        let defaultsChoice: TestModeChoice = defaults.object(forKey: Self.testModeDefaultsKey) == nil
+            ? .unset
+            : .explicit(defaults.bool(forKey: Self.testModeDefaultsKey))
+        let keychainChoice: TestModeChoice
+        switch Keychain.lookup(.testMode) {
+        case .found(let data):
+            keychainChoice = .explicit(data.first == 1)
+        case .missing, .unavailable:
+            keychainChoice = .unset
+        }
+        sendTestMode = TestModePolicy.isOn(keychain: keychainChoice, userDefaults: defaultsChoice)
+        if case .missing = Keychain.lookup(.testMode), case .explicit(let on) = defaultsChoice {
+            _ = Keychain.set(Data([on ? 1 : 0]), for: .testMode)
+        }
         notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
         notificationSubjects = defaults.bool(forKey: "notificationSubjects")
         appLockEnabled = defaults.bool(forKey: "appLockEnabled")
@@ -103,32 +129,115 @@ final class AppModel {
 
     func start() {
         AttachmentFiles.purge()
-        let imported = Provisioning.importPending()
-        if let url = imported.apiURL { setAPIBase(url) }
-        if let session = imported.session { store(session: session) }
-        if let key = imported.key { store(key: key) }
+        _ = applyProvisioned(Provisioning.importPending())
+        reloadSecrets(initial: true)
+    }
 
-        if let data = Keychain.get(.session), let stored = try? JSONDecoder().decode(Session.self, from: data) {
+    /// Foreground: import a USB drop that arrived while the app was open, and re-read the keychain.
+    /// A locked read does not clear the envelope key.
+    func restoreAfterForeground() {
+        _ = applyProvisioned(Provisioning.importPending())
+        reloadSecrets(initial: false)
+    }
+
+    private func reloadSecrets(initial: Bool) {
+        switch EnvelopeKeyLoad.decide(read: Keychain.lookup(.envelopeKey)) {
+        case .loaded(let data):
+            if let text = String(data: data, encoding: .utf8), let parsed = try? Envelope.PrivateKey(pasted: text) {
+                key = parsed
+                _ = Keychain.set(data, for: .envelopeKey)
+            }
+            keyReadUnavailable = false
+        case .unchanged:
+            keyReadUnavailable = key == nil
+        case .absent:
+            if initial { key = nil }
+            keyReadUnavailable = false
+        }
+        if session == nil, case .found(let data) = Keychain.lookup(.session),
+           let stored = try? JSONDecoder().decode(Session.self, from: data) {
             session = stored
         }
-        if let data = Keychain.get(.envelopeKey), let text = String(data: data, encoding: .utf8) {
-            key = try? Envelope.PrivateKey(pasted: text)
+        switch Keychain.lookup(.passphrase) {
+        case .found:
+            keepsPassphrase = true
+        case .missing:
+            if initial { keepsPassphrase = false }
+        case .unavailable:
+            break
         }
-        keepsPassphrase = Keychain.get(.passphrase) != nil
+        if case .found(let flag) = Keychain.lookup(.testMode) {
+            let on = flag.first == 1
+            if sendTestMode != on { sendTestMode = on }
+        }
+        // Screenshot launch only. It does not delete the key or turn on test mode.
         if launch.previewSignedOut {
             phase = .signedOut
             return
         }
-        if session?.isValid() == true {
+        switch SessionRecovery.step(sessionValid: session?.isValid() == true, passphrase: SecretPresence(Keychain.lookup(.passphrase))) {
+        case .ready:
             phase = .ready
-        } else if keepsPassphrase {
+        case .renew:
             phase = .ready
-            Task { if await renewSession() == false { expire() } }
-        } else {
+            Task {
+                switch await renewSession() {
+                case .renewed:
+                    break
+                case .cannot:
+                    expire()
+                case .unreadable:
+                    break
+                }
+            }
+        case .reauthenticate:
             phase = .signedOut
-            if session != nil { signOutReason = "Your session ended. Sign in again." }
+            if session != nil {
+                signOutReason = "Your session ended. Sign in again. Your envelope key stays in the Keychain."
+            }
         }
         if let folder = launch.folder, folders[folder] == nil { folders[folder] = FolderState() }
+    }
+
+    @discardableResult
+    func applyProvisioned(_ files: USBProvision.Files) -> UnlockImportResult {
+        if let url = files.apiURL { setAPIBase(url) }
+        if let session = files.session { store(session: session) }
+        switch USBProvision.outcome(files) {
+        case .unlocked:
+            guard let key = files.key else { return .missing(USBProvision.missingGuidance) }
+            do {
+                try checkBelongsToMailbox(key)
+                guard store(key: key) else { return .failed("Couldn't save the key to the Keychain. Nothing already stored was removed.") }
+                return .unlocked
+            } catch {
+                return .failed(error.localizedDescription)
+            }
+        case .missing(let guidance):
+            return .missing(guidance)
+        case .failed(let message):
+            return .failed(message)
+        }
+    }
+
+    func importProvisionedUSB() -> UnlockImportResult {
+        applyProvisioned(Provisioning.importPending())
+    }
+
+    func importSharedKey(action: UnlockButton.Action) -> UnlockImportResult {
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return .missing(UnlockScreen.missingGuidance(for: action))
+        }
+        let inbox = docs.appendingPathComponent("Inbox", isDirectory: true)
+        guard let url = InboxDrop.firstKeyFile(in: inbox) else {
+            return .missing(UnlockScreen.missingGuidance(for: action))
+        }
+        do {
+            try importKey(fileAt: url)
+            return .unlocked
+        } catch {
+            return .failed(error.localizedDescription)
+        }
     }
 
     func signIn(passphrase: String, keep: Bool) async throws {
@@ -155,11 +264,17 @@ final class AppModel {
         if let data = try? JSONEncoder().encode(session) { Keychain.set(data, for: .session) }
     }
 
-    func store(key: Envelope.PrivateKey) {
-        guard let data = try? key.encoded() else { return }
-        Keychain.set(data, for: .envelopeKey)
+    @discardableResult
+    func store(key: Envelope.PrivateKey) -> Bool {
+        guard let data = try? key.encoded() else { return false }
+        guard Keychain.set(data, for: .envelopeKey) else { return false }
         self.key = key
         bodies = bodies.filter { if case .opened = $0.value { return true } else { return false } }
+        return true
+    }
+
+    struct KeychainSaveFailure: LocalizedError {
+        var errorDescription: String? { "Couldn't save the key to the Keychain. Nothing already stored was removed." }
     }
 
     struct WrongKey: LocalizedError {
@@ -175,13 +290,13 @@ final class AppModel {
     func importKey(_ text: String) throws {
         let key = try KeyFile.parse(text)
         try checkBelongsToMailbox(key)
-        store(key: key)
+        guard store(key: key) else { throw KeychainSaveFailure() }
     }
 
     func importKey(fileAt url: URL) throws {
         let key = try readKeyFile(url)
         try checkBelongsToMailbox(key)
-        store(key: key)
+        guard store(key: key) else { throw KeychainSaveFailure() }
     }
 
     private func checkBelongsToMailbox(_ key: Envelope.PrivateKey) throws {
@@ -216,7 +331,10 @@ final class AppModel {
 
     func accept(_ incoming: IncomingKey) {
         incomingKey = nil
-        store(key: incoming.key)
+        guard store(key: incoming.key) else {
+            keyImportError = KeychainSaveFailure().errorDescription
+            return
+        }
         toast = Toast(text: "Key saved to Keychain", systemImage: "key.fill")
         if phase == .ready { Task { await refreshAll() } }
     }
@@ -259,17 +377,34 @@ final class AppModel {
         phase = .signedOut
     }
 
+    /// Drops the session only. The envelope key stays in memory and in the Keychain.
     private func expire() {
+        let kept = key
         Keychain.delete(.session)
         session = nil
-        signOutReason = "Your session ended. Sign in again."
+        signOutReason = "Your session ended. Sign in again. Your envelope key stays in the Keychain."
         phase = .signedOut
+        key = kept
     }
 
+    private enum RenewResult { case renewed, cannot, unreadable }
+
     /// Signs in again with the stored passphrase (only if Jon chose "Keep me signed in").
-    private func renewSession() async -> Bool {
-        if let renewing { return await renewing.value }
-        guard let data = Keychain.get(.passphrase), let passphrase = String(data: data, encoding: .utf8) else { return false }
+    /// An unreadable keychain is not treated as "no passphrase": the session is not thrown away.
+    private func renewSession() async -> RenewResult {
+        if let renewing {
+            return await renewing.value ? .renewed : .cannot
+        }
+        let passphraseData: Data
+        switch Keychain.lookup(.passphrase) {
+        case .found(let data):
+            passphraseData = data
+        case .missing:
+            return .cannot
+        case .unavailable:
+            return .unreadable
+        }
+        guard let passphrase = String(data: passphraseData, encoding: .utf8) else { return .cannot }
         let base = apiBase
         let urlSession = urlSession
         let task = Task<Bool, Never> {
@@ -280,18 +415,33 @@ final class AppModel {
         renewing = task
         let ok = await task.value
         renewing = nil
-        return ok
+        return ok ? .renewed : .cannot
     }
 
-    /// Every API call goes through here: an expired session is renewed once if possible, otherwise Jon is signed out.
+    /// Every API call goes through here: an expired session is renewed once if possible.
+    /// Failure to renew asks Jon to sign in again and does not remove the envelope key.
+    /// A keychain that is only locked does not sign him out.
     func call<T: Sendable>(_ operation: @Sendable (APIClient) async throws -> T) async throws -> T {
-        if session?.isValid(margin: 300) != true, keepsPassphrase { _ = await renewSession() }
+        if session?.isValid(margin: 300) != true {
+            switch await renewSession() {
+            case .renewed, .unreadable:
+                break
+            case .cannot:
+                break
+            }
+        }
         do {
             return try await operation(api)
         } catch APIError.unauthorized {
-            if await renewSession() { return try await operation(api) }
-            expire()
-            throw APIError.unauthorized
+            switch await renewSession() {
+            case .renewed:
+                return try await operation(api)
+            case .unreadable:
+                throw APIError.unauthorized
+            case .cannot:
+                expire()
+                throw APIError.unauthorized
+            }
         }
     }
 
@@ -354,7 +504,8 @@ final class AppModel {
         pollTask = nil
     }
 
-    /// Background app refresh: metadata only, since the envelope key is not readable while the phone is locked.
+    /// Background app refresh lists metadata only. The envelope key stays in the Keychain
+    /// (`AfterFirstUnlock`) and is not required for this pass.
     func backgroundRefresh() async {
         Notifier.scheduleRefresh()
         guard phase == .ready || keepsPassphrase else { return }

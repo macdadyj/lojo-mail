@@ -6,6 +6,8 @@
 	<string>LOJO Mail</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.1</string>
+	<key>CFBundleVersion</key>
+	<string>2</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>LOJO Mail can ask for Face ID before it shows your mail.</string>
 	<key>NSCameraUsageDescription</key>

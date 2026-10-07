@@ -127,11 +127,16 @@ struct ComposeView: View {
                         .foregroundStyle(.red)
                 }
             }
-            if !model.blockedByTestMode.isEmpty {
+            if app.sendTestMode {
                 Section {
-                    Label("Test mode is on. Sending is limited to \(AppModel.testAddress); \(model.blockedByTestMode.joined(separator: ", ")) would be refused. Save to the approval queue instead, or turn test mode off in Settings.", systemImage: "testtube.2")
+                    Label(model.blockedByTestMode.isEmpty
+                        ? "Test mode is on. Sending is limited to \(AppModel.testAddress)."
+                        : "Test mode is on. Sending is limited to \(AppModel.testAddress); \(model.blockedByTestMode.joined(separator: ", ")) would be refused.",
+                        systemImage: "testtube.2")
                         .font(.footnote)
                         .foregroundStyle(.orange)
+                    Button("Turn off test mode") { app.sendTestMode = false }
+                        .accessibilityIdentifier("testmode.off")
                 }
             }
             if let status = model.status {

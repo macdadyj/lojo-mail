@@ -1,5 +1,6 @@
 import LojoMailCore
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct SignInView: View {
@@ -102,7 +103,13 @@ struct SignInView: View {
                 }
                 .font(.footnote)
 
-                Text("Messages are sealed to your envelope key and are opened only on this iPhone. After signing in you'll load that key once.")
+                    if model.key != nil {
+                        Text("Your envelope key is still in the Keychain. Signing in again does not remove it.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    Text("Messages are sealed to your envelope key and are opened only on this iPhone. After signing in you'll load that key once.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -153,45 +160,66 @@ struct KeySetupView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
     @State private var error: String?
+    @State private var guidance: String?
     @State private var importing = false
+    @State private var retryTarget: UnlockButton.Action?
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Text("Mail is sealed to your envelope key, **envelope.private.jwk**, and opened only on this iPhone. Load it once; it stays in this iPhone's Keychain.")
+                    Text("Mail is sealed to your envelope key, **envelope.private.jwk**, and opened only on this iPhone. Load it once; it stays in the Keychain and an app update does not drop it.")
                         .font(.subheadline)
                 }
                 Section {
-                    Button { importing = true } label: {
-                        Label("Choose from Files…", systemImage: "folder")
-                    }
-                    PasteButton(payloadType: String.self) { strings in
-                        if let first = strings.first {
-                            Task { @MainActor in save(first, fromClipboard: true) }
+                    ForEach(UnlockScreen.loadButtons) { button in
+                        Button {
+                            perform(button.action)
+                        } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(button.title).font(.subheadline.weight(.semibold))
+                                    Text(UnlockScreen.detail(for: button.action))
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: button.systemImage).foregroundStyle(Theme.accent)
+                            }
                         }
+                        .accessibilityIdentifier(button.accessibilityIdentifier)
                     }
-                    .labelStyle(.titleAndIcon)
                 } header: {
                     Text("Load the key")
                 } footer: {
-                    Text("Paste clears the clipboard once the key is saved.")
-                }
-                Section("Other ways to get it here") {
-                    step("airplane.circle", "AirDrop", "From your Mac, AirDrop envelope.private.jwk to this iPhone and choose LOJO Mail.")
-                    step("square.and.arrow.up", "Share or Open in", "In Files, Mail or any app, share the file and pick LOJO Mail (or \"Open in LOJO Mail\").")
-                    step("cable.connector", "USB from Santa Computa", "Run ios/scripts/provision-phone.sh; the app picks the key up on its next launch.")
+                    Text("Every option is a button. Paste clears the clipboard once the key is saved. USB imports a key that provision-phone.sh already copied onto this iPhone.")
                 }
                 Section {
                     SecretField(title: "Paste or type the JWK", text: $text, noun: "key", contentType: nil, multiline: true) {
-                        save(text, fromClipboard: false)
+                        perform(.saveTypedKey)
                     }
-                    Button("Save to Keychain") { save(text, fromClipboard: false) }
-                        .disabled(text.isEmpty)
+                    Button {
+                        perform(UnlockScreen.saveButton.action)
+                    } label: {
+                        Label(UnlockScreen.saveButton.title, systemImage: UnlockScreen.saveButton.systemImage)
+                    }
+                    .accessibilityIdentifier(UnlockScreen.saveButton.accessibilityIdentifier)
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 } header: {
                     Text("Or enter it by hand")
                 } footer: {
-                    Text("Hidden while you type; tap the eye to check it. Stored in the iOS Keychain for this device only: not synced to iCloud, not in backups, and readable only while the iPhone is unlocked. You can replace or remove it later in Settings → Decryption.")
+                    Text("Hidden while you type; tap the eye to check it. Stored in the iOS Keychain with AfterFirstUnlock, not in the app's files. You can replace or remove it later in Settings → Decryption.")
+                }
+                if let guidance {
+                    Section {
+                        Text(guidance)
+                        Button {
+                            perform(.retry)
+                        } label: {
+                            Label(UnlockScreen.retry.title, systemImage: UnlockScreen.retry.systemImage)
+                        }
+                        .accessibilityIdentifier(UnlockScreen.retry.accessibilityIdentifier)
+                    }
                 }
                 if let error {
                     Section { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
@@ -207,12 +235,16 @@ struct KeySetupView: View {
                 case .success(let url):
                     do {
                         try model.importKey(fileAt: url)
-                        saved(fromClipboard: false)
+                        saved(fromClipboard: false, toast: "Key saved to Keychain")
                     } catch {
                         self.error = error.localizedDescription
+                        guidance = nil
                     }
                 case .failure(let failure):
+                    let ns = failure as NSError
+                    if ns.domain == NSCocoaErrorDomain && ns.code == NSUserCancelledError { return }
                     error = failure.localizedDescription
+                    guidance = UnlockScreen.missingGuidance(for: .chooseFromFiles)
                 }
             }
         }
@@ -220,33 +252,73 @@ struct KeySetupView: View {
 
     static let importTypes: [UTType] = [.jwk, .json, .plainText, .data]
 
-    private func step(_ icon: String, _ title: String, _ detail: String) -> some View {
-        Label {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(detail).font(.footnote).foregroundStyle(.secondary)
+    private func perform(_ action: UnlockButton.Action) {
+        switch action {
+        case .retry:
+            if let retryTarget { perform(retryTarget) }
+        case .chooseFromFiles:
+            retryTarget = action
+            importing = true
+        case .pasteKey:
+            retryTarget = action
+            paste()
+        case .airdrop, .shareOrOpenIn:
+            retryTarget = action
+            finish(model.importSharedKey(action: action), toast: "Key saved to Keychain")
+        case .usbFromSantaComputa:
+            retryTarget = action
+            finish(model.importProvisionedUSB(), toast: "Unlocked with the key from Santa Computa.")
+        case .saveTypedKey:
+            retryTarget = action
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                error = nil
+                guidance = UnlockScreen.missingGuidance(for: .saveTypedKey)
+            } else {
+                save(trimmed, fromClipboard: false)
             }
-        } icon: {
-            Image(systemName: icon).foregroundStyle(Theme.accent)
         }
-        .accessibilityElement(children: .combine)
+    }
+
+    private func paste() {
+        guard let value = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            error = nil
+            guidance = UnlockScreen.missingGuidance(for: .pasteKey)
+            return
+        }
+        save(value, fromClipboard: true)
+    }
+
+    private func finish(_ result: UnlockImportResult, toast: String) {
+        switch result {
+        case .unlocked:
+            saved(fromClipboard: false, toast: toast)
+        case .missing(let message):
+            error = nil
+            guidance = message
+        case .failed(let message):
+            guidance = nil
+            error = message
+        }
     }
 
     private func save(_ value: String, fromClipboard: Bool) {
         do {
             try model.importKey(value)
-            saved(fromClipboard: fromClipboard)
+            saved(fromClipboard: fromClipboard, toast: fromClipboard ? "Key saved. Clipboard cleared." : "Key saved to Keychain")
         } catch {
             self.error = error.localizedDescription
+            guidance = nil
         }
     }
 
-    private func saved(fromClipboard: Bool) {
+    private func saved(fromClipboard: Bool, toast: String) {
         text = ""
         error = nil
+        guidance = nil
         if fromClipboard { UIPasteboard.general.string = "" }
         Haptics.success()
-        model.toast = Toast(text: fromClipboard ? "Key saved. Clipboard cleared." : "Key saved to Keychain", systemImage: "key.fill")
+        model.toast = Toast(text: toast, systemImage: "key.fill")
         dismiss()
     }
 }

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Hand LOJO Mail a fresh 12-hour session and the envelope private key over USB, so Jon doesn't have to type
 # a JWK on the phone. Files go into the app's own container (house_arrest; only this paired, trusted host
-# can do that for a development-signed app). On next launch the app moves them into the Keychain and deletes them.
+# can do that for a development-signed app). The app imports them into the Keychain when it becomes
+# active, and the "USB from Santa Computa" button does it immediately. The files are then deleted.
 #   ios/scripts/provision-phone.sh            session + key
 #   ios/scripts/provision-phone.sh --session  session only
 # Reads ~/.config/lojo-mail/web-passphrase and ~/.config/lojo-mail/keys/envelope.private.jwk
@@ -9,7 +10,6 @@
 set -euo pipefail
 
 IOS="$(cd "$(dirname "$0")/.." && pwd)"
-BUNDLE="${LOJO_BUNDLE:-XTL-HG9HAYXW44.com.lojo.Mail}"
 API="${LOJO_API:-https://zp7h9ytl28.execute-api.us-east-1.amazonaws.com}"
 KEYFILE="${LOJO_KEY_FILE:-$HOME/.config/lojo-mail/keys/envelope.private.jwk}"
 
@@ -19,6 +19,7 @@ export PATH="$SWIFT_ROOT/usr/bin:$HOME/.local/bin:$PATH"
 # shellcheck source=phone-lib.sh
 source "$IOS/scripts/phone-lib.sh"
 lojo_pick_phone || exit 1
+BUNDLE="$(lojo_mail_bundle)"
 
 WORK="$(mktemp -d "${XTL_TMPDIR:-/tmp}/lojo-mail-provision.XXXXXX")"
 chmod 700 "$WORK"
@@ -34,5 +35,5 @@ if [[ "${1:-}" != "--session" ]]; then
   [[ -r "$KEYFILE" ]] || { echo "no envelope key at $KEYFILE" >&2; exit 1; }
   push "$KEYFILE" "provision-envelope.private.jwk"
 fi
-pymobiledevice3 developer core-device launch-application --userspace --kill-existing "$BUNDLE" '' >/dev/null
-echo "provisioned $BUNDLE ($([[ "${1:-}" == "--session" ]] && echo "session only" || echo "session + envelope key")); the app imported and deleted the files on launch"
+lojo_launch_best_effort "$BUNDLE"
+echo "provisioned $BUNDLE ($([[ "${1:-}" == "--session" ]] && echo "session only" || echo "session + envelope key")). Open LOJO Mail and tap USB from Santa Computa if it did not import on its own."

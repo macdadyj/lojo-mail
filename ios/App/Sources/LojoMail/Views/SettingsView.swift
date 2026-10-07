@@ -52,17 +52,22 @@ struct SettingsView: View {
                 } header: {
                     Text("Decryption")
                 } footer: {
-                    Text("Bodies and attachments are opened on this iPhone with this key. It is kept in the Keychain for this device only and is never sent anywhere.\n\nTo load or replace it: tap the button above and choose envelope.private.jwk from Files or paste it; or AirDrop or share the file to this iPhone and pick LOJO Mail.")
+                    Text("Bodies and attachments are opened on this iPhone with this key. It is kept in the Keychain (AfterFirstUnlock) so an app update does not drop it, and it is not stored in the app's files.\n\nTo load or replace it: tap the button above. Files, paste, AirDrop, share, and USB from Santa Computa are buttons.")
                 }
 
                 Section {
                     Toggle("Test mode", isOn: $model.sendTestMode)
+                        .accessibilityIdentifier("testmode.toggle")
+                    if model.sendTestMode {
+                        Button("Turn off test mode") { model.sendTestMode = false }
+                            .accessibilityIdentifier("testmode.off")
+                    }
                 } header: {
                     Text("Sending")
                 } footer: {
                     Text(model.sendTestMode
-                        ? "Sending is limited to \(AppModel.testAddress). Everything else can still be saved to the approval queue."
-                        : "Approve and send can reach any recipient. Every send still asks you to confirm.")
+                        ? "Test mode is on because you turned it on. Sending is limited to \(AppModel.testAddress). Tap Turn off test mode to leave it. The app will not turn it on by itself."
+                        : "Test mode is off. It stays off until you turn it on here. Approve and send can reach any recipient, and every send still asks you to confirm.")
                 }
 
                 Section {
@@ -124,7 +129,7 @@ struct SettingsView: View {
                 }
 
                 Section("About") {
-                    LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")
+                    LabeledContent("Version", value: Self.versionLabel)
                     Link("Open the web app", destination: URL(string: "https://app.cyberphysical.us")!)
                 }
 
@@ -152,6 +157,12 @@ struct SettingsView: View {
                 await model.refreshSettings()
             }
         }
+    }
+
+    private static var versionLabel: String {
+        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "2"
+        return "\(short) (\(build))"
     }
 
     private var backgroundRefreshStatus: String {
