@@ -20,6 +20,7 @@ struct MailboxView: View {
     @State private var selecting = false
     @State private var selectedThreads: Set<String> = []
     @State private var siFilter: SiFilterRequest?
+    @State private var messageFilter: SiMessageFilterRequest?
     @State private var labelFilter: String?
 
     private var state: FolderState { model.state(folder) }
@@ -45,7 +46,8 @@ struct MailboxView: View {
                 .navigationTitle(labelFilter.map(SiLabels.title) ?? folder.title)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) { folderMenu }
-                    ToolbarItem(placement: .topBarTrailing) { filterMenu }
+                    ToolbarItem(placement: .topBarTrailing) { selectMenu }
+                    ToolbarItem(placement: .topBarTrailing) { filterButton }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { compose = .new(to: nil) } label: { Image(systemName: "square.and.pencil") }
                             .accessibilityLabel("New message")
@@ -67,6 +69,10 @@ struct MailboxView: View {
         }
         .sheet(item: $siFilter) { request in
             NavigationStack { SiFilterView(request: request) }
+        }
+        .sheet(item: $messageFilter) { request in
+            NavigationStack { SiMessageFilterView(request: request, existingLabels: model.mailLabels) }
+                .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showKeySetup) { KeySetupView() }
         .onChange(of: model.openThreadRequest) { _, id in
@@ -223,21 +229,40 @@ struct MailboxView: View {
         .accessibilityLabel("Folders")
     }
 
-    private var filterMenu: some View {
+    private var filterButton: some View {
+        Button {
+            openFilter(selectedOnly: selecting && !selectedThreads.isEmpty)
+        } label: {
+            Label(SiEntry.filterTitle, systemImage: SiEntry.icon)
+                .labelStyle(.titleAndIcon)
+        }
+        .accessibilityLabel(SiEntry.filterTitle)
+        .accessibilityIdentifier("si.filter")
+    }
+
+    private var selectMenu: some View {
         Menu {
-            Button("Filter with SI", systemImage: "line.3.horizontal.decrease.circle") { openFilter(selectedOnly: false) }
             Button(selecting ? "Done selecting" : "Select messages", systemImage: selecting ? "checkmark.circle.fill" : "checklist") {
                 selecting.toggle()
                 if !selecting { selectedThreads = [] }
             }
-            if selecting && !selectedThreads.isEmpty {
-                Button("Filter \(selectedThreads.count) with SI", systemImage: "sparkles") { openFilter(selectedOnly: true) }
-            }
         } label: {
-            Image(systemName: "line.3.horizontal.decrease.circle")
+            Image(systemName: "checklist")
         }
-        .accessibilityLabel("Filter with SI")
-        .accessibilityIdentifier("si.filter")
+        .accessibilityLabel(selecting ? "Done selecting" : "Select messages")
+    }
+
+    private func openMessageFilter(_ conversation: Conversation) {
+        let messages = conversation.messages
+        guard let target = messages.last(where: { $0.origin != "sent" }) ?? messages.last else { return }
+        let email = target.from.email
+        messageFilter = SiMessageFilterRequest(
+            messageIds: messages.map(\.id),
+            from: email,
+            domain: email.split(separator: "@").last.map(String.init) ?? "",
+            subject: target.subject,
+            texts: model.siTexts(for: messages)
+        )
     }
 
     private func openFilter(selectedOnly: Bool) {
@@ -276,12 +301,26 @@ struct MailboxView: View {
                 Label("Restore", systemImage: "arrow.uturn.backward")
             }
             .tint(.green)
+            Button {
+                openMessageFilter(conversation)
+            } label: {
+                Label(SiEntry.filterTitle, systemImage: SiEntry.icon)
+            }
+            .tint(Theme.ai)
+            .accessibilityIdentifier("si.filter.swipe")
         } else {
             Button(role: .destructive) {
                 Task { await model.trash(conversation.messages, from: folder) }
             } label: {
                 Label("Trash", systemImage: "trash")
             }
+            Button {
+                openMessageFilter(conversation)
+            } label: {
+                Label(SiEntry.filterTitle, systemImage: SiEntry.icon)
+            }
+            .tint(Theme.ai)
+            .accessibilityIdentifier("si.filter.swipe")
             if folder != .archive {
                 Button {
                     Task { await model.archive(conversation.messages, from: folder) }
@@ -297,10 +336,9 @@ struct MailboxView: View {
     private func contextActions(_ conversation: Conversation) -> some View {
         leadingActions(conversation)
         Button {
-            let messages = conversation.messages
-            siFilter = SiFilterRequest(messageIds: messages.map(\.id), folder: nil, texts: model.siTexts(for: messages))
+            openMessageFilter(conversation)
         } label: {
-            Label("Filter with SI", systemImage: "line.3.horizontal.decrease.circle")
+            Label(SiEntry.filterTitle, systemImage: SiEntry.icon)
         }
         Menu("Move to") {
             ForEach(Folder.moveTargets.filter { $0 != folder }) { target in

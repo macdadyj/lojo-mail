@@ -21,7 +21,7 @@ struct ThreadView: View {
     @State private var showKeySetup = false
     @State private var confirmTrash = false
     @State private var siReply = false
-    @State private var siFilter: SiFilterRequest?
+    @State private var messageFilter: SiMessageFilterRequest?
     @State private var pendingSiDraft: DraftView?
 
     private var latest: Message? { messages.last }
@@ -53,7 +53,9 @@ struct ThreadView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { topToolbar }
-        .toolbar { bottomToolbar }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !messages.isEmpty { actionBar }
+        }
         .task { await load() }
         .refreshable { await load() }
         .sheet(item: $compose) { request in
@@ -71,8 +73,9 @@ struct ThreadView: View {
                 }
             }
         }
-        .sheet(item: $siFilter) { request in
-            NavigationStack { SiFilterView(request: request) }
+        .sheet(item: $messageFilter) { request in
+            NavigationStack { SiMessageFilterView(request: request, existingLabels: model.mailLabels) }
+                .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showKeySetup, onDismiss: { Task { await model.openBodies(messages) } }) { KeySetupView() }
         .quickLookPreview($preview)
@@ -202,12 +205,6 @@ struct ThreadView: View {
                         } label: { Label(target.title, systemImage: target.systemImage) }
                     }
                 }
-                if replyTarget != nil {
-                    Button { siReply = true } label: { Label("Reply with SI", systemImage: "sparkles") }
-                        .accessibilityIdentifier("si.reply")
-                    Button { filterThisThread() } label: { Label("Filter with SI", systemImage: "line.3.horizontal.decrease.circle") }
-                        .accessibilityIdentifier("si.filter.message")
-                }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
@@ -215,56 +212,74 @@ struct ThreadView: View {
         }
     }
 
-    @ToolbarContentBuilder
-    private var bottomToolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .bottomBar) {
-            if inTrash {
-                Button {
-                    Task {
-                        await model.restore(messages)
-                        dismiss()
+    private var actionBar: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(alignment: .top, spacing: 0) {
+                if inTrash {
+                    barButton("Restore", "arrow.uturn.backward", tint: .accentColor) {
+                        Task {
+                            await model.restore(messages)
+                            dismiss()
+                        }
                     }
-                } label: { Label("Restore", systemImage: "arrow.uturn.backward") }
-            } else {
-                Button(role: .destructive) { confirmTrash = true } label: { Label("Trash", systemImage: "trash") }
-                    .confirmationDialog("Move this conversation to Trash?", isPresented: $confirmTrash, titleVisibility: .visible) {
-                        Button("Move to Trash", role: .destructive) {
+                } else {
+                    barButton("Trash", "trash", tint: .red) { confirmTrash = true }
+                        .confirmationDialog("Move this conversation to Trash?", isPresented: $confirmTrash, titleVisibility: .visible) {
+                            Button("Move to Trash", role: .destructive) {
+                                Task {
+                                    await model.trash(messages, from: folder)
+                                    dismiss()
+                                }
+                            }
+                        } message: {
+                            Text("You can restore it from Trash for \(model.rules?.rules.trashRetentionDays ?? 30) days.")
+                        }
+                    if folder != .archive {
+                        barButton("Archive", "archivebox", tint: .accentColor) {
                             Task {
-                                await model.trash(messages, from: folder)
+                                await model.archive(messages, from: folder)
                                 dismiss()
                             }
                         }
-                    } message: {
-                        Text("You can restore it from Trash for \(model.rules?.rules.trashRetentionDays ?? 30) days.")
                     }
-                Spacer()
-                if folder != .archive {
-                    Button {
-                        Task {
-                            await model.archive(messages, from: folder)
-                            dismiss()
-                        }
-                    } label: { Label("Archive", systemImage: "archivebox") }
-                    Spacer()
+                }
+                if let target = replyTarget {
+                    barButton("Reply", "arrowshape.turn.up.left", tint: .accentColor, identifier: "thread.reply") {
+                        compose = .reply(target, all: false)
+                    }
+                    .contextMenu {
+                        Button { compose = .reply(target, all: true) } label: { Label("Reply All", systemImage: "arrowshape.turn.up.left.2") }
+                        Button { compose = .forward(latest ?? target) } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") }
+                    }
+                    barButton(SiEntry.replyTitle, SiEntry.icon, tint: Theme.ai, identifier: "si.reply") { siReply = true }
+                    barButton(SiEntry.filterTitle, SiEntry.icon, tint: Theme.ai, identifier: "si.filter.message") { openMessageFilter() }
                 }
             }
-            if let target = replyTarget {
-                Spacer()
-                Menu {
-                    Button { compose = .reply(target, all: false) } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }
-                    Button { compose = .reply(target, all: true) } label: { Label("Reply All", systemImage: "arrowshape.turn.up.left.2") }
-                    Button { compose = .forward(latest ?? target) } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") }
-                    Button { siReply = true } label: { Label("Reply with SI", systemImage: "sparkles") }
-                        .accessibilityIdentifier("si.reply")
-                } label: {
-                    Label("Reply", systemImage: "arrowshape.turn.up.left")
-                } primaryAction: {
-                    compose = .reply(target, all: false)
-                }
-                .accessibilityLabel("Reply")
-                .accessibilityHint("Hold for Reply All, Forward and Reply with SI")
-            }
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+            .background(.bar)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("thread.action-bar")
+    }
+
+    private func barButton(_ title: String, _ systemImage: String, tint: Color, identifier: String? = nil, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: systemImage).font(.body)
+                Text(title)
+                    .font(.caption2)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity)
+            .foregroundStyle(tint)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityIdentifier(identifier ?? title)
     }
 
     private func threadContext(except target: Message) -> String {
@@ -274,8 +289,16 @@ struct ThreadView: View {
         }.joined(separator: "\n\n")
     }
 
-    private func filterThisThread() {
-        siFilter = SiFilterRequest(messageIds: messages.map(\.id), folder: nil, texts: model.siTexts(for: messages))
+    private func openMessageFilter() {
+        guard let target = replyTarget else { return }
+        let email = target.from.email
+        messageFilter = SiMessageFilterRequest(
+            messageIds: messages.map(\.id),
+            from: email,
+            domain: email.split(separator: "@").last.map(String.init) ?? "",
+            subject: target.subject,
+            texts: model.siTexts(for: messages)
+        )
     }
 
     private func toggle(_ message: Message) {
