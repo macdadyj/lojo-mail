@@ -3,7 +3,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const skipDir = new Set(["node_modules", "dist", ".git", ".terraform", "coverage", "data", "imports"]);
+const skipDir = new Set(["node_modules", "dist", ".git", ".terraform", "coverage", "data", "imports", ".build"]);
 
 export const patterns = [
   { name: "PEM private key", re: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/ },
