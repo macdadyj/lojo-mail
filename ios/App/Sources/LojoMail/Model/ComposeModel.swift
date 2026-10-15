@@ -221,6 +221,11 @@ final class ComposeModel {
     /// Saves the text, then uploads any new attachments to the draft.
     @discardableResult
     func save() async throws -> String {
+        if model.launch.uiTest {
+            let id = draft?.id ?? "drf_uitest_local"
+            status = "Saved as a draft. Nothing is sent until you approve it."
+            return id
+        }
         guard !fields.toList.isEmpty else { throw APIError.invalid("Add at least one recipient.") }
         if !attachments.isEmpty {
             await model.refreshSettings()
@@ -275,7 +280,7 @@ final class ComposeModel {
             let id = try await save()
             let view = try await model.call { try await $0.submitForApproval(id) }
             show(view)
-            status = "In the approval queue (Review tab)."
+            status = "In the approval queue."
         }
     }
 

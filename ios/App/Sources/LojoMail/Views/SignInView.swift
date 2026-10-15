@@ -16,9 +16,9 @@ struct SignInView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 28) {
+            VStack(spacing: 32) {
                 header
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 16) {
                     VStack(spacing: 0) {
                         // The username half of the login form. The API only takes the passphrase, but password
                         // managers (iCloud Keychain, 1Password…) pair a .username field with the .password one to
@@ -40,7 +40,7 @@ struct SignInView: View {
                         .padding(.trailing, 4)
                         .frame(minHeight: 50)
                     }
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                     Text("Your password manager can fill the passphrase: tap the field, then the key or Passwords button above the keyboard. Save it under \(model.mailbox) (website app.cyberphysical.us) to find it here.")
                         .font(.caption)
@@ -77,7 +77,8 @@ struct SignInView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
-                    .disabled(passphrase.isEmpty || busy)
+                        .disabled(passphrase.isEmpty || busy)
+                        .accessibilityIdentifier("signin.submit")
                 }
 
                 DisclosureGroup(isExpanded: $showServer) {
@@ -128,11 +129,12 @@ struct SignInView: View {
     private var header: some View {
         VStack(spacing: 10) {
             Image(systemName: "envelope.badge.shield.half.filled")
-                .font(.system(size: logoSize, weight: .regular))
+                .font(.system(size: logoSize, weight: .medium, design: .rounded))
                 .foregroundStyle(Theme.accent.gradient)
-                .padding(.top, 40)
+                .padding(.top, 48)
+                .symbolEffect(.pulse, options: .nonRepeating)
                 .accessibilityHidden(true)
-            Text("LOJO Mail").font(.largeTitle.bold())
+            Text("LOJO Mail").font(.largeTitle.weight(.bold))
             Text(model.mailbox).font(.subheadline).foregroundStyle(.secondary)
         }
     }

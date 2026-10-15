@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var trustedText = ""
     @State private var trustedError: String?
     @State private var siFilter: SiFilterRequest?
+    @Environment(\.openReview) private var openReview
 
     var body: some View {
         @Bindable var model = model
@@ -20,6 +21,20 @@ struct SettingsView: View {
             Form {
                 Section("Account") {
                     LabeledContent("Mailbox", value: model.mailbox)
+                    Button {
+                        openReview()
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(AppChrome.reviewTitle, systemImage: "tray.full")
+                            Text(model.reviewCount == 0
+                                 ? "No drafts waiting. SI, assistants, and rules leave mail here instead of sending it."
+                                 : "\(model.reviewCount) waiting for your approval before anything is sent.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .accessibilityIdentifier("settings.approval-queue")
                     if let expiry = model.session?.expiry {
                         LabeledContent("Session until", value: expiry.formatted(date: .abbreviated, time: .shortened))
                     }
@@ -171,7 +186,10 @@ struct SettingsView: View {
                 }
 
                 Section("About") {
-                    LabeledContent("Version", value: Self.versionLabel)
+                    Text(AppBuild.label(info: Bundle.main.infoDictionary))
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("settings.build")
                     Link("Open the web app", destination: URL(string: "https://app.cyberphysical.us")!)
                 }
 
@@ -204,12 +222,6 @@ struct SettingsView: View {
                 await model.refreshSettings()
             }
         }
-    }
-
-    private static var versionLabel: String {
-        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "2"
-        return "\(short) (\(build))"
     }
 
     private var backgroundRefreshStatus: String {

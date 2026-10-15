@@ -22,6 +22,7 @@ struct MailboxView: View {
     @State private var siFilter: SiFilterRequest?
     @State private var messageFilter: SiMessageFilterRequest?
     @State private var labelFilter: String?
+    @Environment(\.openReview) private var openReview
 
     private var state: FolderState { model.state(folder) }
 
@@ -46,11 +47,12 @@ struct MailboxView: View {
                 .navigationTitle(labelFilter.map(SiLabels.title) ?? folder.title)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) { folderMenu }
-                    ToolbarItem(placement: .topBarTrailing) { selectMenu }
+                    ToolbarItem(placement: .topBarTrailing) { moreMenu }
                     ToolbarItem(placement: .topBarTrailing) { filterButton }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { compose = .new(to: nil) } label: { Image(systemName: "square.and.pencil") }
                             .accessibilityLabel("New message")
+                            .accessibilityIdentifier("mail.compose")
                     }
                 }
                 .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search all mail")
@@ -123,6 +125,23 @@ struct MailboxView: View {
                 .listRowSeparator(.hidden)
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
+            if folder == .inbox, model.reviewCount > 0, results == nil {
+                Button {
+                    openReview()
+                } label: {
+                    Banner(
+                        text: model.reviewCount == 1
+                            ? "1 draft waiting in the approval queue"
+                            : "\(model.reviewCount) drafts waiting in the approval queue",
+                        systemImage: "tray.full",
+                        tint: Theme.accent
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("mail.approval-queue.banner")
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 2, trailing: 16))
+            }
             if folder == .trash, !visible.isEmpty {
                 Text("Mail in Trash is kept \(model.rules?.rules.trashRetentionDays ?? 30) days, then purged. Swipe to restore.")
                     .font(.footnote)
@@ -155,6 +174,7 @@ struct MailboxView: View {
             }
         }
         .listStyle(.plain)
+        .listRowSpacing(2)
         .overlay { overlay }
     }
 
@@ -227,6 +247,7 @@ struct MailboxView: View {
             Label("Folders", systemImage: "tray.2")
         }
         .accessibilityLabel("Folders")
+        .accessibilityIdentifier("mail.folders")
     }
 
     private var filterButton: some View {
@@ -240,16 +261,31 @@ struct MailboxView: View {
         .accessibilityIdentifier("si.filter")
     }
 
-    private var selectMenu: some View {
+    private var moreMenu: some View {
         Menu {
             Button(selecting ? "Done selecting" : "Select messages", systemImage: selecting ? "checkmark.circle.fill" : "checklist") {
                 selecting.toggle()
                 if !selecting { selectedThreads = [] }
             }
+            Button {
+                openReview()
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(AppChrome.reviewMenuTitle)
+                        Text(model.reviewCount == 0 ? "No drafts waiting" : "\(model.reviewCount) waiting for you")
+                            .font(.caption)
+                    }
+                } icon: {
+                    Image(systemName: "tray.full")
+                }
+            }
+            .accessibilityIdentifier("mail.approval-queue")
         } label: {
-            Image(systemName: "checklist")
+            Image(systemName: "ellipsis.circle")
         }
-        .accessibilityLabel(selecting ? "Done selecting" : "Select messages")
+        .accessibilityLabel("More")
+        .accessibilityIdentifier("mail.more")
     }
 
     private func openMessageFilter(_ conversation: Conversation) {
@@ -306,7 +342,7 @@ struct MailboxView: View {
             } label: {
                 Label(SiEntry.filterTitle, systemImage: SiEntry.icon)
             }
-            .tint(Theme.ai)
+            .tint(Theme.si)
             .accessibilityIdentifier("si.filter.swipe")
         } else {
             Button(role: .destructive) {
@@ -319,7 +355,7 @@ struct MailboxView: View {
             } label: {
                 Label(SiEntry.filterTitle, systemImage: SiEntry.icon)
             }
-            .tint(Theme.ai)
+            .tint(Theme.si)
             .accessibilityIdentifier("si.filter.swipe")
             if folder != .archive {
                 Button {
@@ -369,7 +405,7 @@ struct MailboxView: View {
     private var emptyMessage: String? {
         switch folder {
         case .inbox: "New mail to \(model.mailbox) shows up here."
-        case .drafts: "Drafts live in the Review tab, with the approval queue."
+        case .drafts: "Drafts live in the Approval queue (Mail menu or Settings)."
         case .trash: "Deleted mail stays here for \(model.rules?.rules.trashRetentionDays ?? 30) days and can be restored."
         default: nil
         }
@@ -420,13 +456,16 @@ struct ConversationRow: View {
 
     var body: some View {
         let latest = conversation.latest
-        HStack(alignment: .top, spacing: 10) {
-            Circle()
-                .fill(conversation.unread ? Theme.unread : .clear)
-                .frame(width: 9, height: 9)
-                .padding(.top, 6)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack(alignment: .topLeading) {
+                Avatar(address: conversation.latest.origin == "sent" ? (conversation.latest.to.first ?? conversation.latest.from) : conversation.latest.from)
+                Circle()
+                    .fill(conversation.unread ? Theme.unread : .clear)
+                    .frame(width: 10, height: 10)
+                    .offset(x: -2, y: -1)
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 4) {
                 if typeSize.isAccessibilitySize {
                     sender.lineLimit(2)
                     HStack(spacing: 6) { markers; stamp }
@@ -447,15 +486,16 @@ struct ConversationRow: View {
                 chips
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
         .accessibilityHint("Opens the conversation")
+        .accessibilityIdentifier("mail.row.\(conversation.id)")
     }
 
     private var sender: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(conversation.participants(me: me))
-                .font(.body.weight(conversation.unread ? .bold : .regular))
+                .font(.body.weight(conversation.unread ? .semibold : .regular))
             if conversation.count > 1 {
                 Text("\(conversation.count)").font(.caption).foregroundStyle(.secondary).accessibilityLabel("\(conversation.count) messages")
             }

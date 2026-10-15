@@ -2,7 +2,7 @@ import LojoMailCore
 import PhotosUI
 import SwiftUI
 
-/// Compose, reply, forward, and review of any draft (Jon's, the AI's, an assistant's, a rule's, or one saved by his desktop mail client).
+/// Compose, reply, forward, and review of any draft (Jon's, SI's, an assistant's, a rule's, or one saved by his desktop mail client).
 struct ComposeView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -52,8 +52,8 @@ struct ComposeView: View {
                 Section {
                     HStack(spacing: 6) {
                         Chip(text: draft.status.label, systemImage: draft.status == .pendingApproval ? "hourglass" : "doc", tint: draft.status == .pendingApproval ? .orange : .secondary)
-                        Chip(text: draft.origin.chip, systemImage: draft.origin.isBot ? "sparkles" : "person", tint: draft.origin.isBot ? Theme.ai : Theme.accent)
-                        if draft.aiGenerated == true && draft.origin != .ai { Chip(text: "SI text", systemImage: "sparkles", tint: Theme.ai) }
+                        Chip(text: draft.origin.chip, systemImage: draft.origin.isBot ? "sparkles" : "person", tint: draft.origin.isBot ? Theme.si : Theme.accent)
+                        if draft.aiGenerated == true && draft.origin != .ai { Chip(text: "SI text", systemImage: "sparkles", tint: Theme.si) }
                         Spacer()
                         if let updated = ISODate.parse(draft.updatedAt) {
                             Text(updated.mailListStamp).font(.caption).foregroundStyle(.secondary)
@@ -242,12 +242,11 @@ struct ComposeView: View {
 
     @ToolbarContentBuilder
     private func toolbar(_ model: ComposeModel) -> some ToolbarContent {
-        if presentedAsSheet {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(model.closed ? "Done" : "Cancel") {
-                    if model.dirty && !model.closed { confirmClose = true } else { dismiss() }
-                }
+        ToolbarItem(placement: .cancellationAction) {
+            Button(model.closed ? "Done" : (presentedAsSheet ? "Cancel" : "Close")) {
+                if model.dirty && !model.closed { confirmClose = true } else { dismiss() }
             }
+            .accessibilityIdentifier("compose.cancel")
         }
         if !model.closed {
             ToolbarItem(placement: .confirmationAction) {

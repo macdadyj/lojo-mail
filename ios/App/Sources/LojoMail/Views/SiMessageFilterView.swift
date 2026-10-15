@@ -116,8 +116,8 @@ struct SiMessageFilterView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(selected ? Theme.ai.opacity(0.18) : Color.secondary.opacity(0.12), in: Capsule())
-            .foregroundStyle(selected ? Theme.ai : .primary)
+            .background(selected ? Theme.si.opacity(0.18) : Color.secondary.opacity(0.12), in: Capsule())
+            .foregroundStyle(selected ? Theme.si : .primary)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(suggested ? "\(SiLabels.title(title)), SI suggests" : (title == "New label" ? title : SiLabels.title(title)))
@@ -133,6 +133,15 @@ struct SiMessageFilterView: View {
     }
 
     private func loadSuggestion() async {
+        if model.launch.uiTest {
+            let result = UITestFixtures.filterResult()
+            filter.killSwitch = result.killSwitch
+            let suggested = result.proposals.lazy.compactMap { proposal in
+                proposal.actions.first { $0.type == "label" }?.labels?.first
+            }.first
+            filter.useSuggestion(suggested)
+            return
+        }
         do {
             let result = try await model.call { try await $0.siFilter(messageIds: request.messageIds, folder: nil, texts: request.texts) }
             filter.killSwitch = result.killSwitch

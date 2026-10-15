@@ -21,7 +21,7 @@ Nothing in this repo deploys itself. Terraform plans; it does not apply. There a
 | [docs/BOT.md](docs/BOT.md) | `lojo-bot` for Jon's Grok Bot: revocable bot credential, opt-in bot envelope key, stdio MCP + CLI on Santa, new-mail digest, threat model |
 | [config/rules.example.json](config/rules.example.json) | Mail rules: sort, label, archive, trash (restorable), and replies (drafts by default; guarded auto-send). See SECURITY.md, mail rules |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | Leaving Tuta (`lojo@tuta.io`) without IMAP, locally or straight into AWS |
-| [ios/README.md](ios/README.md) | LOJO Mail for iPhone: native SwiftUI client, decrypts on the phone, built on Linux with xtool and a free Apple ID |
+| [ios/README.md](ios/README.md) | LOJO Mail for iPhone: native SwiftUI client, decrypts on the phone, xtool USB installs, TestFlight on push to main |
 | [qa/REVIEW_REPORT.md](qa/REVIEW_REPORT.md) | Independent pre-deploy review, with evidence and screenshots under `qa/` |
 
 ## Local demo

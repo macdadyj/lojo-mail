@@ -33,6 +33,12 @@ keys/*.asc
 data/
 *.mbox
 imports/
+# iOS Xcode / TestFlight (generated)
+ios/*.xcodeproj/
+ios/build/
+ios/App/build/
+ios/scripts/__pycache__/
+
 .playwright-mcp/
 *.private.jwk
 *.master.key

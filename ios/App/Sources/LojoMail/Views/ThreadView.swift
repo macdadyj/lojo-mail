@@ -143,7 +143,7 @@ struct ThreadView: View {
         let items = opened.flatMap { $0.ai?.actionItems ?? [] }
         if let summary {
             VStack(alignment: .leading, spacing: 8) {
-                Label("SI summary", systemImage: "sparkles").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ai)
+                Label("SI summary", systemImage: "sparkles").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.si)
                 Text(summary).font(.subheadline)
                 if !items.isEmpty {
                     ForEach(Array(Set(items.map(\.text))).sorted(), id: \.self) { item in
@@ -153,7 +153,7 @@ struct ThreadView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.ai.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(Theme.si.opacity(0.10), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .accessibilityElement(children: .combine)
         }
     }
@@ -252,8 +252,8 @@ struct ThreadView: View {
                         Button { compose = .reply(target, all: true) } label: { Label("Reply All", systemImage: "arrowshape.turn.up.left.2") }
                         Button { compose = .forward(latest ?? target) } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") }
                     }
-                    barButton(SiEntry.replyTitle, SiEntry.icon, tint: Theme.ai, identifier: "si.reply") { siReply = true }
-                    barButton(SiEntry.filterTitle, SiEntry.icon, tint: Theme.ai, identifier: "si.filter.message") { openMessageFilter() }
+                    barButton(SiEntry.replyTitle, SiEntry.icon, tint: Theme.si, identifier: "si.reply", prominent: true) { siReply = true }
+                    barButton(SiEntry.filterTitle, SiEntry.icon, tint: Theme.si, identifier: "si.filter.message", prominent: true) { openMessageFilter() }
                 }
             }
             .padding(.top, 6)
@@ -264,18 +264,20 @@ struct ThreadView: View {
         .accessibilityIdentifier("thread.action-bar")
     }
 
-    private func barButton(_ title: String, _ systemImage: String, tint: Color, identifier: String? = nil, action: @escaping () -> Void) -> some View {
+    private func barButton(_ title: String, _ systemImage: String, tint: Color, identifier: String? = nil, prominent: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: systemImage).font(.body)
+            VStack(spacing: 4) {
+                Image(systemName: systemImage).font(.body.weight(prominent ? .semibold : .regular))
                 Text(title)
-                    .font(.caption2)
+                    .font(.caption2.weight(prominent ? .semibold : .regular))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
             }
             .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
             .foregroundStyle(tint)
+            .background(prominent ? tint.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
@@ -383,9 +385,9 @@ struct MessageCard: View {
                 Text(snippet).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
             }
         }
-        .padding(14)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.primary.opacity(0.06)))
+        .padding(16)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Color.primary.opacity(0.05)))
         .environment(\.openURL, OpenURLAction { url in
             if let guarded = GuardedLink(marker: url) {
                 pendingLink = guarded

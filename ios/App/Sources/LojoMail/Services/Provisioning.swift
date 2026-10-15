@@ -48,18 +48,25 @@ struct LaunchOptions {
     /// Opens Compose with two generated sample files, so the attachments UI can be checked and photographed.
     var composeSamples: Bool
     var previewSignedOut: Bool
+    /// Simulator UI tests. Loads an in-memory mailbox. Never writes the Keychain or turns on test mode.
+    var uiTest: Bool
 
     static let current: LaunchOptions = {
         let env = ProcessInfo.processInfo.environment
+        let args = ProcessInfo.processInfo.arguments
+        let uiTest = args.contains("-LojoMailUITest") || env["LOJO_UITEST"] == "1"
+        let screenName = env["LOJO_SCREEN"]
+            ?? args.drop(while: { $0 != "-LojoMailUITestScreen" }).dropFirst().first
         return LaunchOptions(
-            screen: env["LOJO_SCREEN"].flatMap(Screen.init(rawValue:)),
+            screen: screenName.flatMap(Screen.init(rawValue:)),
             folder: env["LOJO_FOLDER"].flatMap(Folder.init(rawValue:)),
             thread: env["LOJO_THREAD"],
             draft: env["LOJO_DRAFT"],
             search: env["LOJO_SEARCH"],
             composeTo: env["LOJO_COMPOSE_TO"],
             composeSamples: env["LOJO_COMPOSE_SAMPLES"] == "1",
-            previewSignedOut: env["LOJO_SCREEN"] == "signin"
+            previewSignedOut: screenName == "signin",
+            uiTest: uiTest
         )
     }()
 }

@@ -14,17 +14,18 @@ signed with a free Apple ID and installed over USB, the same way as
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Targets, data flow, API contract the app relies on |
 | [docs/SECURITY.md](docs/SECURITY.md) | Where the key, session and mail live on the phone; send guards; what a free account can't do |
 | [docs/TESTING.md](docs/TESTING.md) | Core tests, live tests, QA launch hooks, and what is still untested |
+| [docs/TESTFLIGHT.md](docs/TESTFLIGHT.md) | App Store Connect App ID, secrets, and the TestFlight upload |
 
 ## What it does
 
 - **Mail**: Inbox, Sent, Drafts, Trash, Junk and Archive; conversations grouped by thread; pull to refresh; search
   (filters the loaded list as you type, searches the server on Return); swipe to mark read, star, archive, trash
   (soft delete, restorable for the retention period) and restore; Move to any folder from the context menu.
-- **Reading**: bodies decrypted on the phone ("Sealed to your key"), links detected, AI summary and phishing warning,
+- **Reading**: bodies decrypted on the phone ("Sealed to your key"), links detected, SI summary and phishing warning,
   sender verdicts. Attachments are decrypted on tap: preview in Quick Look, or from the row's menu (or a long press)
   **Share…** or **Save to Files**. The decrypted copy is a temporary file, deleted when the preview or sheet closes.
-- **Writing**: compose, reply, reply all, forward, and "AI reply". Save a draft, put it in the approval queue, ask the
-  AI to rewrite it, or **Approve and send** behind a confirmation that names the recipients and the From address. The
+- **Writing**: compose, reply, reply all, forward, and Reply with SI. Save a draft, put it in the approval queue, ask
+  SI to rewrite it, or **Approve and send** behind a confirmation that names the recipients and the From address. The
   approval is bound to the exact reviewed content; if a bot changed the draft meanwhile, the app shows what changed and
   makes you look before it will send.
 - **Attachments in Compose**: the paperclip (toolbar or the Attachments section) adds photos from the library, a new
@@ -34,9 +35,9 @@ signed with a free Apple ID and installed over USB, the same way as
   draft; the approval names each by SHA-256, and they go out with plain TLS or OpenPGP (PGP/MIME) sends alike. Limits
   come from `/v1/settings`, re-read on launch, foreground and Compose. Forwarding re-attaches the original's files.
   See [docs/API-ATTACHMENTS.md](docs/API-ATTACHMENTS.md).
-- **Review**: drafts waiting for approval, drafts written by the AI, bots or rules, and your own drafts; open one
-  to edit and send, swipe to discard.
-- **AI Rules**: status of the rules engine and every rule; a big **Stop all autonomous sending** button (the rules
+- **Approval queue** (Mail menu or Settings, not a tab): drafts waiting for approval, drafts written by SI, bots or rules, and your own drafts; open one
+  to edit and send, swipe to discard. Nothing they write is sent until you tap Approve and send.
+- **Rules**: status of the rules engine and every rule; a big **Stop all autonomous sending** button (the rules
   kill switch, engages instantly), a **Stop all sending** switch (the global send kill switch from PR #7, which also
   stops every send from the mailbox), pause/resume, and swipe to disable a rule. Releasing or resuming asks first,
   and the server only lets a signed-in human session do it.
@@ -44,7 +45,7 @@ signed with a free Apple ID and installed over USB, the same way as
   (sender, optionally subject). **There is no push (APNs): a free Apple account can't use it**, so notifications arrive
   whenever iOS decides to run background refresh, which can be hours apart.
 - **Settings**: session expiry, key fingerprint / replace / remove (with import instructions), send test mode, notifications, Face ID lock,
-  server URL, sign out.
+  server URL, version and build number, approval queue, sign out.
 - Dark mode (the teal is adjusted per mode for 4.5:1 text contrast), Dynamic Type (chips wrap, list rows stack at
   accessibility sizes, icons scale), VoiceOver labels, empty / error / offline / missing-key states throughout. iPad
   runs in every orientation with readable line lengths.
@@ -113,7 +114,12 @@ Free-account limits to know:
 ios/scripts/test-core.sh               # offline: envelope crypto against the repo's TypeScript sealer, models, helpers
 ios/scripts/test-core.sh --live        # + read-only checks against the deployed API with Jon's session and key
 ios/scripts/test-core.sh --live-write  # + mail actions, kill switches, and one real send to lojo-test@cyberphysical.us
+ios/scripts/archive-upload.sh --self-test  # build-number offset and ASC key decode (no secrets)
 ```
+
+Push and pull request CI also generate the Xcode project and run simulator unit + UI tests. Those UI tests
+(`-LojoMailUITest`) walk every screen and gate TestFlight. A push to `main` uploads `com.lojo.Mail` after they pass.
+See [docs/TESTFLIGHT.md](docs/TESTFLIGHT.md). Sideload over USB is unchanged (`deploy-phone.sh`).
 
 ## Screenshots (dark mode)
 
@@ -126,7 +132,7 @@ build, `LOJO_PHONE="14 Pro Max" ios/scripts/retake-screenshots.sh` retakes them 
 | ![Sign in](docs/screenshots/01-sign-in.png) Sign in | ![Inbox](docs/screenshots/02-inbox.png) Inbox | ![Thread](docs/screenshots/03-thread-decrypted.png) Thread, body decrypted on the phone |
 | ![Attachment](docs/screenshots/04-attachment-preview.png) Attachment decrypted, Quick Look | ![Search](docs/screenshots/05-search.png) Server search | ![Sent](docs/screenshots/06-folder-sent.png) Sent folder |
 | ![Trash](docs/screenshots/07-folder-trash.png) Trash | ![Trashed thread](docs/screenshots/07b-trash-thread.png) Trashed by you, kept 30 days | ![Compose](docs/screenshots/08-compose.png) Compose |
-| ![Send confirm](docs/screenshots/09-send-confirm.png) Send confirmation | ![Review](docs/screenshots/10-review.png) Review queue | ![Draft](docs/screenshots/11-draft-review.png) Draft waiting for approval |
-| ![AI Rules](docs/screenshots/12-ai-rules.png) AI Rules and kill switches | ![Settings](docs/screenshots/13-settings.png) Settings | ![Key](docs/screenshots/14-key-setup.png) Envelope key setup |
+| ![Send confirm](docs/screenshots/09-send-confirm.png) Send confirmation | ![Review](docs/screenshots/10-review.png) Approval queue (was the Review tab) | ![Draft](docs/screenshots/11-draft-review.png) Draft waiting for approval |
+| ![Rules](docs/screenshots/12-ai-rules.png) Rules and kill switches | ![Settings](docs/screenshots/13-settings.png) Settings | ![Key](docs/screenshots/14-key-setup.png) Envelope key setup |
 
 The screenshots show real (test) mail from the mailbox. The repo is private; crop or regenerate them before making it public.
