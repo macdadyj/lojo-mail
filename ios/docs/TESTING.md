@@ -4,7 +4,7 @@
 
 `CoreTests` builds `LojoMailCore` with swift-crypto on Santa Computa. Offline tests include the unlock buttons,
 USB import, test mode staying off unless chosen, the envelope key surviving session expiry, an app update,
-and relaunch (`UnlockAndPersistenceTests`), and that Review is not a tab (`AppChromeTests`). Linux CI runs `ios/scripts/test-core.sh`.
+and relaunch (`UnlockAndPersistenceTests`), and that Review is not a tab (`AppChromeTests`, `ReviewQueueTests`). Linux CI also runs `ios/scripts/archive-upload.sh --self-test`. Linux CI runs `ios/scripts/test-core.sh`.
 The macOS **iOS** workflow generates the Xcode project, runs the same core tests on a simulator, then runs UI tests
 that tap every screen. Those UI tests gate TestFlight. They launch with `-LojoMailUITest` (an in-memory mailbox).
 That path does not write the Keychain, does not turn on test mode, and does not delete the envelope key.

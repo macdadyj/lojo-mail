@@ -130,9 +130,7 @@ struct MailboxView: View {
                     openReview()
                 } label: {
                     Banner(
-                        text: model.reviewCount == 1
-                            ? "1 draft waiting in the approval queue"
-                            : "\(model.reviewCount) drafts waiting in the approval queue",
+                        text: AppChrome.reviewBanner(waiting: model.reviewCount),
                         systemImage: "tray.full",
                         tint: Theme.accent
                     )
@@ -267,18 +265,8 @@ struct MailboxView: View {
                 selecting.toggle()
                 if !selecting { selectedThreads = [] }
             }
-            Button {
+            Button(AppChrome.reviewMenuLabel(waiting: model.reviewCount), systemImage: "tray.full") {
                 openReview()
-            } label: {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(AppChrome.reviewMenuTitle)
-                        Text(model.reviewCount == 0 ? "No drafts waiting" : "\(model.reviewCount) waiting for you")
-                            .font(.caption)
-                    }
-                } icon: {
-                    Image(systemName: "tray.full")
-                }
             }
             .accessibilityIdentifier("mail.approval-queue")
         } label: {

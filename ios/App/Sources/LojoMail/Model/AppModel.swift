@@ -853,9 +853,7 @@ final class AppModel {
     }
 
     /// Drafts that need Jon: waiting for approval, or written by a bot and not yet handled.
-    var reviewCount: Int {
-        drafts.filter { $0.draft.status == .pendingApproval || ($0.draft.origin.isBot && $0.draft.status.editable) }.count
-    }
+    var reviewCount: Int { ReviewQueue.count(drafts.map(\.draft)) }
 
     func upsertDraft(_ view: DraftView) {
         if let index = drafts.firstIndex(where: { $0.id == view.id }) {

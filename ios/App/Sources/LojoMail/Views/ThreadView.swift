@@ -215,53 +215,60 @@ struct ThreadView: View {
     private var actionBar: some View {
         VStack(spacing: 0) {
             Divider()
-            HStack(alignment: .top, spacing: 0) {
-                if inTrash {
-                    barButton("Restore", "arrow.uturn.backward", tint: .accentColor) {
-                        Task {
-                            await model.restore(messages)
-                            dismiss()
-                        }
-                    }
-                } else {
-                    barButton("Trash", "trash", tint: .red) { confirmTrash = true }
-                        .confirmationDialog("Move this conversation to Trash?", isPresented: $confirmTrash, titleVisibility: .visible) {
-                            Button("Move to Trash", role: .destructive) {
-                                Task {
-                                    await model.trash(messages, from: folder)
-                                    dismiss()
-                                }
-                            }
-                        } message: {
-                            Text("You can restore it from Trash for \(model.rules?.rules.trashRetentionDays ?? 30) days.")
-                        }
-                    if folder != .archive {
-                        barButton("Archive", "archivebox", tint: .accentColor) {
-                            Task {
-                                await model.archive(messages, from: folder)
-                                dismiss()
-                            }
-                        }
-                    }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 6) {
+                    actionButtons
                 }
-                if let target = replyTarget {
-                    barButton("Reply", "arrowshape.turn.up.left", tint: .accentColor, identifier: "thread.reply") {
-                        compose = .reply(target, all: false)
-                    }
-                    .contextMenu {
-                        Button { compose = .reply(target, all: true) } label: { Label("Reply All", systemImage: "arrowshape.turn.up.left.2") }
-                        Button { compose = .forward(latest ?? target) } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") }
-                    }
-                    barButton(SiEntry.replyTitle, SiEntry.icon, tint: Theme.si, identifier: "si.reply", prominent: true) { siReply = true }
-                    barButton(SiEntry.filterTitle, SiEntry.icon, tint: Theme.si, identifier: "si.filter.message", prominent: true) { openMessageFilter() }
-                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
             }
-            .padding(.top, 6)
-            .padding(.bottom, 2)
             .background(.bar)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("thread.action-bar")
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
+        if inTrash {
+            barButton("Restore", "arrow.uturn.backward", tint: .accentColor) {
+                Task {
+                    await model.restore(messages)
+                    dismiss()
+                }
+            }
+        } else {
+            barButton("Trash", "trash", tint: .red) { confirmTrash = true }
+                .confirmationDialog("Move this conversation to Trash?", isPresented: $confirmTrash, titleVisibility: .visible) {
+                    Button("Move to Trash", role: .destructive) {
+                        Task {
+                            await model.trash(messages, from: folder)
+                            dismiss()
+                        }
+                    }
+                } message: {
+                    Text("You can restore it from Trash for \(model.rules?.rules.trashRetentionDays ?? 30) days.")
+                }
+            if folder != .archive {
+                barButton("Archive", "archivebox", tint: .accentColor) {
+                    Task {
+                        await model.archive(messages, from: folder)
+                        dismiss()
+                    }
+                }
+            }
+        }
+        if let target = replyTarget {
+            barButton("Reply", "arrowshape.turn.up.left", tint: .accentColor, identifier: "thread.reply") {
+                compose = .reply(target, all: false)
+            }
+            .contextMenu {
+                Button { compose = .reply(target, all: true) } label: { Label("Reply All", systemImage: "arrowshape.turn.up.left.2") }
+                Button { compose = .forward(latest ?? target) } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") }
+            }
+            barButton(SiEntry.replyTitle, SiEntry.icon, tint: Theme.si, identifier: "si.reply", prominent: true) { siReply = true }
+            barButton(SiEntry.filterTitle, SiEntry.icon, tint: Theme.si, identifier: "si.filter.message", prominent: true) { openMessageFilter() }
+        }
     }
 
     private func barButton(_ title: String, _ systemImage: String, tint: Color, identifier: String? = nil, prominent: Bool = false, action: @escaping () -> Void) -> some View {
@@ -274,8 +281,9 @@ struct ThreadView: View {
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
             }
-            .frame(maxWidth: .infinity)
+            .frame(minWidth: prominent ? 96 : 68)
             .padding(.vertical, 6)
+            .padding(.horizontal, 2)
             .foregroundStyle(tint)
             .background(prominent ? tint.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }

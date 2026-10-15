@@ -24,14 +24,27 @@ struct SettingsView: View {
                     Button {
                         openReview()
                     } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Label(AppChrome.reviewTitle, systemImage: "tray.full")
-                            Text(model.reviewCount == 0
-                                 ? "No drafts waiting. SI, assistants, and rules leave mail here instead of sending it."
-                                 : "\(model.reviewCount) waiting for your approval before anything is sent.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "tray.full")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(Theme.accent)
+                                .frame(width: 28, alignment: .center)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(AppChrome.reviewTitle)
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                Text(AppChrome.reviewSettingsDetail(waiting: model.reviewCount))
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                                .padding(.top, 4)
+                                .accessibilityHidden(true)
                         }
                     }
                     .accessibilityIdentifier("settings.approval-queue")

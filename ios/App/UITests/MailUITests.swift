@@ -12,6 +12,7 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["Rules"].exists)
         XCTAssertTrue(app.tabBars.buttons["Settings"].exists)
         XCTAssertFalse(app.tabBars.buttons["Review"].exists, "Review must not be a tab")
+        XCTAssertFalse(app.tabBars.buttons["AI Rules"].exists, "Rules is not labeled AI")
         XCTAssertEqual(app.tabBars.buttons.count, 3)
         shot(app, "after-inbox")
     }
@@ -22,7 +23,12 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(app.buttons["mail.approval-queue.banner"].waitForExistence(timeout: 4))
         openFolder(app, "Sent")
         XCTAssertTrue(app.navigationBars["Sent"].waitForExistence(timeout: 4))
+        openFolder(app, "Drafts")
+        XCTAssertTrue(app.navigationBars["Drafts"].waitForExistence(timeout: 4))
         openFolder(app, "Junk")
+        XCTAssertTrue(app.navigationBars["Junk"].waitForExistence(timeout: 4))
+        openFolder(app, "Archive")
+        XCTAssertTrue(app.navigationBars["Archive"].waitForExistence(timeout: 4))
         openFolder(app, "Trash")
         XCTAssertTrue(app.navigationBars["Trash"].waitForExistence(timeout: 4))
         openFolder(app, "Inbox")
@@ -35,18 +41,14 @@ final class MailUITests: XCTestCase {
             app.buttons["Done selecting"].tap()
         }
 
+        app.swipeDown()
         let search = app.searchFields.firstMatch
-        if search.waitForExistence(timeout: 3) {
-            search.tap()
-            search.typeText("Gate")
-            if app.keyboards.buttons["Search"].waitForExistence(timeout: 2) {
-                app.keyboards.buttons["Search"].tap()
-            } else if app.buttons["Search"].waitForExistence(timeout: 1) {
-                app.buttons["Search"].tap()
-            }
-            if app.buttons["Cancel"].waitForExistence(timeout: 2) {
-                app.buttons["Cancel"].tap()
-            }
+        XCTAssertTrue(search.waitForExistence(timeout: 4), "Search field did not appear")
+        search.tap()
+        search.typeText("Gate")
+        XCTAssertTrue(app.descendants(matching: .any)["mail.row.thr_uitest_gate"].waitForExistence(timeout: 4))
+        if app.buttons["Cancel"].waitForExistence(timeout: 2) {
+            app.buttons["Cancel"].tap()
         }
 
         app.buttons["mail.compose"].tap()
@@ -56,14 +58,15 @@ final class MailUITests: XCTestCase {
 
         openApprovalQueue(app)
         XCTAssertTrue(app.navigationBars["Approval queue"].waitForExistence(timeout: 6))
-        XCTAssertTrue(app.descendants(matching: .any)["review.explanation"].waitForExistence(timeout: 3))
-        if app.descendants(matching: .any)["review.row.drf_uitest_queue"].waitForExistence(timeout: 4) {
-            app.descendants(matching: .any)["review.row.drf_uitest_queue"].firstMatch.tap()
-            dismissCompose(app)
-        }
-        if app.buttons["review.done"].waitForExistence(timeout: 4) {
-            app.buttons["review.done"].tap()
-        }
+        let explanation = app.descendants(matching: .any)["review.explanation"]
+        XCTAssertTrue(explanation.waitForExistence(timeout: 3))
+        XCTAssertTrue(explanation.label.contains("Approve and send"))
+        XCTAssertFalse(explanation.label.contains("AI"))
+        XCTAssertTrue(app.descendants(matching: .any)["review.row.drf_uitest_queue"].waitForExistence(timeout: 4))
+        app.descendants(matching: .any)["review.row.drf_uitest_queue"].firstMatch.tap()
+        dismissCompose(app)
+        XCTAssertTrue(app.buttons["review.done"].waitForExistence(timeout: 4))
+        app.buttons["review.done"].tap()
         shot(app, "after-approval-queue")
     }
 
@@ -74,8 +77,10 @@ final class MailUITests: XCTestCase {
         row.tap()
         XCTAssertTrue(app.descendants(matching: .any)["thread.action-bar"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["thread.reply"].waitForExistence(timeout: 4))
-        XCTAssertTrue(app.buttons["si.reply"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["si.filter.message"].waitForExistence(timeout: 2))
+        revealBarButton(app, "si.reply")
+        revealBarButton(app, "si.filter.message")
+        XCTAssertEqual(app.buttons["si.reply"].label, "Reply with SI")
+        XCTAssertEqual(app.buttons["si.filter.message"].label, "Filter with SI")
         shot(app, "after-thread")
 
         app.buttons["si.reply"].tap()
@@ -132,7 +137,9 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["Rules"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Rules"].tap()
         XCTAssertTrue(app.navigationBars["Rules"].waitForExistence(timeout: 6))
+        XCTAssertFalse(app.staticTexts["AI Rules"].exists)
         XCTAssertTrue(app.buttons["rules.kill-switch"].waitForExistence(timeout: 6))
+        XCTAssertTrue(app.buttons["rules.kill-switch"].label.contains("autonomous"))
         app.buttons["rules.kill-switch"].tap()
         if app.buttons["Release kill switch"].waitForExistence(timeout: 4) {
             app.buttons["Release kill switch"].tap()
@@ -158,37 +165,40 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(build.label.contains("build"), "unexpected build line: \(build.label)")
         shot(app, "after-settings")
 
-        if app.buttons["Load envelope key…"].waitForExistence(timeout: 2) || app.buttons["Replace key…"].waitForExistence(timeout: 1) {
-            (app.buttons["Replace key…"].exists ? app.buttons["Replace key…"] : app.buttons["Load envelope key…"]).tap()
-            XCTAssertTrue(app.navigationBars["Unlock your mail"].waitForExistence(timeout: 6))
-            XCTAssertTrue(app.buttons["unlock.files"].waitForExistence(timeout: 3))
-            XCTAssertTrue(app.buttons["unlock.paste"].exists)
-            XCTAssertTrue(app.buttons["unlock.airdrop"].exists)
-            XCTAssertTrue(app.buttons["unlock.share"].exists)
-            XCTAssertTrue(app.buttons["unlock.usb"].exists)
-            app.buttons["Later"].tap()
-        }
+        let loadKey = app.buttons["Load envelope key…"]
+        XCTAssertTrue(reveal(loadKey, in: app), "Load envelope key is missing")
+        XCTAssertFalse(app.buttons["Replace key…"].exists, "UI tests must not load a key")
+        loadKey.tap()
+        XCTAssertTrue(app.navigationBars["Unlock your mail"].waitForExistence(timeout: 6))
+        XCTAssertTrue(app.buttons["unlock.files"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["unlock.paste"].exists)
+        XCTAssertTrue(app.buttons["unlock.airdrop"].exists)
+        XCTAssertTrue(app.buttons["unlock.share"].exists)
+        XCTAssertTrue(app.buttons["unlock.usb"].exists)
+        XCTAssertTrue(app.buttons["unlock.save"].exists)
+        app.buttons["Later"].tap()
 
         XCTAssertFalse(app.alerts["Remove the envelope key?"].exists)
         app.buttons["settings.approval-queue"].tap()
         XCTAssertTrue(app.navigationBars["Approval queue"].waitForExistence(timeout: 6))
         app.buttons["review.done"].tap()
 
-        if app.buttons["Blocked"].waitForExistence(timeout: 3) {
-            app.buttons["Blocked"].tap()
-            XCTAssertTrue(app.navigationBars["Blocked"].waitForExistence(timeout: 4))
-            app.navigationBars.buttons.firstMatch.tap()
-        }
-        if app.buttons["Saved SI filters"].waitForExistence(timeout: 3) {
-            app.buttons["Saved SI filters"].tap()
-            XCTAssertTrue(app.navigationBars["SI filters"].waitForExistence(timeout: 4))
-            app.navigationBars.buttons.firstMatch.tap()
-        }
+        XCTAssertTrue(reveal(app.buttons["Blocked"], in: app))
+        app.buttons["Blocked"].tap()
+        XCTAssertTrue(app.navigationBars["Blocked"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.buttons["si.unblock.si-block-sender-news"].waitForExistence(timeout: 3))
+        app.navigationBars.buttons.firstMatch.tap()
 
+        XCTAssertTrue(reveal(app.buttons["Saved SI filters"], in: app))
+        app.buttons["Saved SI filters"].tap()
+        XCTAssertTrue(app.navigationBars["SI filters"].waitForExistence(timeout: 4))
+        app.navigationBars.buttons.firstMatch.tap()
+
+        XCTAssertTrue(reveal(app.buttons["Filter the inbox with SI"], in: app))
         app.buttons["Filter the inbox with SI"].tap()
-        if app.buttons["Close"].waitForExistence(timeout: 6) {
-            app.buttons["Close"].tap()
-        }
+        XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 6))
+        XCTAssertTrue(app.navigationBars["Filter with SI"].exists)
+        app.buttons["Close"].tap()
 
         XCTAssertEqual(app.switches["testmode.toggle"].value as? String, "0")
     }
@@ -197,6 +207,7 @@ final class MailUITests: XCTestCase {
         let app = launch(extra: ["-LojoMailUITestScreen", "signin"])
         XCTAssertTrue(app.staticTexts["LOJO Mail"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["signin.submit"].waitForExistence(timeout: 4))
+        XCTAssertFalse(app.buttons["signin.submit"].isEnabled, "Sign in stays disabled with an empty passphrase")
         XCTAssertTrue(app.textFields["Account"].exists)
         shot(app, "after-sign-in")
     }
@@ -204,14 +215,13 @@ final class MailUITests: XCTestCase {
     func testToolbarFilterWithSI() {
         let app = launch()
         XCTAssertTrue(app.buttons["si.filter"].waitForExistence(timeout: 8))
+        XCTAssertEqual(app.buttons["si.filter"].label, "Filter with SI")
         app.buttons["si.filter"].tap()
-        if app.buttons["Close"].waitForExistence(timeout: 8) {
-            XCTAssertTrue(app.navigationBars["Filter with SI"].exists)
-            if app.buttons["si.apply-all"].waitForExistence(timeout: 2) {
-                XCTAssertTrue(app.buttons["si.apply-all"].exists)
-            }
-            app.buttons["Close"].tap()
-        }
+        XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.navigationBars["Filter with SI"].exists)
+        XCTAssertTrue(app.buttons["si.apply-all"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["Weekly notes"].waitForExistence(timeout: 3))
+        app.buttons["Close"].tap()
     }
 
     private func launch(extra: [String] = []) -> XCUIApplication {
@@ -224,12 +234,32 @@ final class MailUITests: XCTestCase {
     private func openFolder(_ app: XCUIApplication, _ title: String) {
         XCTAssertTrue(app.buttons["mail.folders"].waitForExistence(timeout: 4))
         app.buttons["mail.folders"].tap()
-        let button = app.buttons[title]
-        if button.waitForExistence(timeout: 3) {
-            button.tap()
-        } else if app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch.waitForExistence(timeout: 2) {
-            app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch.tap()
+        let exact = app.buttons[title]
+        if exact.waitForExistence(timeout: 3) {
+            exact.tap()
+            return
         }
+        let prefixed = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
+        XCTAssertTrue(prefixed.waitForExistence(timeout: 2), "Folder \(title) is missing")
+        prefixed.tap()
+    }
+
+    @discardableResult
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication, swipes: Int = 5) -> Bool {
+        if element.exists { return true }
+        for _ in 0..<swipes {
+            app.swipeUp()
+            if element.waitForExistence(timeout: 1) { return true }
+        }
+        return element.exists
+    }
+
+    private func revealBarButton(_ app: XCUIApplication, _ identifier: String) {
+        let button = app.buttons[identifier]
+        if button.waitForExistence(timeout: 4), button.isHittable { return }
+        let bar = app.descendants(matching: .any)["thread.action-bar"]
+        bar.swipeLeft()
+        XCTAssertTrue(button.waitForExistence(timeout: 3), "\(identifier) is missing from the action bar")
     }
 
     private func dismissCompose(_ app: XCUIApplication) {

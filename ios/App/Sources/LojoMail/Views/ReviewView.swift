@@ -280,7 +280,7 @@ struct RulesView: View {
             }
         }
         .padding(16)
-        .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .accessibilityElement(children: .contain)
     }
 
