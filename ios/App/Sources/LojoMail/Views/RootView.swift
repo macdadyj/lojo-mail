@@ -137,11 +137,11 @@ struct RootView: View {
 }
 
 private struct OpenReviewKey: EnvironmentKey {
-    static let defaultValue: () -> Void = {}
+    @MainActor static let defaultValue: @MainActor @Sendable () -> Void = {}
 }
 
 extension EnvironmentValues {
-    var openReview: () -> Void {
+    @MainActor var openReview: @MainActor @Sendable () -> Void {
         get { self[OpenReviewKey.self] }
         set { self[OpenReviewKey.self] = newValue }
     }
