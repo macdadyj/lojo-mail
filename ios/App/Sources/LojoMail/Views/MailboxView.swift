@@ -252,8 +252,7 @@ struct MailboxView: View {
         Button {
             openFilter(selectedOnly: selecting && !selectedThreads.isEmpty)
         } label: {
-            Label(SiEntry.filterTitle, systemImage: SiEntry.icon)
-                .labelStyle(.titleAndIcon)
+            Image(systemName: SiEntry.icon)
         }
         .accessibilityLabel(SiEntry.filterTitle)
         .accessibilityIdentifier("si.filter")

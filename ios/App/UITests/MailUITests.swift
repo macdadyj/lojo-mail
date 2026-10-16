@@ -46,10 +46,11 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(search.waitForExistence(timeout: 4), "Search field did not appear")
         search.tap()
         search.typeText("Gate")
-        XCTAssertTrue(app.descendants(matching: .any)["mail.row.thr_uitest_gate"].waitForExistence(timeout: 4))
+        XCTAssertTrue(matching(app, "mail.row.thr_uitest_gate").waitForExistence(timeout: 4))
         dismissSearch(app)
-        XCTAssertTrue(app.buttons["mail.compose"].waitForExistence(timeout: 4))
-        app.buttons["mail.compose"].tap()
+        let compose = app.buttons["mail.compose"].firstMatch
+        XCTAssertTrue(compose.waitForExistence(timeout: 6), "New message is not in the toolbar")
+        compose.tap()
         XCTAssertTrue(app.navigationBars["New message"].waitForExistence(timeout: 6) || app.navigationBars.element.waitForExistence(timeout: 6))
         dismissCompose(app)
         shot(app, "after-compose-closed")
@@ -70,7 +71,7 @@ final class MailUITests: XCTestCase {
 
     func testThreadKeepsSiBesideReply() {
         let app = launch()
-        let row = app.descendants(matching: .any).matching(identifier: "mail.row.thr_uitest_gate").firstMatch
+        let row = matching(app, "mail.row.thr_uitest_gate")
         XCTAssertTrue(row.waitForExistence(timeout: 8))
         row.tap()
         XCTAssertTrue(app.descendants(matching: .any)["thread.action-bar"].waitForExistence(timeout: 8))
@@ -93,16 +94,19 @@ final class MailUITests: XCTestCase {
             app.descendants(matching: .any)["si.reply.instruction"].tap()
             app.descendants(matching: .any)["si.reply.instruction"].typeText("say yes")
         }
-        app.buttons["si.reply.generate"].tap()
-        dismissCompose(app)
-        if app.buttons["Close"].waitForExistence(timeout: 2) {
-            app.buttons["Close"].tap()
+        app.buttons["si.reply.generate"].firstMatch.tap()
+        let cancelDraft = app.buttons["compose.cancel"].firstMatch
+        XCTAssertTrue(cancelDraft.waitForExistence(timeout: 8))
+        cancelDraft.tap()
+        if app.buttons["Close without saving"].waitForExistence(timeout: 2) {
+            app.buttons["Close without saving"].tap()
         }
         shot(app, "after-si-reply")
 
-        XCTAssertTrue(app.buttons["si.filter.message"].waitForExistence(timeout: 4))
-        app.buttons["si.filter.message"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["si.direct.sheet"].waitForExistence(timeout: 6))
+        let filterMessage = matching(app, "si.filter.message")
+        XCTAssertTrue(filterMessage.waitForExistence(timeout: 6))
+        filterMessage.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["si.direct.sheet"].firstMatch.waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["si.direct.spam"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["si.direct.blockSender"].exists)
         XCTAssertTrue(app.buttons["si.direct.trash"].exists)
@@ -145,8 +149,8 @@ final class MailUITests: XCTestCase {
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 6))
         XCTAssertTrue(app.buttons["settings.approval-queue"].waitForExistence(timeout: 4))
-        let testMode = app.switches["testmode.toggle"]
-        XCTAssertTrue(testMode.waitForExistence(timeout: 6), "test mode toggle missing")
+        let testMode = app.switches["Test mode"].firstMatch
+        XCTAssertTrue(reveal(testMode, in: app), "test mode toggle missing")
         XCTAssertEqual(testMode.value as? String, "0", "UI tests must not turn test mode on")
         XCTAssertFalse(app.buttons["testmode.off"].exists)
 
@@ -193,7 +197,7 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Filter with SI"].exists)
         app.buttons["Close"].tap()
 
-        XCTAssertEqual(app.switches["testmode.toggle"].value as? String, "0")
+        XCTAssertEqual(app.switches["Test mode"].firstMatch.value as? String, "0")
     }
 
     func testSignInAndKeySetupScreens() {
@@ -256,13 +260,25 @@ final class MailUITests: XCTestCase {
     }
 
     private func dismissSearch(_ app: XCUIApplication) {
-        let cancel = app.buttons["Cancel"].firstMatch
-        if cancel.waitForExistence(timeout: 3) {
-            cancel.tap()
-            return
+        for _ in 0..<3 {
+            if app.buttons["mail.compose"].exists { return }
+            let cancel = app.buttons["Cancel"].firstMatch
+            if cancel.exists {
+                cancel.tap()
+                continue
+            }
+            app.swipeDown()
         }
-        let navCancel = app.navigationBars.buttons["Cancel"].firstMatch
-        if navCancel.exists { navCancel.tap() }
+    }
+
+    /// The first hittable element with this identifier. SwiftUI often exposes the same id twice.
+    private func matching(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
+        let matches = app.descendants(matching: .any).matching(identifier: identifier)
+        for index in 0..<matches.count {
+            let element = matches.element(boundBy: index)
+            if element.isHittable { return element }
+        }
+        return matches.firstMatch
     }
 
     private func dismissCompose(_ app: XCUIApplication) {
