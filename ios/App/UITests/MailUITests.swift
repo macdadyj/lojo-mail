@@ -47,10 +47,8 @@ final class MailUITests: XCTestCase {
         search.tap()
         search.typeText("Gate")
         XCTAssertTrue(app.descendants(matching: .any)["mail.row.thr_uitest_gate"].waitForExistence(timeout: 4))
-        if app.buttons["Cancel"].waitForExistence(timeout: 2) {
-            app.buttons["Cancel"].tap()
-        }
-
+        dismissSearch(app)
+        XCTAssertTrue(app.buttons["mail.compose"].waitForExistence(timeout: 4))
         app.buttons["mail.compose"].tap()
         XCTAssertTrue(app.navigationBars["New message"].waitForExistence(timeout: 6) || app.navigationBars.element.waitForExistence(timeout: 6))
         dismissCompose(app)
@@ -72,7 +70,7 @@ final class MailUITests: XCTestCase {
 
     func testThreadKeepsSiBesideReply() {
         let app = launch()
-        let row = app.descendants(matching: .any)["mail.row.thr_uitest_gate"]
+        let row = app.descendants(matching: .any).matching(identifier: "mail.row.thr_uitest_gate").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 8))
         row.tap()
         XCTAssertTrue(app.descendants(matching: .any)["thread.action-bar"].waitForExistence(timeout: 8))
@@ -141,12 +139,7 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(app.buttons["rules.kill-switch"].waitForExistence(timeout: 6))
         XCTAssertTrue(app.buttons["rules.kill-switch"].label.contains("autonomous"))
         app.buttons["rules.kill-switch"].tap()
-        if app.buttons["Release kill switch"].waitForExistence(timeout: 4) {
-            app.buttons["Release kill switch"].tap()
-            if app.buttons["Cancel"].waitForExistence(timeout: 2) {
-                app.buttons["Cancel"].tap()
-            }
-        }
+        XCTAssertTrue(app.buttons["Release kill switch"].waitForExistence(timeout: 4))
         shot(app, "after-rules")
 
         app.tabBars.buttons["Settings"].tap()
@@ -260,6 +253,16 @@ final class MailUITests: XCTestCase {
         let bar = app.descendants(matching: .any)["thread.action-bar"]
         bar.swipeLeft()
         XCTAssertTrue(button.waitForExistence(timeout: 3), "\(identifier) is missing from the action bar")
+    }
+
+    private func dismissSearch(_ app: XCUIApplication) {
+        let cancel = app.buttons["Cancel"].firstMatch
+        if cancel.waitForExistence(timeout: 3) {
+            cancel.tap()
+            return
+        }
+        let navCancel = app.navigationBars.buttons["Cancel"].firstMatch
+        if navCancel.exists { navCancel.tap() }
     }
 
     private func dismissCompose(_ app: XCUIApplication) {
