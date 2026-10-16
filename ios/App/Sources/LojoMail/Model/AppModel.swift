@@ -829,7 +829,7 @@ final class AppModel {
                 $0.subject.lowercased().contains(q) || $0.from.email.lowercased().contains(q) || ($0.snippet ?? "").lowercased().contains(q)
             }
         }
-        try await call { try await $0.search(query) }
+        return try await call { try await $0.search(query) }
     }
 
     func report(_ error: Error) {
