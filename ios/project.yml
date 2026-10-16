@@ -60,6 +60,22 @@ targets:
       - path: CoreTests/Tests/LojoMailCoreTests
     dependencies:
       - target: LojoMailCore
+    postBuildScripts:
+      - name: Copy envelope vectors into the test bundle
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          if [[ -z "${LOJO_VECTORS:-}" || ! -f "${LOJO_VECTORS}/key.jwk" ]]; then
+            echo "LOJO_VECTORS is unset; envelope tests that need sealed vectors will skip."
+            exit 0
+          fi
+          dest="${TARGET_BUILD_DIR}/${WRAPPER_NAME}"
+          mkdir -p "${dest}"
+          cp "${LOJO_VECTORS}/key.jwk" "${LOJO_VECTORS}/other-key.jwk" "${LOJO_VECTORS}/key-fingerprint.txt" \
+            "${LOJO_VECTORS}/body.json" "${LOJO_VECTORS}/body-expected.json" \
+            "${LOJO_VECTORS}/attachment.bin.json" "${LOJO_VECTORS}/attachment-expected.bin" \
+            "${dest}/"
+          echo "Copied envelope vectors into ${WRAPPER_NAME}."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lojo.Mail.tests
