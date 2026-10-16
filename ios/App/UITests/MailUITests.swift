@@ -168,7 +168,7 @@ final class MailUITests: XCTestCase {
         app.buttons["Later"].tap()
         XCTAssertFalse(app.alerts["Remove the envelope key?"].exists)
 
-        let testMode = app.switches["Test mode"].firstMatch
+        let testMode = app.switches.matching(NSPredicate(format: "label BEGINSWITH 'Test mode'")).firstMatch
         XCTAssertTrue(reveal(testMode, in: app), "test mode toggle missing")
         XCTAssertEqual(testMode.value as? String, "0", "UI tests must not turn test mode on")
         XCTAssertFalse(app.buttons["testmode.off"].exists)
@@ -200,7 +200,7 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Filter with SI"].exists)
         app.buttons["Close"].tap()
 
-        XCTAssertEqual(app.switches["Test mode"].firstMatch.value as? String, "0")
+        XCTAssertEqual(app.switches.matching(NSPredicate(format: "label BEGINSWITH 'Test mode'")).firstMatch.value as? String, "0")
     }
 
     func testSignInAndKeySetupScreens() {
