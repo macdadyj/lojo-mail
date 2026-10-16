@@ -125,6 +125,11 @@ struct SiFilterView: View {
     private func load() async {
         loading = screen == nil
         error = nil
+        if model.launch.uiTest {
+            screen = SiFilterScreen(result: UITestFixtures.filterResult())
+            loading = false
+            return
+        }
         do {
             let result = try await model.call { try await $0.siFilter(messageIds: request.messageIds, folder: request.folder, texts: request.texts) }
             screen = SiFilterScreen(result: result)
@@ -190,6 +195,11 @@ struct BlockedSendersView: View {
 
     private func load() async {
         loading = blocked.isEmpty
+        if model.launch.uiTest {
+            blocked = UITestFixtures.blocked()
+            loading = false
+            return
+        }
         do {
             blocked = try await model.call { try await $0.siBlocked() }
             error = nil

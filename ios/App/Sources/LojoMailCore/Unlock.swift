@@ -344,10 +344,71 @@ public enum InboxDrop {
 }
 
 public enum LaunchSideEffects {
-    /// Screenshot hooks (`LOJO_SCREEN`, sample attachments) choose a screen. They do not enable test mode or delete the key.
+    /// Screenshot hooks (`LOJO_SCREEN`, sample attachments) and UI tests choose a screen.
+    /// None of them enable test mode or delete the envelope key.
     public static func enablesTestMode(screen: String?) -> Bool { false }
 
     public static func discardsEnvelopeKey(screen: String?) -> Bool { false }
+
+    public static func writesEnvelopeKey(uiTest: Bool) -> Bool { false }
+
+    public static func persistsUITestSession(uiTest: Bool) -> Bool { false }
+}
+
+/// The line Settings shows, so a tester can tell which TestFlight build is installed.
+public enum AppBuild {
+    public static func label(info: [String: Any]?) -> String {
+        let version = resolved(info?["CFBundleShortVersionString"] as? String, fallback: "0.1")
+        let build = resolved(info?["CFBundleVersion"] as? String, fallback: "2")
+        return "Version \(version) (build \(build))"
+    }
+
+    private static func resolved(_ raw: String?, fallback: String) -> String {
+        guard let raw else { return fallback }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains("$(") else { return fallback }
+        return trimmed
+    }
+}
+
+/// Primary chrome. Review is the approval queue, not a tab — Jon already approves from Compose.
+public enum AppChrome {
+    public static let tabs = ["Mail", "Rules", "Settings"]
+    public static let reviewTitle = "Approval queue"
+    public static let reviewExplanation = "Drafts from SI, assistants, mail rules, and your desktop client wait here. Nothing they write is sent until you open one and tap Approve and send. Your own saved drafts show up here too."
+    public static let reviewMenuTitle = "Approval queue"
+
+    public static func reviewMenuLabel(waiting: Int) -> String {
+        waiting == 0 ? reviewMenuTitle : "\(reviewMenuTitle) (\(waiting))"
+    }
+
+    public static func reviewBanner(waiting: Int) -> String {
+        switch waiting {
+        case 1:
+            return "1 draft waiting in the approval queue"
+        default:
+            return "\(waiting) drafts waiting in the approval queue"
+        }
+    }
+
+    public static func reviewSettingsDetail(waiting: Int) -> String {
+        waiting == 0
+            ? "No drafts waiting. SI, assistants, and rules leave mail here instead of sending it."
+            : "\(waiting) waiting for your approval before anything is sent."
+    }
+}
+
+/// Which drafts belong in the count on Mail and Settings. Sending still happens on the draft.
+public enum ReviewQueue {
+    public static func needsAttention(_ draft: Draft) -> Bool {
+        draft.status == .pendingApproval || (draft.origin.isBot && draft.status.editable)
+    }
+
+    public static func count(_ drafts: [Draft]) -> Int {
+        drafts.reduce(into: 0) { total, draft in
+            if needsAttention(draft) { total += 1 }
+        }
+    }
 }
 
 /// Keychain plus the sandbox files an update may drop. Session expiry, update, and relaunch keep the envelope key.

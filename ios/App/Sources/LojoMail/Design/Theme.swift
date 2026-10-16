@@ -7,13 +7,22 @@ enum Theme {
     /// darker in light mode for the same on white.
     static let accent = Color(UIColor { traits in
         traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.22, green: 0.70, blue: 0.74, alpha: 1)
-            : UIColor(red: 0.03, green: 0.45, blue: 0.49, alpha: 1)
+            ? UIColor(red: 0.28, green: 0.76, blue: 0.78, alpha: 1)
+            : UIColor(red: 0.02, green: 0.42, blue: 0.46, alpha: 1)
     })
     static let unread = Color(red: 0.16, green: 0.47, blue: 0.96)
     static let star = Color.orange
     static let danger = Color.red
-    static let ai = Color.purple
+    /// SI (Super Intelligence). Never labeled "AI" in the interface.
+    static let si = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.72, green: 0.58, blue: 0.98, alpha: 1)
+            : UIColor(red: 0.42, green: 0.28, blue: 0.72, alpha: 1)
+    })
+    static let ai = si
+
+    static let cardRadius: CGFloat = 18
+    static let spring = Animation.spring(duration: 0.34, bounce: 0.12)
 
     static func avatarColor(for email: String) -> Color {
         let palette: [Color] = [.teal, .indigo, .orange, .pink, .green, .blue, .purple, .brown, .cyan, .mint]
@@ -28,13 +37,13 @@ struct Chip: View {
     var tint: Color = .secondary
 
     var body: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 4) {
             if let systemImage { Image(systemName: systemImage).imageScale(.small) }
             Text(text)
         }
         .font(.caption2.weight(.semibold))
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
         .foregroundStyle(tint)
         .background(tint.opacity(0.14), in: Capsule())
         .accessibilityElement(children: .combine)
@@ -43,7 +52,7 @@ struct Chip: View {
 
 struct Avatar: View {
     var address: Address
-    @ScaledMetric(relativeTo: .body) private var size: CGFloat = 36
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = 38
 
     private var initials: String {
         let source = address.name?.nonEmptyTrimmed ?? address.email
@@ -53,7 +62,7 @@ struct Avatar: View {
 
     var body: some View {
         Text(initials.isEmpty ? "?" : initials)
-            .font(.system(size: size * 0.38, weight: .semibold, design: .rounded))
+            .font(.system(size: size * 0.36, weight: .semibold, design: .rounded))
             .foregroundStyle(.white)
             .frame(width: size, height: size)
             .background(Theme.avatarColor(for: address.email).gradient, in: Circle())
@@ -63,8 +72,8 @@ struct Avatar: View {
 
 /// Chips and other short items that wrap onto more lines instead of clipping at large text sizes.
 struct FlowLayout: Layout {
-    var spacing: CGFloat = 5
-    var lineSpacing: CGFloat = 5
+    var spacing: CGFloat = 6
+    var lineSpacing: CGFloat = 6
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let lines = arrange(subviews, width: proposal.width ?? .infinity)
@@ -112,6 +121,13 @@ extension View {
     func readableWidth(_ maxWidth: CGFloat = 760) -> some View {
         frame(maxWidth: maxWidth).frame(maxWidth: .infinity)
     }
+
+    func lojoCard(padding: CGFloat = 16) -> some View {
+        self
+            .padding(padding)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Color.primary.opacity(0.05)))
+    }
 }
 
 struct ToastView: View {
@@ -128,9 +144,9 @@ struct ToastView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
+        .padding(.vertical, 13)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.16), radius: 12, y: 5)
         .padding(.horizontal)
         .accessibilityElement(children: .contain)
     }
@@ -167,8 +183,8 @@ struct Banner: View {
             .foregroundStyle(tint)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(.vertical, 10)
+            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .accessibilityElement(children: .combine)
     }
 }

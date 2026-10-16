@@ -5,10 +5,15 @@ import XCTest
 /// Envelopes come from `make-vectors.ts`, sealed by `packages/core/src/crypto/envelope.ts`. `LOJO_VECTORS` names the directory.
 final class EnvelopeTests: XCTestCase {
     private func vectors() throws -> URL {
-        guard let dir = ProcessInfo.processInfo.environment["LOJO_VECTORS"] else {
-            throw XCTSkip("LOJO_VECTORS is not set; run ios/scripts/test-core.sh")
+        if let dir = ProcessInfo.processInfo.environment["LOJO_VECTORS"],
+           FileManager.default.fileExists(atPath: (dir as NSString).appendingPathComponent("key.jwk")) {
+            return URL(fileURLWithPath: dir)
         }
-        return URL(fileURLWithPath: dir)
+        let bundle = Bundle(for: EnvelopeTests.self)
+        if let url = bundle.url(forResource: "key", withExtension: "jwk") {
+            return url.deletingLastPathComponent()
+        }
+        throw XCTSkip("LOJO_VECTORS is not set; run ios/scripts/test-core.sh")
     }
 
     private func key(_ name: String) throws -> Envelope.PrivateKey {
@@ -95,7 +100,10 @@ final class EnvelopeTests: XCTestCase {
     }
 
     func testFingerprintMatchesServer() throws {
-        XCTAssertEqual(try key("key.jwk").fingerprint, try String(contentsOf: vectors().appendingPathComponent("key-fingerprint.txt"), encoding: .utf8))
+        let dir = try vectors()
+        let fingerprint = try String(contentsOf: dir.appendingPathComponent("key-fingerprint.txt"), encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(try key("key.jwk").fingerprint, fingerprint)
         XCTAssertNotEqual(try key("key.jwk").fingerprint, try key("other-key.jwk").fingerprint)
     }
 }

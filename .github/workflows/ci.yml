@@ -39,6 +39,8 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - name: Archive script self-test
+        run: ios/scripts/archive-upload.sh --self-test
       - uses: swift-actions/setup-swift@v2
         with:
           swift-version: "6.0.3"

@@ -75,7 +75,7 @@ struct ThreadView: View {
         }
         .sheet(item: $messageFilter) { request in
             NavigationStack { SiMessageFilterView(request: request, existingLabels: model.mailLabels) }
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.large])
         }
         .sheet(isPresented: $showKeySetup, onDismiss: { Task { await model.openBodies(messages) } }) { KeySetupView() }
         .quickLookPreview($preview)
@@ -143,7 +143,7 @@ struct ThreadView: View {
         let items = opened.flatMap { $0.ai?.actionItems ?? [] }
         if let summary {
             VStack(alignment: .leading, spacing: 8) {
-                Label("SI summary", systemImage: "sparkles").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ai)
+                Label("SI summary", systemImage: "sparkles").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.si)
                 Text(summary).font(.subheadline)
                 if !items.isEmpty {
                     ForEach(Array(Set(items.map(\.text))).sorted(), id: \.self) { item in
@@ -153,7 +153,7 @@ struct ThreadView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.ai.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(Theme.si.opacity(0.10), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .accessibilityElement(children: .combine)
         }
     }
@@ -215,67 +215,77 @@ struct ThreadView: View {
     private var actionBar: some View {
         VStack(spacing: 0) {
             Divider()
-            HStack(alignment: .top, spacing: 0) {
-                if inTrash {
-                    barButton("Restore", "arrow.uturn.backward", tint: .accentColor) {
-                        Task {
-                            await model.restore(messages)
-                            dismiss()
-                        }
-                    }
-                } else {
-                    barButton("Trash", "trash", tint: .red) { confirmTrash = true }
-                        .confirmationDialog("Move this conversation to Trash?", isPresented: $confirmTrash, titleVisibility: .visible) {
-                            Button("Move to Trash", role: .destructive) {
-                                Task {
-                                    await model.trash(messages, from: folder)
-                                    dismiss()
-                                }
-                            }
-                        } message: {
-                            Text("You can restore it from Trash for \(model.rules?.rules.trashRetentionDays ?? 30) days.")
-                        }
-                    if folder != .archive {
-                        barButton("Archive", "archivebox", tint: .accentColor) {
-                            Task {
-                                await model.archive(messages, from: folder)
-                                dismiss()
-                            }
-                        }
-                    }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 6) {
+                    actionButtons
                 }
-                if let target = replyTarget {
-                    barButton("Reply", "arrowshape.turn.up.left", tint: .accentColor, identifier: "thread.reply") {
-                        compose = .reply(target, all: false)
-                    }
-                    .contextMenu {
-                        Button { compose = .reply(target, all: true) } label: { Label("Reply All", systemImage: "arrowshape.turn.up.left.2") }
-                        Button { compose = .forward(latest ?? target) } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") }
-                    }
-                    barButton(SiEntry.replyTitle, SiEntry.icon, tint: Theme.ai, identifier: "si.reply") { siReply = true }
-                    barButton(SiEntry.filterTitle, SiEntry.icon, tint: Theme.ai, identifier: "si.filter.message") { openMessageFilter() }
-                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
             }
-            .padding(.top, 6)
-            .padding(.bottom, 2)
             .background(.bar)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("thread.action-bar")
     }
 
-    private func barButton(_ title: String, _ systemImage: String, tint: Color, identifier: String? = nil, action: @escaping () -> Void) -> some View {
+    @ViewBuilder
+    private var actionButtons: some View {
+        if inTrash {
+            barButton("Restore", "arrow.uturn.backward", tint: .accentColor) {
+                Task {
+                    await model.restore(messages)
+                    dismiss()
+                }
+            }
+        } else {
+            barButton("Trash", "trash", tint: .red) { confirmTrash = true }
+                .confirmationDialog("Move this conversation to Trash?", isPresented: $confirmTrash, titleVisibility: .visible) {
+                    Button("Move to Trash", role: .destructive) {
+                        Task {
+                            await model.trash(messages, from: folder)
+                            dismiss()
+                        }
+                    }
+                } message: {
+                    Text("You can restore it from Trash for \(model.rules?.rules.trashRetentionDays ?? 30) days.")
+                }
+            if folder != .archive {
+                barButton("Archive", "archivebox", tint: .accentColor) {
+                    Task {
+                        await model.archive(messages, from: folder)
+                        dismiss()
+                    }
+                }
+            }
+        }
+        if let target = replyTarget {
+            barButton("Reply", "arrowshape.turn.up.left", tint: .accentColor, identifier: "thread.reply") {
+                compose = .reply(target, all: false)
+            }
+            .contextMenu {
+                Button { compose = .reply(target, all: true) } label: { Label("Reply All", systemImage: "arrowshape.turn.up.left.2") }
+                Button { compose = .forward(latest ?? target) } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") }
+            }
+            barButton(SiEntry.replyTitle, SiEntry.icon, tint: Theme.si, identifier: "si.reply", prominent: true) { siReply = true }
+            barButton(SiEntry.filterTitle, SiEntry.icon, tint: Theme.si, identifier: "si.filter.message", prominent: true) { openMessageFilter() }
+        }
+    }
+
+    private func barButton(_ title: String, _ systemImage: String, tint: Color, identifier: String? = nil, prominent: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: systemImage).font(.body)
+            VStack(spacing: 4) {
+                Image(systemName: systemImage).font(.body.weight(prominent ? .semibold : .regular))
                 Text(title)
-                    .font(.caption2)
+                    .font(.caption2.weight(prominent ? .semibold : .regular))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
             }
-            .frame(maxWidth: .infinity)
+            .frame(minWidth: prominent ? 96 : 68)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 2)
             .foregroundStyle(tint)
+            .background(prominent ? tint.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
@@ -383,9 +393,9 @@ struct MessageCard: View {
                 Text(snippet).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
             }
         }
-        .padding(14)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.primary.opacity(0.06)))
+        .padding(16)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Color.primary.opacity(0.05)))
         .environment(\.openURL, OpenURLAction { url in
             if let guarded = GuardedLink(marker: url) {
                 pendingLink = guarded

@@ -36,7 +36,8 @@ test("a bot token is shown once, stored as a hash, and checked against the regis
   assert.ok(registry);
   assert.equal(JSON.stringify(registry).includes(token), false);
   assert.deepEqual(checkBotToken(registry, token), { ok: true, bot: registry.bots[0] });
-  assert.deepEqual(checkBotToken(registry, `${token.slice(0, -1)}A`), { ok: false, reason: "bad_token" });
+  const wrongLast = token.endsWith("A") ? "B" : "A";
+  assert.deepEqual(checkBotToken(registry, `${token.slice(0, -1)}${wrongLast}`), { ok: false, reason: "bad_token" });
   assert.deepEqual(checkBotToken(registry, "lbt_other_" + "x".repeat(43)), { ok: false, reason: "unknown" });
   assert.deepEqual(checkBotToken(registry, "lbt_grok_short"), { ok: false, reason: "malformed" });
   const audit = await w.store.listAudit(10);

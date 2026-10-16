@@ -1,9 +1,10 @@
 import LojoMailCore
 import SwiftUI
 
-/// The approval queue: drafts from the AI, assistants, rules and Jon's desktop mail client, plus his own.
+/// The approval queue: drafts from SI, assistants, rules and Jon's desktop mail client, plus his own.
 struct ReviewView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
     @State private var path = NavigationPath()
     @State private var showDone = false
     @State private var appliedLaunch = false
@@ -17,6 +18,13 @@ struct ReviewView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                Section {
+                    Text(AppChrome.reviewExplanation)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .listRowBackground(Color.clear)
+                        .accessibilityIdentifier("review.explanation")
+                }
                 if !model.online {
                     Banner(text: "Offline", systemImage: "wifi.slash", tint: .orange).listRowSeparator(.hidden)
                 }
@@ -32,7 +40,14 @@ struct ReviewView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("Review")
+            .navigationTitle(AppChrome.reviewTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                        .accessibilityIdentifier("review.done")
+                }
+            }
             .navigationDestination(for: DraftView.self) { view in
                 ComposeView(request: .draft(view), presentedAsSheet: false)
             }
@@ -47,9 +62,9 @@ struct ReviewView: View {
                         }
                     } else {
                         StateView(
-                            title: "Nothing to review",
-                            systemImage: "checkmark.seal",
-                            message: "Drafts SI, your assistants or your mail rules write land here. Nothing they write is sent until you open it here and tap Approve and send."
+                            title: "Nothing waiting",
+                            systemImage: "tray",
+                            message: AppChrome.reviewExplanation
                         )
                     }
                 }
@@ -91,7 +106,7 @@ struct ReviewView: View {
         NavigationLink(value: view) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Chip(text: view.draft.origin.chip, systemImage: view.draft.origin.isBot ? "sparkles" : "person", tint: view.draft.origin.isBot ? Theme.ai : Theme.accent)
+                    Chip(text: view.draft.origin.chip, systemImage: view.draft.origin.isBot ? "sparkles" : "person", tint: view.draft.origin.isBot ? Theme.si : Theme.accent)
                     Chip(text: view.draft.status.label, tint: view.draft.status == .pendingApproval ? .orange : .secondary)
                     Spacer()
                     Text(ISODate.parse(view.draft.updatedAt)?.mailListStamp ?? "").font(.caption).foregroundStyle(.secondary)
@@ -115,6 +130,7 @@ struct ReviewView: View {
             }
             .padding(.vertical, 2)
             .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("review.row.\(view.id)")
         }
     }
 
@@ -259,11 +275,12 @@ struct RulesView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
                 .controlSize(.large)
+                .accessibilityIdentifier("rules.kill-switch")
                 .accessibilityHint("Engages the kill switch. Replies fall back to drafts.")
             }
         }
         .padding(16)
-        .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .accessibilityElement(children: .contain)
     }
 

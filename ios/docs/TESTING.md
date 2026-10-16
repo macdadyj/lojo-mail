@@ -3,8 +3,11 @@
 ## Automated (Linux, `ios/scripts/test-core.sh`)
 
 `CoreTests` builds `LojoMailCore` with swift-crypto on Santa Computa. Offline tests include the unlock buttons,
-USB import, test mode staying off unless chosen, and the envelope key surviving session expiry, an app update,
-and relaunch (`UnlockAndPersistenceTests`). CI runs `ios/scripts/test-core.sh` and `ios/scripts/provision-phone.test.mjs`.
+USB import, test mode staying off unless chosen, the envelope key surviving session expiry, an app update,
+and relaunch (`UnlockAndPersistenceTests`), and that Review is not a tab (`AppChromeTests`, `ReviewQueueTests`). Linux CI also runs `ios/scripts/archive-upload.sh --self-test`. Linux CI runs `ios/scripts/test-core.sh`.
+The macOS **iOS** workflow generates the Xcode project, runs the same core tests on a simulator, then runs UI tests
+that tap every screen. Those UI tests gate TestFlight. They launch with `-LojoMailUITest` (an in-memory mailbox).
+That path does not write the Keychain, does not turn on test mode, and does not delete the envelope key.
 
 - **Offline**: envelopes sealed by `packages/core/src/envelope.ts` open in Swift (body, 70 KB attachment); wrong
   AAD, wrong key and tampering are refused; JWK validation; fingerprint equals `keyFingerprint` from `packages/core`; model decoding (messages, drafts, rules
@@ -55,7 +58,7 @@ the installed build (launch only).
 
 Verified on the iPhone 11 (iOS 26.6.2) by screenshot: sign-in, Inbox from the live API, a thread with its body
 decrypted on the phone, an image attachment decrypted and shown in Quick Look, server search, Sent and Trash, a
-trashed thread with "Trashed by you", compose, the send confirmation, the review queue, a queued draft, AI Rules with
+trashed thread with "Trashed by you", compose, the send confirmation, the approval queue, a queued draft, Rules with
 both kill switches, Settings, and key setup.
 
 ## Tester pass for attachments and the interface (2026-09-30)
@@ -91,10 +94,9 @@ interface at the largest Dynamic Type size and with VoiceOver, and an iPad if on
   `.jwk` or `.json` file, the confirmation alert, and Choose from Files. To check: AirDrop `envelope.private.jwk` from
   the Mac, pick LOJO Mail, confirm the fingerprint matches Settings → Decryption.
 
-- **Taps on the phone.** pymobiledevice3 can launch and screenshot but can't tap without a paid-account XCTest
-  runner, so swipe actions, Undo, the Face ID lock, pull to refresh, the rewrite menu and pressing "Send now" were
-  exercised through the API client (`--live-write`) and by reading the code, not by touch. Worth ten minutes of Jon
-  tapping through.
+- **Taps on a device.** Simulator UI tests walk Mail, the approval queue, Rules, Settings, Compose, Reply with SI,
+  Filter with SI, sign-in, and key setup. They do not tap Send now, do not turn on test mode, and do not remove the key.
+  A real-phone pass is still useful for camera, Files, and Face ID.
 - **Background refresh and notifications on a real schedule.** The code path is the same as the foreground poll, but
   iOS decides when to run it; not observed firing.
 - **Offline**: the offline banner and cached lists weren't captured (needs airplane mode on the phone).

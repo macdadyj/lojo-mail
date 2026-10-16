@@ -63,6 +63,8 @@ final class AppModel {
     var online = true
     var toast: Toast?
     var openThreadRequest: String?
+    /// Opens the approval queue (the old Review tab) from Mail or Settings.
+    var openReviewRequest = false
     var lastBackgroundCheck: Date?
 
     /// Off unless Jon turns it on. The choice is stored in UserDefaults and the Keychain.
@@ -70,6 +72,7 @@ final class AppModel {
     /// whenever the app container was new (reinstall, or a new `XTL-<team>` bundle id).
     var sendTestMode: Bool {
         didSet {
+            if LaunchOptions.current.uiTest { return }
             UserDefaults.standard.set(sendTestMode, forKey: Self.testModeDefaultsKey)
             _ = Keychain.set(Data([sendTestMode ? 1 : 0]), for: .testMode)
         }
@@ -106,7 +109,9 @@ final class AppModel {
             keychainChoice = .unset
         }
         sendTestMode = TestModePolicy.isOn(keychain: keychainChoice, userDefaults: defaultsChoice)
-        if case .missing = Keychain.lookup(.testMode), case .explicit(let on) = defaultsChoice {
+        if !LaunchOptions.current.uiTest,
+           case .missing = Keychain.lookup(.testMode),
+           case .explicit(let on) = defaultsChoice {
             _ = Keychain.set(Data([on ? 1 : 0]), for: .testMode)
         }
         notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
@@ -134,13 +139,64 @@ final class AppModel {
 
     func start() {
         AttachmentFiles.purge()
+        if launch.uiTest {
+            applyUITestFixtures()
+            return
+        }
         _ = applyProvisioned(Provisioning.importPending())
         reloadSecrets(initial: true)
+    }
+
+    /// In-memory mailbox for UI tests. Does not write the session, passphrase, test-mode flag, or envelope key.
+    private func applyUITestFixtures() {
+        guard !UITestFixtures.enablesTestMode,
+              !UITestFixtures.writesEnvelopeKey,
+              !UITestFixtures.deletesEnvelopeKey,
+              !UITestFixtures.persistsSession,
+              !LaunchSideEffects.enablesTestMode(screen: launch.screen?.rawValue),
+              !LaunchSideEffects.discardsEnvelopeKey(screen: launch.screen?.rawValue),
+              !LaunchSideEffects.writesEnvelopeKey(uiTest: true),
+              !LaunchSideEffects.persistsUITestSession(uiTest: true)
+        else { return }
+        session = UITestFixtures.session()
+        mailbox = UITestFixtures.mailbox
+        if let settings = try? UITestFixtures.settings() { serverSettings = settings }
+        if let inbox = try? UITestFixtures.inbox() {
+            folders[.inbox] = FolderState(messages: inbox, updatedAt: Date())
+            for message in inbox {
+                bodies[message.id] = .opened(UITestFixtures.body(for: message))
+            }
+        }
+        if let sent = try? UITestFixtures.sent() {
+            folders[.sent] = FolderState(messages: sent, updatedAt: Date())
+        }
+        if let trash = try? UITestFixtures.trash() {
+            folders[.trash] = FolderState(messages: trash, updatedAt: Date())
+        }
+        for folder in [Folder.drafts, .spam, .archive] where folders[folder] == nil {
+            folders[folder] = FolderState(messages: [], updatedAt: Date())
+        }
+        drafts = (try? UITestFixtures.drafts()) ?? []
+        rules = try? UITestFixtures.rules()
+        if launch.previewSignedOut {
+            phase = .signedOut
+            return
+        }
+        phase = .ready
+        switch launch.screen {
+        case .review, .draft:
+            openReviewRequest = true
+        case .thread, .attachment:
+            openThreadRequest = launch.thread ?? UITestFixtures.threadId
+        default:
+            break
+        }
     }
 
     /// Foreground: import a USB drop that arrived while the app was open, and re-read the keychain.
     /// A locked read does not clear the envelope key.
     func restoreAfterForeground() {
+        if launch.uiTest { return }
         _ = applyProvisioned(Provisioning.importPending())
         reloadSecrets(initial: false)
     }
@@ -246,6 +302,7 @@ final class AppModel {
     }
 
     func signIn(passphrase: String, keep: Bool) async throws {
+        if launch.uiTest { throw APIError.offline }
         let session = try await APIClient(baseURL: apiBase, session: urlSession).login(passphrase: passphrase)
         store(session: session)
         if keep {
@@ -260,17 +317,23 @@ final class AppModel {
     }
 
     func forgetPassphrase() {
+        if launch.uiTest {
+            keepsPassphrase = false
+            return
+        }
         Keychain.delete(.passphrase)
         keepsPassphrase = false
     }
 
     private func store(session: Session) {
         self.session = session
+        if launch.uiTest { return }
         if let data = try? JSONEncoder().encode(session) { Keychain.set(data, for: .session) }
     }
 
     @discardableResult
     func store(key: Envelope.PrivateKey) -> Bool {
+        if launch.uiTest { return false }
         guard let data = try? key.encoded() else { return false }
         guard Keychain.set(data, for: .envelopeKey) else { return false }
         self.key = key
@@ -358,12 +421,18 @@ final class AppModel {
     }
 
     func removeKey() {
+        if launch.uiTest { return }
         Keychain.delete(.envelopeKey)
         key = nil
         bodies = [:]
     }
 
     func signOut(removeKey alsoKey: Bool) {
+        if launch.uiTest {
+            session = nil
+            phase = .signedOut
+            return
+        }
         pollTask?.cancel()
         Keychain.delete(.session)
         Keychain.delete(.passphrase)
@@ -427,6 +496,7 @@ final class AppModel {
     /// Failure to renew asks Jon to sign in again and does not remove the envelope key.
     /// A keychain that is only locked does not sign him out.
     func call<T: Sendable>(_ operation: @Sendable (APIClient) async throws -> T) async throws -> T {
+        if launch.uiTest { throw APIError.offline }
         if session?.isValid(margin: 300) != true {
             switch await renewSession() {
             case .renewed, .unreadable:
@@ -460,6 +530,7 @@ final class AppModel {
     func state(_ folder: Folder) -> FolderState { folders[folder] ?? FolderState() }
 
     func refresh(_ folder: Folder) async {
+        if launch.uiTest { return }
         folders[folder, default: FolderState()].loading = true
         do {
             let messages = try await call { try await $0.folder(folder, limit: 200) }
@@ -473,6 +544,7 @@ final class AppModel {
     }
 
     func refreshAll() async {
+        if launch.uiTest { return }
         async let inbox: Void = refresh(.inbox)
         async let drafts: Void = refreshDrafts()
         async let rules: Void = refreshRules()
@@ -484,6 +556,7 @@ final class AppModel {
     /// from earlier in the session is never trusted to mean "not supported". On failure the last answer is kept.
     @discardableResult
     func refreshSettings() async -> ServerSettings? {
+        if launch.uiTest { return serverSettings }
         if let fresh = try? await call({ try await $0.settings() }) {
             serverSettings = fresh
             mailbox = fresh.mailbox
@@ -493,6 +566,7 @@ final class AppModel {
 
     /// Foreground poll every 60 s while the app is active.
     func startPolling() {
+        if launch.uiTest { return }
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -532,6 +606,13 @@ final class AppModel {
     // MARK: Threads and bodies
 
     func loadThread(_ id: String) async throws -> [Message] {
+        if launch.uiTest {
+            let messages = try UITestFixtures.thread(id)
+            for message in messages {
+                bodies[message.id] = .opened(UITestFixtures.body(for: message))
+            }
+            return messages
+        }
         let response = try await call { try await $0.thread(id) }
         let messages = response.messages.sorted { ($0.sentDate ?? .distantPast) < ($1.sentDate ?? .distantPast) }
         let ids = Set(messages.map(\.id))
@@ -742,7 +823,13 @@ final class AppModel {
     }
 
     func search(_ query: String) async throws -> [Message] {
-        try await call { try await $0.search(query) }
+        if launch.uiTest {
+            let q = query.lowercased()
+            return folders.values.flatMap(\.messages).filter {
+                $0.subject.lowercased().contains(q) || $0.from.email.lowercased().contains(q) || ($0.snippet ?? "").lowercased().contains(q)
+            }
+        }
+        return try await call { try await $0.search(query) }
     }
 
     func report(_ error: Error) {
@@ -753,6 +840,7 @@ final class AppModel {
     // MARK: Drafts
 
     func refreshDrafts() async {
+        if launch.uiTest { draftsLoading = false; draftsError = nil; return }
         draftsLoading = true
         defer { draftsLoading = false }
         do {
@@ -765,9 +853,7 @@ final class AppModel {
     }
 
     /// Drafts that need Jon: waiting for approval, or written by a bot and not yet handled.
-    var reviewCount: Int {
-        drafts.filter { $0.draft.status == .pendingApproval || ($0.draft.origin.isBot && $0.draft.status.editable) }.count
-    }
+    var reviewCount: Int { ReviewQueue.count(drafts.map(\.draft)) }
 
     func upsertDraft(_ view: DraftView) {
         if let index = drafts.firstIndex(where: { $0.id == view.id }) {
@@ -780,6 +866,7 @@ final class AppModel {
     // MARK: Rules
 
     func refreshRules() async {
+        if launch.uiTest { return }
         do {
             rules = try await call { try await $0.rules() }
             rulesError = nil
@@ -789,6 +876,10 @@ final class AppModel {
     }
 
     func setKillSwitch(_ on: Bool) async {
+        if launch.uiTest {
+            patchRules { $0.killSwitch = on }
+            return
+        }
         do {
             let doc = try await call { try await $0.setRuleSwitches(killSwitch: on) }
             rules?.rules = doc
@@ -799,6 +890,10 @@ final class AppModel {
     }
 
     func setSendKillSwitch(_ on: Bool) async {
+        if launch.uiTest {
+            patchRules { $0.sendKillSwitch = on }
+            return
+        }
         do {
             let doc = try await call { try await $0.setRuleSwitches(sendKillSwitch: on) }
             rules?.rules = doc
@@ -809,6 +904,10 @@ final class AppModel {
     }
 
     func setPaused(_ paused: Bool) async {
+        if launch.uiTest {
+            patchRules { $0.paused = paused }
+            return
+        }
         do {
             let doc = try await call { try await $0.setRuleSwitches(paused: paused) }
             rules?.rules = doc
@@ -818,6 +917,10 @@ final class AppModel {
     }
 
     func setSiKillSwitch(_ on: Bool) async {
+        if launch.uiTest {
+            patchRules { $0.siKillSwitch = on }
+            return
+        }
         do {
             let doc = try await call { try await $0.setRuleSwitches(siKillSwitch: on) }
             rules?.rules = doc
@@ -841,11 +944,25 @@ final class AppModel {
     }
 
     func disableRule(_ id: String) async {
+        if launch.uiTest {
+            patchRules { doc in
+                if let index = doc.rules.firstIndex(where: { $0.id == id }) {
+                    doc.rules[index].enabled = false
+                }
+            }
+            return
+        }
         do {
             let doc = try await call { try await $0.disableRule(id) }
             rules?.rules = doc
         } catch {
             report(error)
         }
+    }
+
+    private func patchRules(_ change: (inout RulesDocument) -> Void) {
+        guard var state = rules else { return }
+        change(&state.rules)
+        rules = state
     }
 }

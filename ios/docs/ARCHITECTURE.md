@@ -3,7 +3,8 @@
 ## Targets
 
 ```text
-ios/App                      xtool project (Package.swift + xtool.yml + Info.plist)
+ios/project.yml              XcodeGen spec for TestFlight (app, unit tests, UI tests)
+ios/App                      xtool project (Package.swift + xtool.yml + Info.plist) and the Xcode sources
   Sources/LojoMailCore       Foundation + CryptoKit only; also builds on Linux (swift-crypto) for tests
     Envelope.swift           open the P-256 ECDH + HKDF-SHA256 + AES-256-GCM envelopes; JWK import and fingerprint
     APIClient.swift          every HTTP call the app makes; error mapping
@@ -13,10 +14,11 @@ ios/App                      xtool project (Package.swift + xtool.yml + Info.pli
     Model/AppModel.swift     @Observable @MainActor state: session, key, folders, bodies, drafts, rules, settings
     Model/ComposeModel.swift one compose/review sheet: save, queue, rewrite, approve-and-send
     Services/                Keychain, metadata cache, temp attachment files, notifications + BG refresh, USB provisioning
-    Views/                   RootView (tabs + lock), Mailbox, Thread, Compose, Review, Rules, Settings, Sign in, Key setup
+    Views/                   RootView (Mail, Rules, Settings + lock), Mailbox, Thread, Compose, Approval queue, Rules, Settings
     Design/Theme.swift       colours, chips, banners, toasts, empty states
+  UITests                    Simulator taps that gate TestFlight
 ios/CoreTests                SwiftPM package that symlinks LojoMailCore and tests it on Linux
-ios/scripts                  deploy, provision, screenshot, test, icon
+ios/scripts                  deploy, provision, screenshot, test, icon, TestFlight archive
 ```
 
 `LojoMailCore` has no UIKit/SwiftUI so the crypto and the API contract are tested on Santa Computa without a
@@ -54,7 +56,7 @@ approval flow above, which is the one path that binds a send to content a human 
   by agent X".
 - `rate_limited` maps to HTTP 429, shown as "try again in N s".
 - Bot drafts: the bridge tags drafts whose `origin` is `agent`, `ai` or `rule` with the IMAP keyword `bot-draft`. The
-  API itself exposes `draft.origin`, and the app uses the same split (`DraftAuthor.isBot`) for the "Written by AI
+  API itself exposes `draft.origin`, and the app uses the same split (`DraftAuthor.isBot`) for the "Written by SI
   and assistants" section and the author notice.
 
 From #9 (web app on any device): `/v1/settings` publishes `envelopeKeyFingerprint`; the app computes the same

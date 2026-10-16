@@ -105,7 +105,11 @@ final class UnlockAndPersistenceTests: XCTestCase {
         XCTAssertTrue(TestModePolicy.isOn(keychain: .explicit(true), userDefaults: .unset))
         XCTAssertFalse(LaunchSideEffects.enablesTestMode(screen: "signin"))
         XCTAssertFalse(LaunchSideEffects.enablesTestMode(screen: nil))
+        XCTAssertFalse(LaunchSideEffects.enablesTestMode(screen: "uitest"))
         XCTAssertFalse(LaunchSideEffects.discardsEnvelopeKey(screen: "key"))
+        XCTAssertFalse(LaunchSideEffects.discardsEnvelopeKey(screen: "uitest"))
+        XCTAssertFalse(LaunchSideEffects.writesEnvelopeKey(uiTest: true))
+        XCTAssertFalse(LaunchSideEffects.persistsUITestSession(uiTest: true))
     }
 
     func testUnreadablePassphraseDoesNotSignOut() {

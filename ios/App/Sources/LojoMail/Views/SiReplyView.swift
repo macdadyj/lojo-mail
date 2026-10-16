@@ -64,6 +64,12 @@ struct SiReplyView: View {
         guard screen.canGenerate, !screen.sendsAutomatically else { return }
         busy = true
         defer { busy = false }
+        if model.launch.uiTest, let view = try? UITestFixtures.drafts().first {
+            model.upsertDraft(view)
+            dismiss()
+            onDraft(view)
+            return
+        }
         let messageId = message.id
         let tone = screen.tone
         let instruction = screen.instruction
