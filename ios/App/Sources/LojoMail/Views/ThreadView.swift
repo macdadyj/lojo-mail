@@ -75,7 +75,7 @@ struct ThreadView: View {
         }
         .sheet(item: $messageFilter) { request in
             NavigationStack { SiMessageFilterView(request: request, existingLabels: model.mailLabels) }
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.large])
         }
         .sheet(isPresented: $showKeySetup, onDismiss: { Task { await model.openBodies(messages) } }) { KeySetupView() }
         .quickLookPreview($preview)

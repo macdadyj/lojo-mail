@@ -41,6 +41,12 @@ final class MailUITests: XCTestCase {
             app.buttons["Done selecting"].tap()
         }
 
+        let compose = composeButton(app)
+        XCTAssertTrue(compose.waitForExistence(timeout: 6), "New message is not in the toolbar")
+        compose.tap()
+        XCTAssertTrue(app.navigationBars["New message"].waitForExistence(timeout: 6) || app.navigationBars.element.waitForExistence(timeout: 6))
+        dismissCompose(app)
+
         app.swipeDown()
         let search = app.searchFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 4), "Search field did not appear")
@@ -48,11 +54,6 @@ final class MailUITests: XCTestCase {
         search.typeText("Gate")
         XCTAssertTrue(matching(app, "mail.row.thr_uitest_gate").waitForExistence(timeout: 4))
         dismissSearch(app)
-        let compose = composeButton(app)
-        XCTAssertTrue(compose.waitForExistence(timeout: 6), "New message is not in the toolbar")
-        compose.tap()
-        XCTAssertTrue(app.navigationBars["New message"].waitForExistence(timeout: 6) || app.navigationBars.element.waitForExistence(timeout: 6))
-        dismissCompose(app)
         shot(app, "after-compose-closed")
 
         openApprovalQueue(app)
@@ -151,16 +152,6 @@ final class MailUITests: XCTestCase {
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 6))
         XCTAssertTrue(app.buttons["settings.approval-queue"].waitForExistence(timeout: 4))
-        let testMode = app.switches["Test mode"].firstMatch
-        XCTAssertTrue(reveal(testMode, in: app), "test mode toggle missing")
-        XCTAssertEqual(testMode.value as? String, "0", "UI tests must not turn test mode on")
-        XCTAssertFalse(app.buttons["testmode.off"].exists)
-
-        let build = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Version '")).firstMatch
-        XCTAssertTrue(reveal(build, in: app, swipes: 8), "Settings does not show the build")
-        XCTAssertTrue(build.label.contains("build"), "unexpected build line: \(build.label)")
-        shot(app, "after-settings")
-
         let loadKey = app.buttons["Load envelope key…"]
         XCTAssertTrue(reveal(loadKey, in: app), "Load envelope key is missing")
         XCTAssertFalse(app.buttons["Replace key…"].exists, "UI tests must not load a key")
@@ -173,8 +164,18 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(app.buttons["unlock.usb"].exists)
         XCTAssertTrue(app.buttons["unlock.save"].exists)
         app.buttons["Later"].tap()
-
         XCTAssertFalse(app.alerts["Remove the envelope key?"].exists)
+
+        let testMode = app.switches["Test mode"].firstMatch
+        XCTAssertTrue(reveal(testMode, in: app), "test mode toggle missing")
+        XCTAssertEqual(testMode.value as? String, "0", "UI tests must not turn test mode on")
+        XCTAssertFalse(app.buttons["testmode.off"].exists)
+
+        let build = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Version '")).firstMatch
+        XCTAssertTrue(reveal(build, in: app, swipes: 8), "Settings does not show the build")
+        XCTAssertTrue(build.label.contains("build"), "unexpected build line: \(build.label)")
+        shot(app, "after-settings")
+
         app.buttons["settings.approval-queue"].tap()
         XCTAssertTrue(app.navigationBars["Approval queue"].waitForExistence(timeout: 6))
         app.buttons["review.done"].tap()

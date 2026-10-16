@@ -74,7 +74,7 @@ struct MailboxView: View {
         }
         .sheet(item: $messageFilter) { request in
             NavigationStack { SiMessageFilterView(request: request, existingLabels: model.mailLabels) }
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.large])
         }
         .sheet(isPresented: $showKeySetup) { KeySetupView() }
         .onChange(of: model.openThreadRequest) { _, id in

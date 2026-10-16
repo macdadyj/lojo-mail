@@ -69,6 +69,7 @@ struct SiMessageFilterView: View {
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
         }
+        .presentationDetents([.large])
         .navigationDestination(isPresented: $showDecide) {
             SiFilterView(request: SiFilterRequest(messageIds: request.messageIds, folder: nil, texts: request.texts))
         }

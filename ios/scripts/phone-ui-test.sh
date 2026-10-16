@@ -22,6 +22,7 @@ print(chosen)
 PY
 )"
 
+defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
 mkdir -p build/phone-ui-screenshots
 export LOJO_UI_SCREENSHOTS="${ROOT}/build/phone-ui-screenshots"
 run_phone() {
