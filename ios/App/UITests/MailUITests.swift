@@ -168,10 +168,9 @@ final class MailUITests: XCTestCase {
         app.buttons["Later"].tap()
         XCTAssertFalse(app.alerts["Remove the envelope key?"].exists)
 
-        let testMode = app.switches.matching(NSPredicate(format: "label BEGINSWITH 'Test mode'")).firstMatch
-        XCTAssertTrue(reveal(testMode, in: app), "test mode toggle missing")
-        XCTAssertEqual(testMode.value as? String, "0", "UI tests must not turn test mode on")
-        XCTAssertFalse(app.buttons["testmode.off"].exists)
+        XCTAssertTrue(revealLabel(app, "Test mode"), "test mode toggle missing")
+        XCTAssertTrue(revealLabelPrefix(app, "Test mode is off"), "test mode must stay off")
+        XCTAssertFalse(hasLabel(app, "Turn off test mode"))
 
         let build = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Version '")).firstMatch
         XCTAssertTrue(reveal(build, in: app, swipes: 8), "Settings does not show the build")
@@ -200,7 +199,7 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Filter with SI"].exists)
         app.buttons["Close"].tap()
 
-        XCTAssertEqual(app.switches.matching(NSPredicate(format: "label BEGINSWITH 'Test mode'")).firstMatch.value as? String, "0")
+        XCTAssertFalse(hasLabel(app, "Turn off test mode"))
     }
 
     func testSignInAndKeySetupScreens() {
@@ -252,6 +251,30 @@ final class MailUITests: XCTestCase {
     @discardableResult
     private func revealUp(_ element: XCUIElement, in app: XCUIApplication, swipes: Int = 6) -> Bool {
         scroll(element, in: app, swipes: swipes, down: true)
+    }
+
+    private func hasLabel(_ app: XCUIApplication, _ label: String) -> Bool {
+        app.staticTexts.matching(NSPredicate(format: "label == %@", label)).count > 0
+            || app.buttons.matching(NSPredicate(format: "label == %@", label)).count > 0
+    }
+
+    private func revealLabelPrefix(_ app: XCUIApplication, _ prefix: String, swipes: Int = 4) -> Bool {
+        let query = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", prefix))
+        if query.count > 0 { return true }
+        for _ in 0..<swipes {
+            app.swipeUp()
+            if query.count > 0 { return true }
+        }
+        return query.count > 0
+    }
+
+    private func revealLabel(_ app: XCUIApplication, _ label: String, swipes: Int = 6) -> Bool {
+        if hasLabel(app, label) { return true }
+        for _ in 0..<swipes {
+            app.swipeUp()
+            if hasLabel(app, label) { return true }
+        }
+        return hasLabel(app, label)
     }
 
     private func scroll(_ element: XCUIElement, in app: XCUIApplication, swipes: Int, down: Bool) -> Bool {
