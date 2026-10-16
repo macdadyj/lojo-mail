@@ -178,6 +178,7 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(build.label.contains("build"), "unexpected build line: \(build.label)")
         shot(app, "after-settings")
 
+        XCTAssertTrue(revealUp(app.buttons["settings.approval-queue"], in: app), "Approval queue row is missing")
         app.buttons["settings.approval-queue"].tap()
         XCTAssertTrue(app.navigationBars["Approval queue"].waitForExistence(timeout: 6))
         app.buttons["review.done"].tap()
@@ -245,9 +246,18 @@ final class MailUITests: XCTestCase {
 
     @discardableResult
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, swipes: Int = 5) -> Bool {
+        scroll(element, in: app, swipes: swipes, down: false)
+    }
+
+    @discardableResult
+    private func revealUp(_ element: XCUIElement, in app: XCUIApplication, swipes: Int = 6) -> Bool {
+        scroll(element, in: app, swipes: swipes, down: true)
+    }
+
+    private func scroll(_ element: XCUIElement, in app: XCUIApplication, swipes: Int, down: Bool) -> Bool {
         if element.exists { return true }
         for _ in 0..<swipes {
-            app.swipeUp()
+            if down { app.swipeDown() } else { app.swipeUp() }
             if element.waitForExistence(timeout: 1) { return true }
         }
         return element.exists
