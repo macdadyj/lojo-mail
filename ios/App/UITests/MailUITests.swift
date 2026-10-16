@@ -39,6 +39,8 @@ final class MailUITests: XCTestCase {
         app.buttons["mail.more"].tap()
         if app.buttons["Done selecting"].waitForExistence(timeout: 3) {
             app.buttons["Done selecting"].tap()
+        } else if app.buttons["mail.more"].exists {
+            app.buttons["mail.more"].tap()
         }
 
         let compose = composeButton(app)
@@ -160,9 +162,9 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(app.buttons["unlock.files"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["unlock.paste"].exists)
         XCTAssertTrue(app.buttons["unlock.airdrop"].exists)
-        XCTAssertTrue(app.buttons["unlock.share"].exists)
-        XCTAssertTrue(app.buttons["unlock.usb"].exists)
-        XCTAssertTrue(app.buttons["unlock.save"].exists)
+        XCTAssertTrue(reveal(app.buttons["unlock.share"], in: app), "Share or Open in is missing")
+        XCTAssertTrue(reveal(app.buttons["unlock.usb"], in: app), "USB from Santa Computa is missing")
+        XCTAssertTrue(reveal(app.buttons["unlock.save"], in: app), "Save to Keychain is missing")
         app.buttons["Later"].tap()
         XCTAssertFalse(app.alerts["Remove the envelope key?"].exists)
 
