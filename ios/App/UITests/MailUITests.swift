@@ -48,7 +48,7 @@ final class MailUITests: XCTestCase {
         search.typeText("Gate")
         XCTAssertTrue(matching(app, "mail.row.thr_uitest_gate").waitForExistence(timeout: 4))
         dismissSearch(app)
-        let compose = app.buttons["mail.compose"].firstMatch
+        let compose = composeButton(app)
         XCTAssertTrue(compose.waitForExistence(timeout: 6), "New message is not in the toolbar")
         compose.tap()
         XCTAssertTrue(app.navigationBars["New message"].waitForExistence(timeout: 6) || app.navigationBars.element.waitForExistence(timeout: 6))
@@ -107,9 +107,11 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(filterMessage.waitForExistence(timeout: 6))
         filterMessage.tap()
         XCTAssertTrue(app.descendants(matching: .any)["si.direct.sheet"].firstMatch.waitForExistence(timeout: 8))
-        XCTAssertTrue(app.buttons["si.direct.spam"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["si.direct.blockSender"].exists)
-        XCTAssertTrue(app.buttons["si.direct.trash"].exists)
+        let spam = app.buttons["Filter to Spam"].firstMatch
+        if !spam.waitForExistence(timeout: 2) { app.swipeUp() }
+        XCTAssertTrue(spam.waitForExistence(timeout: 4))
+        XCTAssertTrue(app.buttons["Block sender"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["Move to Trash"].firstMatch.exists)
         app.buttons["si.direct.decide"].tap()
         if app.buttons["Close"].waitForExistence(timeout: 4) {
             app.buttons["Close"].tap()
@@ -154,11 +156,8 @@ final class MailUITests: XCTestCase {
         XCTAssertEqual(testMode.value as? String, "0", "UI tests must not turn test mode on")
         XCTAssertFalse(app.buttons["testmode.off"].exists)
 
-        let build = app.staticTexts["settings.build"]
-        if !build.waitForExistence(timeout: 3) {
-            app.swipeUp()
-        }
-        XCTAssertTrue(build.waitForExistence(timeout: 4), "Settings does not show the build")
+        let build = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Version '")).firstMatch
+        XCTAssertTrue(reveal(build, in: app, swipes: 8), "Settings does not show the build")
         XCTAssertTrue(build.label.contains("build"), "unexpected build line: \(build.label)")
         shot(app, "after-settings")
 
@@ -269,6 +268,12 @@ final class MailUITests: XCTestCase {
             }
             app.swipeDown()
         }
+    }
+
+    private func composeButton(_ app: XCUIApplication) -> XCUIElement {
+        let identified = app.buttons["mail.compose"].firstMatch
+        if identified.exists { return identified }
+        return app.buttons["New message"].firstMatch
     }
 
     /// The first hittable element with this identifier. SwiftUI often exposes the same id twice.

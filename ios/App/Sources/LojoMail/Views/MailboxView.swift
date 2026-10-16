@@ -49,7 +49,7 @@ struct MailboxView: View {
                     ToolbarItem(placement: .topBarLeading) { folderMenu }
                     ToolbarItem(placement: .topBarTrailing) { moreMenu }
                     ToolbarItem(placement: .topBarTrailing) { filterButton }
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItem(placement: .primaryAction) {
                         Button { compose = .new(to: nil) } label: { Image(systemName: "square.and.pencil") }
                             .accessibilityLabel("New message")
                             .accessibilityIdentifier("mail.compose")
