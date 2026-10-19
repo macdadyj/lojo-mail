@@ -138,19 +138,28 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def api(token, method, path, payload=None):
     data = None if payload is None else json.dumps(payload).encode()
-    request = urllib.request.Request(API_ROOT + path, data=data, method=method)
-    request.add_header("Authorization", "Bearer " + token)
-    request.add_header("Accept", "application/json")
-    if data is not None:
-        request.add_header("Content-Type", "application/json")
-    opener = urllib.request.build_opener(NoRedirect)
-    try:
-        with opener.open(request, timeout=60) as response:
-            return response.status, response.read().decode()
-    except urllib.error.HTTPError as error:
-        return error.code, error.read().decode()
-    except urllib.error.URLError:
-        raise SystemExit("Could not reach App Store Connect. Stopped without creating a certificate.")
+    # Reads can time out after the upload has already succeeded. Retry those.
+    # Writes are not retried, so a timeout cannot create a second certificate or profile.
+    attempts = 4 if method == "GET" else 1
+    for attempt in range(attempts):
+        request = urllib.request.Request(API_ROOT + path, data=data, method=method)
+        request.add_header("Authorization", "Bearer " + token)
+        request.add_header("Accept", "application/json")
+        if data is not None:
+            request.add_header("Content-Type", "application/json")
+        opener = urllib.request.build_opener(NoRedirect)
+        try:
+            with opener.open(request, timeout=60) as response:
+                return response.status, response.read().decode()
+        except urllib.error.HTTPError as error:
+            return error.code, error.read().decode()
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            if attempt + 1 == attempts:
+                raise SystemExit(
+                    "Could not reach App Store Connect. Stopped without creating a certificate."
+                )
+            time.sleep(2 * (attempt + 1))
+    raise SystemExit("Could not reach App Store Connect. Stopped without creating a certificate.")
 
 
 def api_path(url_or_path):
@@ -755,6 +764,7 @@ def self_test():
     tied_roundtrip()
     prepare_roundtrip()
     cleanup_roundtrip()
+    api_retry_roundtrip()
     no_mint_roundtrip()
     print("asc signing ok")
 
@@ -1300,6 +1310,58 @@ def cleanup_roundtrip():
             os.environ.pop("SIGNING_MANIFEST", None)
         else:
             os.environ["SIGNING_MANIFEST"] = previous
+
+
+def api_retry_roundtrip():
+    class Response:
+        status = 200
+
+        def read(self):
+            return b'{"data":[]}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    class Flaky:
+        def __init__(self):
+            self.calls = 0
+
+        def open(self, _request, timeout=60):
+            self.calls += 1
+            if self.calls == 1:
+                raise TimeoutError("timed out")
+            return Response()
+
+    flaky = Flaky()
+    real_opener = urllib.request.build_opener
+    real_sleep = time.sleep
+    urllib.request.build_opener = lambda *_args, **_kwargs: flaky
+    time.sleep = lambda _seconds: None
+    try:
+        status, body = api("token", "GET", "/v1/apps")
+        if status != 200 or body != '{"data":[]}' or flaky.calls != 2:
+            raise SystemExit("GET did not retry a timeout")
+        posts = Flaky()
+
+        def post_opener(*_args, **_kwargs):
+            return posts
+
+        urllib.request.build_opener = post_opener
+        try:
+            api("token", "POST", "/v1/profiles", {"data": {}})
+        except SystemExit as error:
+            if "certificate" not in str(error):
+                raise
+        else:
+            raise SystemExit("POST timeout was retried or accepted")
+        if posts.calls != 1:
+            raise SystemExit("POST timeout was retried")
+    finally:
+        urllib.request.build_opener = real_opener
+        time.sleep = real_sleep
 
 
 def no_mint_roundtrip():
