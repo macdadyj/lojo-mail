@@ -19,8 +19,15 @@ struct SettingsView: View {
         @Bindable var model = model
         NavigationStack {
             Form {
-                Section("Account") {
-                    LabeledContent("Mailbox", value: model.mailbox)
+                Section("Getting started") {
+                    ForEach(Array(SetupCopy.steps.enumerated()), id: \.offset) { index, step in
+                        Text("\(index + 1). \(step)")
+                            .font(.body)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Section {
+                    LabeledContent(SetupCopy.accountLabel, value: model.mailbox)
                     Button {
                         openReview()
                     } label: {
@@ -34,6 +41,10 @@ struct SettingsView: View {
                                 Text(AppChrome.reviewTitle)
                                     .font(.body.weight(.semibold))
                                     .foregroundStyle(.primary)
+                                Text(SetupCopy.approvalsDetail)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Text(AppChrome.reviewSettingsDetail(waiting: model.reviewCount))
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
@@ -58,6 +69,10 @@ struct SettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+                } header: {
+                    Text("Account")
+                } footer: {
+                    Text(SetupCopy.accountDetail)
                 }
 
                 Section {
@@ -81,9 +96,9 @@ struct SettingsView: View {
                         Button("Load envelope key…") { showKeySetup = true }
                     }
                 } header: {
-                    Text("Decryption")
+                    Text("Reading sealed mail")
                 } footer: {
-                    Text("Bodies and attachments are opened on this iPhone with this key. It is kept in the Keychain (AfterFirstUnlock) so an app update does not drop it, and it is not stored in the app's files.\n\nTo load or replace it: tap the button above. Files, paste, AirDrop, share, and USB from Santa Computa are buttons.")
+                    Text("Mail opens on this iPhone with your envelope key. The key stays in the Keychain, so an app update does not drop it. Tap Load envelope key to add or replace it. Files, paste, AirDrop, share, and USB from Santa Computa are buttons.")
                 }
 
                 Section {
@@ -193,9 +208,9 @@ struct SettingsView: View {
                     NavigationLink("Blocked") { BlockedSendersView() }
                     NavigationLink("Saved SI filters") { SiRulesView() }
                 } header: {
-                    Text("SI")
+                    Text(SetupCopy.siTitle)
                 } footer: {
-                    Text("Filter with SI proposes a label, junk, Trash, or a block. Trash is kept and can be restored. Saved filters run on new mail until you turn this switch on. Unblock a sender from Blocked. Reply with SI only writes a draft.")
+                    Text("\(SetupCopy.siDetail) Trash is kept and can be restored. Saved filters run on new mail until you turn Stop SI filters on.")
                 }
 
                 Section("About") {
