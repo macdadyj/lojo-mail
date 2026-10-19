@@ -19,9 +19,8 @@ struct ComposeView: View {
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var pickFiles = false
     @State private var takePhoto = false
-    @FocusState private var focus: Field?
-
-    enum Field { case to, cc, subject, body }
+    @FocusState private var focus: ComposeField?
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         Group {
@@ -78,33 +77,58 @@ struct ComposeView: View {
                 }
             }
             Section {
-                LabeledContent("To") {
+                LabeledContent(ComposeChrome.toLabel) {
                     TextField("name@example.com", text: $model.fields.to, axis: .vertical)
+                        .font(.body)
                         .focused($focus, equals: .to)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .textContentType(.emailAddress)
+                        .accessibilityLabel(ComposeChrome.toLabel)
                 }
-                LabeledContent("Cc") {
-                    TextField("", text: $model.fields.cc, axis: .vertical)
+                LabeledContent(ComposeChrome.ccLabel) {
+                    TextField("Optional", text: $model.fields.cc, axis: .vertical)
+                        .font(.body)
                         .focused($focus, equals: .cc)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .accessibilityLabel(ComposeChrome.ccLabel)
                 }
-                LabeledContent("Subject") {
-                    TextField("", text: $model.fields.subject, axis: .vertical)
+                LabeledContent(ComposeChrome.subjectLabel) {
+                    TextField("Subject", text: $model.fields.subject, axis: .vertical)
+                        .font(.body)
                         .focused($focus, equals: .subject)
+                        .accessibilityLabel(ComposeChrome.subjectLabel)
                 }
+            } header: {
+                Text("Recipients").textCase(nil)
             }
             .disabled(model.closed)
             Section {
-                TextEditor(text: $model.fields.text)
-                    .focused($focus, equals: .body)
-                    .frame(minHeight: 260)
-                    .accessibilityLabel("Message")
-                    .disabled(model.closed)
+                ZStack(alignment: .topLeading) {
+                    if model.fields.text.isEmpty {
+                        Text(ComposeChrome.placeholder)
+                            .font(.body)
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 8)
+                            .padding(.leading, 5)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                    TextEditor(text: $model.fields.text)
+                        .font(.body)
+                        .lineSpacing(CGFloat(ComposeChrome.bodyLineSpacing))
+                        .focused($focus, equals: .body)
+                        .frame(minHeight: CGFloat(ComposeChrome.editorMinHeight(accessibilitySize: typeSize.isAccessibilitySize)))
+                        .accessibilityLabel(ComposeChrome.messageLabel)
+                        .disabled(model.closed)
+                }
+            } header: {
+                Text(ComposeChrome.messageLabel).textCase(nil)
+            } footer: {
+                Text(ComposeChrome.approvalNote)
             }
             if !model.closed || model.hasAttachments {
                 ComposeAttachmentsSection(model: model, photos: openPhotos, camera: openCamera, files: openFiles)
@@ -158,6 +182,7 @@ struct ComposeView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .disabled(!canSend(model) || app.rules?.rules.sendKillSwitch == true)
+                    .accessibilityHint("Asks you to confirm before sending")
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                 } footer: {
@@ -170,6 +195,7 @@ struct ComposeView: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
+        .toolbar { keyboardFields }
         .navigationTitle(title(model))
         .navigationBarTitleDisplayMode(.inline)
         .interactiveDismissDisabled(model.dirty && !model.closed)
@@ -241,6 +267,31 @@ struct ComposeView: View {
     }
 
     @ToolbarContentBuilder
+    private var keyboardFields: some ToolbarContent {
+        ToolbarItemGroup(placement: .keyboard) {
+            Button {
+                focus = ComposeChrome.previousField(focus)
+            } label: {
+                Image(systemName: "chevron.up")
+            }
+            .disabled(ComposeChrome.previousField(focus) == nil)
+            .accessibilityLabel("Previous field")
+            .accessibilityIdentifier("compose.field.previous")
+            Button {
+                focus = ComposeChrome.nextField(focus)
+            } label: {
+                Image(systemName: "chevron.down")
+            }
+            .disabled(ComposeChrome.nextField(focus) == nil)
+            .accessibilityLabel("Next field")
+            .accessibilityIdentifier("compose.field.next")
+            Spacer()
+            Button("Done") { focus = nil }
+                .accessibilityIdentifier("compose.field.done")
+        }
+    }
+
+    @ToolbarContentBuilder
     private func toolbar(_ model: ComposeModel) -> some ToolbarContent {
         ToolbarItem(placement: .cancellationAction) {
             Button(model.closed ? "Done" : (presentedAsSheet ? "Cancel" : "Close")) {
@@ -258,6 +309,7 @@ struct ComposeView: View {
                 }
                 .disabled(!canSend(model))
                 .accessibilityLabel("Approve and send")
+                .accessibilityHint("Asks you to confirm before sending")
             }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
