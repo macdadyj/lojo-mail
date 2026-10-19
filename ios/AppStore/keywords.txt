@@ -1,0 +1,1 @@
+mail,inbox,encrypted,OpenPGP,SI,filter,reply,approval,drafts,private,sealed,archive,trash
