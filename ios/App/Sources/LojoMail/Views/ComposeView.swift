@@ -19,9 +19,8 @@ struct ComposeView: View {
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var pickFiles = false
     @State private var takePhoto = false
-    @FocusState private var focus: Field?
-
-    enum Field { case to, cc, subject, body }
+    @FocusState private var focus: ComposeField?
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         Group {
@@ -77,99 +76,19 @@ struct ComposeView: View {
                     .foregroundStyle(.orange)
                 }
             }
-            Section {
-                LabeledContent("To") {
-                    TextField("name@example.com", text: $model.fields.to, axis: .vertical)
-                        .focused($focus, equals: .to)
-                        .keyboardType(.emailAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .textContentType(.emailAddress)
-                }
-                LabeledContent("Cc") {
-                    TextField("", text: $model.fields.cc, axis: .vertical)
-                        .focused($focus, equals: .cc)
-                        .keyboardType(.emailAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
-                LabeledContent("Subject") {
-                    TextField("", text: $model.fields.subject, axis: .vertical)
-                        .focused($focus, equals: .subject)
-                }
-            }
-            .disabled(model.closed)
-            Section {
-                TextEditor(text: $model.fields.text)
-                    .focused($focus, equals: .body)
-                    .frame(minHeight: 260)
-                    .accessibilityLabel("Message")
-                    .disabled(model.closed)
-            }
+            recipientFields(model)
+            messageFields(model)
             if !model.closed || model.hasAttachments {
                 ComposeAttachmentsSection(model: model, photos: openPhotos, camera: openCamera, files: openFiles)
             }
-            Section {
-                Picker("Encryption", selection: $model.fields.pgp) {
-                    Text("OpenPGP when possible").tag(PgpMode.auto)
-                    Text("Off (plain text)").tag(PgpMode.off)
-                }
-                .disabled(model.closed)
-            } footer: {
-                Text(model.fields.pgp == .off
-                    ? "Encryption is off. This goes out in plain text, even to recipients who have an OpenPGP key."
-                    : "Encrypted with OpenPGP when every recipient has a published key; otherwise sent over TLS.")
-            }
-            if app.rules?.rules.sendKillSwitch == true {
-                Section {
-                    Label("Stop all sending is on in Rules, so the server will refuse to send. You can still save to the approval queue.", systemImage: "xmark.octagon.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                }
-            }
-            if app.sendTestMode {
-                Section {
-                    Label(model.blockedByTestMode.isEmpty
-                        ? "Test mode is on. Sending is limited to \(AppModel.testAddress)."
-                        : "Test mode is on. Sending is limited to \(AppModel.testAddress); \(model.blockedByTestMode.joined(separator: ", ")) would be refused.",
-                        systemImage: "testtube.2")
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                    Button("Turn off test mode") { app.sendTestMode = false }
-                        .accessibilityIdentifier("testmode.off")
-                }
-            }
-            if let status = model.status {
-                Section { Label(status, systemImage: model.sentMessageId == nil ? "checkmark.circle" : "paperplane.fill").foregroundStyle(.green) }
-            }
-            if let error = model.error {
-                Section { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
-            }
+            encryptionFields(model)
+            noticeFields(model)
             if !model.closed {
-                Section {
-                    Button {
-                        focus = nil
-                        confirmSend = true
-                    } label: {
-                        Label(model.conflict != nil ? (model.conflictArmed ? "Approve this version and send" : "Read the changes first…") : "Approve and send", systemImage: "paperplane.fill")
-                            .frame(maxWidth: .infinity)
-                            .fontWeight(.semibold)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(!canSend(model) || app.rules?.rules.sendKillSwitch == true)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                } footer: {
-                    if model.overBudget {
-                        Text("Remove an attachment to send: the message is over \(ByteSize.format(model.budget.maxMessageBytes)).").foregroundStyle(.red)
-                    } else {
-                        Text("Sending asks the server for a one-time approval bound to exactly the recipients, subject, text\(model.hasAttachments ? ", attachments" : "") and encryption shown here. Only you can do this step; bots and other clients can't.")
-                    }
-                }
+                sendFields(model)
             }
         }
         .scrollDismissesKeyboard(.interactively)
+        .toolbar { keyboardFields }
         .navigationTitle(title(model))
         .navigationBarTitleDisplayMode(.inline)
         .interactiveDismissDisabled(model.dirty && !model.closed)
@@ -240,6 +159,171 @@ struct ComposeView: View {
         }
     }
 
+    private func recipientFields(_ model: ComposeModel) -> some View {
+        @Bindable var model = model
+        return Section {
+            LabeledContent(ComposeChrome.toLabel) {
+                TextField("name@example.com", text: $model.fields.to, axis: .vertical)
+                    .font(.body)
+                    .focused($focus, equals: .to)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .textContentType(.emailAddress)
+                    .accessibilityLabel(ComposeChrome.toLabel)
+            }
+            LabeledContent(ComposeChrome.ccLabel) {
+                TextField("Optional", text: $model.fields.cc, axis: .vertical)
+                    .font(.body)
+                    .focused($focus, equals: .cc)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .accessibilityLabel(ComposeChrome.ccLabel)
+            }
+            LabeledContent(ComposeChrome.subjectLabel) {
+                TextField("Subject", text: $model.fields.subject, axis: .vertical)
+                    .font(.body)
+                    .focused($focus, equals: .subject)
+                    .accessibilityLabel(ComposeChrome.subjectLabel)
+            }
+        } header: {
+            Text("Recipients").textCase(nil)
+        }
+        .disabled(model.closed)
+    }
+
+    private func messageFields(_ model: ComposeModel) -> some View {
+        @Bindable var model = model
+        return Section {
+            ZStack(alignment: .topLeading) {
+                if model.fields.text.isEmpty {
+                    Text(ComposeChrome.placeholder)
+                        .font(.body)
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 8)
+                        .padding(.leading, 5)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                TextEditor(text: $model.fields.text)
+                    .font(.body)
+                    .lineSpacing(CGFloat(ComposeChrome.bodyLineSpacing))
+                    .focused($focus, equals: .body)
+                    .frame(minHeight: CGFloat(ComposeChrome.editorMinHeight(accessibilitySize: typeSize.isAccessibilitySize)))
+                    .accessibilityLabel(ComposeChrome.messageLabel)
+                    .disabled(model.closed)
+            }
+        } header: {
+            Text(ComposeChrome.messageLabel).textCase(nil)
+        } footer: {
+            Text(ComposeChrome.approvalNote)
+        }
+    }
+
+    private func encryptionFields(_ model: ComposeModel) -> some View {
+        @Bindable var model = model
+        let footer = model.fields.pgp == .off
+            ? "Encryption is off. This goes out in plain text, even to recipients who have an OpenPGP key."
+            : "Encrypted with OpenPGP when every recipient has a published key; otherwise sent over TLS."
+        return Section {
+            Picker("Encryption", selection: $model.fields.pgp) {
+                Text("OpenPGP when possible").tag(PgpMode.auto)
+                Text("Off (plain text)").tag(PgpMode.off)
+            }
+            .disabled(model.closed)
+        } footer: {
+            Text(footer)
+        }
+    }
+
+    @ViewBuilder
+    private func noticeFields(_ model: ComposeModel) -> some View {
+        if app.rules?.rules.sendKillSwitch == true {
+            Section {
+                Label("Stop all sending is on in Rules, so the server will refuse to send. You can still save to the approval queue.", systemImage: "xmark.octagon.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
+        if app.sendTestMode {
+            let blocked = model.blockedByTestMode
+            let text = blocked.isEmpty
+                ? "Test mode is on. Sending is limited to \(AppModel.testAddress)."
+                : "Test mode is on. Sending is limited to \(AppModel.testAddress); \(blocked.joined(separator: ", ")) would be refused."
+            Section {
+                Label(text, systemImage: "testtube.2")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                Button("Turn off test mode") { app.sendTestMode = false }
+                    .accessibilityIdentifier("testmode.off")
+            }
+        }
+        if let status = model.status {
+            Section { Label(status, systemImage: model.sentMessageId == nil ? "checkmark.circle" : "paperplane.fill").foregroundStyle(.green) }
+        }
+        if let error = model.error {
+            Section { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
+        }
+    }
+
+    private func sendFields(_ model: ComposeModel) -> some View {
+        let title = sendTitle(model)
+        let footer = model.overBudget
+            ? "Remove an attachment to send: the message is over \(ByteSize.format(model.budget.maxMessageBytes))."
+            : "Sending asks the server for a one-time approval bound to exactly the recipients, subject, text\(model.hasAttachments ? ", attachments" : "") and encryption shown here. Only you can do this step; bots and other clients can't."
+        return Section {
+            Button {
+                focus = nil
+                confirmSend = true
+            } label: {
+                Label(title, systemImage: "paperplane.fill")
+                    .frame(maxWidth: .infinity)
+                    .fontWeight(.semibold)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!canSend(model) || app.rules?.rules.sendKillSwitch == true)
+            .accessibilityHint("Asks you to confirm before sending")
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+        } footer: {
+            Text(footer).foregroundStyle(model.overBudget ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+        }
+    }
+
+    private func sendTitle(_ model: ComposeModel) -> String {
+        if model.conflict != nil {
+            return model.conflictArmed ? "Approve this version and send" : "Read the changes first…"
+        }
+        return "Approve and send"
+    }
+
+    @ToolbarContentBuilder
+    private var keyboardFields: some ToolbarContent {
+        ToolbarItemGroup(placement: .keyboard) {
+            Button {
+                focus = ComposeChrome.previousField(focus)
+            } label: {
+                Image(systemName: "chevron.up")
+            }
+            .disabled(ComposeChrome.previousField(focus) == nil)
+            .accessibilityLabel("Previous field")
+            .accessibilityIdentifier("compose.field.previous")
+            Button {
+                focus = ComposeChrome.nextField(focus)
+            } label: {
+                Image(systemName: "chevron.down")
+            }
+            .disabled(ComposeChrome.nextField(focus) == nil)
+            .accessibilityLabel("Next field")
+            .accessibilityIdentifier("compose.field.next")
+            Spacer()
+            Button("Done") { focus = nil }
+                .accessibilityIdentifier("compose.field.done")
+        }
+    }
+
     @ToolbarContentBuilder
     private func toolbar(_ model: ComposeModel) -> some ToolbarContent {
         ToolbarItem(placement: .cancellationAction) {
@@ -258,6 +342,7 @@ struct ComposeView: View {
                 }
                 .disabled(!canSend(model))
                 .accessibilityLabel("Approve and send")
+                .accessibilityHint("Asks you to confirm before sending")
             }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
