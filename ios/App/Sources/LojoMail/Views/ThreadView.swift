@@ -278,11 +278,11 @@ struct ThreadView: View {
             barButton("Reply", "arrowshape.turn.up.left", tint: .accentColor, identifier: "thread.reply") {
                 compose = .reply(target, all: false)
             }
-            barButton(SiEntry.replyAllTitle, "arrowshape.turn.up.left.2", tint: .accentColor, identifier: "thread.reply-all") {
-                compose = .reply(target, all: true)
-            }
             .contextMenu {
                 Button { compose = .forward(latest ?? target) } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") }
+            }
+            barButton(SiEntry.replyAllTitle, "arrowshape.turn.up.left.2", tint: .accentColor, identifier: "thread.reply-all") {
+                compose = .reply(target, all: true)
             }
             barButton(SiEntry.replyTitle, SiEntry.icon, tint: Theme.si, identifier: "si.reply", prominent: true) {
                 siReplyAll = false

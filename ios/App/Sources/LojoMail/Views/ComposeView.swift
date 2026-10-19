@@ -431,7 +431,7 @@ struct ComposeView: View {
         if let draft = model.draft, draft.origin.isBot { return "Review draft" }
         switch request {
         case .new: return "New message"
-        case .reply(_, let all): return all ? "Reply all" : "Reply"
+        case .reply(_, let all): return all ? SiEntry.replyAllTitle : "Reply"
         case .forward: return "Forward"
         case .aiReply: return "Reply with SI"
         case .draft: return model.closed ? "Draft" : "Edit draft"

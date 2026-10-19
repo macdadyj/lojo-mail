@@ -82,23 +82,19 @@ final class MailUITests: XCTestCase {
         revealBarButton(app, "thread.reply-all")
         XCTAssertEqual(app.buttons["thread.reply-all"].label, "Reply All")
         app.buttons["thread.reply-all"].tap()
-        let to = app.textFields["To"]
-        XCTAssertTrue(to.waitForExistence(timeout: 6))
-        let toValue = (to.value as? String) ?? ""
+        XCTAssertTrue(app.navigationBars["Reply All"].waitForExistence(timeout: 6))
+        let toValue = composeValue(app, "To")
         XCTAssertTrue(toValue.contains("ada@example.com"))
         XCTAssertTrue(toValue.contains("bea@example.com"))
         XCTAssertFalse(toValue.localizedCaseInsensitiveContains("lojo@cyberphysical.us"))
         XCTAssertFalse(toValue.localizedCaseInsensitiveContains("copy@example.com"))
-        let cc = app.textFields["Cc"]
-        let ccValue = (cc.value as? String) ?? ""
+        let ccValue = composeValue(app, "Cc")
         XCTAssertTrue(ccValue.contains("copy@example.com"))
         XCTAssertFalse(ccValue.localizedCaseInsensitiveContains("ada@example.com"))
         XCTAssertFalse(ccValue.localizedCaseInsensitiveContains("bea@example.com"))
         XCTAssertFalse(ccValue.localizedCaseInsensitiveContains("lojo@cyberphysical.us"))
-        XCTAssertEqual(app.textFields["Subject"].value as? String, "Re: Gate sensor")
-        let message = app.textViews["Message"]
-        XCTAssertTrue(message.waitForExistence(timeout: 4))
-        let quote = (message.value as? String) ?? ""
+        XCTAssertEqual(composeValue(app, "Subject"), "Re: Gate sensor")
+        let quote = composeValue(app, "Message")
         XCTAssertTrue(quote.contains("wrote:"))
         XCTAssertTrue(quote.contains("> The north gate is back online."))
         dismissCompose(app)
@@ -316,6 +312,15 @@ final class MailUITests: XCTestCase {
             if element.waitForExistence(timeout: 1) { return true }
         }
         return element.exists
+    }
+
+    /// Compose fields are text fields, or text views once they wrap onto more than one line.
+    private func composeValue(_ app: XCUIApplication, _ label: String) -> String {
+        let field = app.textFields[label]
+        let view = app.textViews[label]
+        let element = field.waitForExistence(timeout: 2) ? field : view
+        XCTAssertTrue(element.waitForExistence(timeout: 4), "\(label) is missing")
+        return (element.value as? String) ?? ""
     }
 
     private func revealBarButton(_ app: XCUIApplication, _ identifier: String) {
