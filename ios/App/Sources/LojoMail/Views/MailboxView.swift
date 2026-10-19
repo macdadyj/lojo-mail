@@ -23,6 +23,7 @@ struct MailboxView: View {
     @State private var messageFilter: SiMessageFilterRequest?
     @State private var labelFilter: String?
     @State private var recentSearches: [String] = []
+    @State private var searchPresented = false
     @Environment(\.openReview) private var openReview
 
     private var state: FolderState { model.state(folder) }
@@ -62,8 +63,7 @@ struct MailboxView: View {
                             .accessibilityIdentifier("mail.compose")
                     }
                 }
-                .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: MailSearch.prompt)
-                .searchSuggestions { suggestions }
+                .searchable(text: $query, isPresented: $searchPresented, placement: .navigationBarDrawer(displayMode: .automatic), prompt: MailSearch.prompt)
                 .onSubmit(of: .search) { Task { await runSearch() } }
                 .onChange(of: query) { _, value in if value.isEmpty { results = nil; searchError = nil } }
                 .onAppear {
@@ -161,6 +161,9 @@ struct MailboxView: View {
             if let results {
                 searchResults(results)
             } else {
+                if searchPresented {
+                    suggestions
+                }
                 ForEach(visible) { conversation in
                     HStack(spacing: 8) {
                         if selecting {
