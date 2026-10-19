@@ -55,17 +55,15 @@ struct ReviewView: View {
             .overlay {
                 if model.drafts.isEmpty {
                     if model.draftsLoading {
-                        ProgressView()
+                        ProgressView(ListStates.loading(.approval))
                     } else if let error = model.draftsError {
-                        StateView(title: "Couldn't load drafts", systemImage: "exclamationmark.icloud", message: error, actionTitle: "Try again") {
+                        let notice = ListStates.failed(.approval)
+                        StateView(title: notice.title, systemImage: "exclamationmark.icloud", message: error, actionTitle: ListStates.tryAgain) {
                             Task { await model.refreshDrafts() }
                         }
                     } else {
-                        StateView(
-                            title: "Nothing waiting",
-                            systemImage: "tray",
-                            message: AppChrome.reviewExplanation
-                        )
+                        let notice = ListStates.empty(.approval)
+                        StateView(title: notice.title, systemImage: "tray", message: notice.message)
                     }
                 }
             }
