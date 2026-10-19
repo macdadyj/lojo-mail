@@ -101,7 +101,8 @@ struct ThreadView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
                 Text(messages.first?.subject.nonEmptyTrimmed ?? "(no subject)")
-                    .font(.title2.bold())
+                    .font(.title2.weight(.semibold))
+                    .lineSpacing(2)
                     .textSelection(.enabled)
                     .accessibilityAddTraits(.isHeader)
                 if inTrash, let keep = messages.compactMap(\.keepUntil).compactMap(ISODate.parse).min() {
@@ -131,6 +132,7 @@ struct ThreadView: View {
             .readableWidth()
         }
         .scrollDismissesKeyboard(.interactively)
+        .background(Color(.systemGroupedBackground))
     }
 
     @ViewBuilder
@@ -144,7 +146,9 @@ struct ThreadView: View {
         if let summary {
             VStack(alignment: .leading, spacing: 8) {
                 Label("SI summary", systemImage: "sparkles").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.si)
-                Text(summary).font(.subheadline)
+                Text(summary)
+                    .font(.body)
+                    .lineSpacing(MailReading.bodyLineSpacing)
                 if !items.isEmpty {
                     ForEach(Array(Set(items.map(\.text))).sorted(), id: \.self) { item in
                         Label(item, systemImage: "checkmark.circle").font(.subheadline)
@@ -380,6 +384,8 @@ struct MessageCard: View {
 
     @State private var pendingLink: GuardedLink?
 
+    @Environment(\.dynamicTypeSize) private var typeSize
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Button(action: onToggle) { header }
@@ -390,7 +396,10 @@ struct MessageCard: View {
                 bodyView
                 if !message.attachments.isEmpty { attachments }
             } else if let snippet = message.snippet {
-                Text(snippet).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                Text(snippet)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(MailReading.snippetLineLimit(accessibilitySize: typeSize.isAccessibilitySize))
             }
         }
         .padding(16)
@@ -425,12 +434,12 @@ struct MessageCard: View {
             Avatar(address: message.from)
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
-                    Text(message.from.display).font(.body.weight(.semibold)).lineLimit(1)
+                    Text(message.from.display).font(.body.weight(.semibold)).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                     if message.origin == "sent" { Chip(text: "You", tint: Theme.accent) }
                     Spacer()
-                    Text(message.sentDate?.mailListStamp ?? "").font(.caption).foregroundStyle(.secondary)
+                    Text(message.sentDate?.mailListStamp ?? "").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
-                Text(message.from.email).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(message.from.email).font(.caption).foregroundStyle(.secondary).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
             }
         }
         .contentShape(Rectangle())
@@ -470,17 +479,11 @@ struct MessageCard: View {
         switch bodyState {
         case .opened:
             if let parts, !parts.isEmpty {
-                Text(messageAttributedString(parts, direct: linksOpenDirectly))
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                readable(Text(messageAttributedString(parts, direct: linksOpenDirectly)))
             } else if let text, !text.isEmpty {
-                Text(linkified(text))
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                readable(Text(linkified(text)))
             } else {
-                Text("(no text)").font(.body).foregroundStyle(.secondary)
+                readable(Text("(no text)").foregroundStyle(.secondary))
             }
         case .locked:
             Button(action: onUnlock) {
@@ -495,6 +498,14 @@ struct MessageCard: View {
                 Text("Decrypting…").font(.subheadline).foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func readable(_ text: Text) -> some View {
+        text
+            .font(.body)
+            .lineSpacing(MailReading.bodyLineSpacing)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var attachments: some View {

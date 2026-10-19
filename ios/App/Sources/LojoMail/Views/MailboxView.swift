@@ -168,11 +168,14 @@ struct MailboxView: View {
                     .swipeActions(edge: .leading, allowsFullSwipe: true) { leadingActions(conversation) }
                     .swipeActions(edge: .trailing, allowsFullSwipe: folder != .trash) { trailingActions(conversation) }
                     .contextMenu { contextActions(conversation) }
+                    .listRowBackground(Color(.secondarySystemGroupedBackground))
                 }
             }
         }
         .listStyle(.plain)
-        .listRowSpacing(2)
+        .listRowSpacing(CGFloat(MailReading.listRowSpacing))
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemGroupedBackground))
         .overlay { overlay }
     }
 
@@ -210,6 +213,7 @@ struct MailboxView: View {
                 NavigationLink(value: ThreadRoute(threadId: conversation.id, folder: conversation.latest.folderValue ?? .inbox)) {
                     ConversationRow(conversation: conversation, me: model.mailbox, showFolder: true)
                 }
+                .listRowBackground(Color(.secondarySystemGroupedBackground))
             }
         } header: {
             Text("\(messages.count) result\(messages.count == 1 ? "" : "s") in all folders · subject, sender and snippet")
@@ -443,6 +447,7 @@ struct ConversationRow: View {
 
     var body: some View {
         let latest = conversation.latest
+        let reading = typeSize.isAccessibilitySize
         HStack(alignment: .top, spacing: 12) {
             ZStack(alignment: .topLeading) {
                 Avatar(address: conversation.latest.origin == "sent" ? (conversation.latest.to.first ?? conversation.latest.from) : conversation.latest.from)
@@ -465,16 +470,29 @@ struct ConversationRow: View {
                     }
                 }
                 Text(conversation.subject)
-                    .font(.subheadline.weight(conversation.unread ? .semibold : .regular))
-                    .lineLimit(1)
+                    .font(.body.weight(conversation.unread ? .semibold : .regular))
+                    .foregroundStyle(conversation.unread ? .primary : .secondary)
+                    .lineLimit(MailReading.subjectLineLimit(accessibilitySize: reading))
                 if let snippet = latest.snippet, !snippet.isEmpty {
-                    Text(snippet).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                    Text(snippet)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(MailReading.snippetLineLimit(accessibilitySize: reading))
                 }
                 chips
             }
         }
         .padding(.vertical, 6)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(MailReading.rowLabel(
+            unread: conversation.unread,
+            sender: conversation.participants(me: me),
+            count: conversation.count,
+            subject: conversation.subject,
+            snippet: latest.snippet,
+            starred: conversation.starred,
+            attachments: conversation.hasAttachments
+        ))
         .accessibilityHint("Opens the conversation")
         .accessibilityIdentifier("mail.row.\(conversation.id)")
     }
@@ -500,7 +518,9 @@ struct ConversationRow: View {
     }
 
     private var stamp: some View {
-        Text(conversation.date?.mailListStamp ?? "").font(.caption).foregroundStyle(.secondary)
+        Text(conversation.date?.mailListStamp ?? "")
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
