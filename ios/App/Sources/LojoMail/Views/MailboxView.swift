@@ -177,7 +177,11 @@ struct MailboxView: View {
                             .accessibilityLabel(selectedThreads.contains(conversation.id) ? "Deselect" : "Select")
                         }
                         NavigationLink(value: ThreadRoute(threadId: conversation.id, folder: folder)) {
-                            ConversationRow(conversation: conversation, me: model.mailbox)
+                            ConversationRow(
+                                conversation: conversation,
+                                me: model.mailbox,
+                                voiceOver: folder == .inbox ? inboxVoiceOver(conversation) : nil
+                            )
                         }
                     }
                     .swipeActions(edge: .leading, allowsFullSwipe: true) { leadingActions(conversation) }
@@ -318,6 +322,15 @@ struct MailboxView: View {
         .accessibilityIdentifier("mail.more")
     }
 
+    private func inboxVoiceOver(_ conversation: Conversation) -> InboxRowActions {
+        InboxRowActions(
+            markRead: InboxGestures.markRead(unread: conversation.unread),
+            archive: InboxGestures.archive,
+            onMarkRead: { Task { await model.setUnread(conversation.messages, !conversation.unread) } },
+            onArchive: { Task { await model.archive(conversation.messages, from: .inbox) } }
+        )
+    }
+
     private func openMessageFilter(_ conversation: Conversation) {
         let messages = conversation.messages
         guard let target = messages.last(where: { $0.origin != "sent" }) ?? messages.last else { return }
@@ -347,7 +360,7 @@ struct MailboxView: View {
         Button {
             Task { await model.setUnread(conversation.messages, !conversation.unread) }
         } label: {
-            Label(conversation.unread ? "Read" : "Unread", systemImage: conversation.unread ? "envelope.open" : "envelope.badge")
+            Label(InboxGestures.markRead(unread: conversation.unread), systemImage: conversation.unread ? "envelope.open" : "envelope.badge")
         }
         .tint(Theme.unread)
         Button {
@@ -391,7 +404,7 @@ struct MailboxView: View {
                 Button {
                     Task { await model.archive(conversation.messages, from: folder) }
                 } label: {
-                    Label("Archive", systemImage: "archivebox")
+                    Label(InboxGestures.archive, systemImage: "archivebox")
                 }
                 .tint(.indigo)
             }
@@ -482,10 +495,33 @@ struct MailboxView: View {
     }
 }
 
+struct InboxRowActions {
+    var markRead: String
+    var archive: String
+    var onMarkRead: () -> Void
+    var onArchive: () -> Void
+}
+
+private struct InboxVoiceOverActions: ViewModifier {
+    var actions: InboxRowActions?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let actions {
+            content
+                .accessibilityAction(named: Text(actions.markRead)) { actions.onMarkRead() }
+                .accessibilityAction(named: Text(actions.archive)) { actions.onArchive() }
+        } else {
+            content
+        }
+    }
+}
+
 struct ConversationRow: View {
     var conversation: Conversation
     var me: String
     var showFolder = false
+    var voiceOver: InboxRowActions?
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -538,6 +574,7 @@ struct ConversationRow: View {
         ))
         .accessibilityHint("Opens the conversation")
         .accessibilityIdentifier("mail.row.\(conversation.id)")
+        .modifier(InboxVoiceOverActions(actions: voiceOver))
     }
 
     private var sender: some View {
