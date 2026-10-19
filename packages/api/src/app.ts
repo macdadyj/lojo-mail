@@ -314,7 +314,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json(await mailbox.getDraft(c.req.param("id"), { withText }));
   });
   app.post("/v1/drafts", need("write"), async (c) => {
-    const input = await body<{ to: string[]; cc: string[]; bcc: string[]; subject: string; text: string; threadId: string; inReplyTo: string; pgp: PgpMode; clientMessageId: string }>(c);
+    const input = await body<{ to: string[]; cc: string[]; bcc: string[]; subject: string; text: string; threadId: string; inReplyTo: string; references: string[]; pgp: PgpMode; clientMessageId: string }>(c);
     const to = strings(input.to, "to");
     const principal = c.get("principal");
     const origin = draftOriginOf(principal);
@@ -322,6 +322,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       throw new MailError("to, subject, and text are required", "invalid");
     }
     const pgp = pgpMode(input.pgp);
+    const references = strings(input.references, "references");
     const draft = await mailbox.createDraft({
       to,
       cc: strings(input.cc, "cc"),
@@ -330,6 +331,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       text: input.text,
       ...(typeof input.threadId === "string" ? { threadId: input.threadId } : {}),
       ...(typeof input.inReplyTo === "string" ? { inReplyTo: input.inReplyTo } : {}),
+      ...(references ? { references } : {}),
       ...(pgp ? { pgp } : {}),
       ...(origin === "client" && typeof input.clientMessageId === "string" ? { clientMessageId: input.clientMessageId } : {}),
       origin,
@@ -508,7 +510,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
    * Opens nothing by itself: the client puts the draft in Compose. Never sends.
    */
   app.post("/v1/si/reply", need("write"), async (c) => {
-    const input = await body<{ messageId: string; tone: string; instruction: string; sourceText: string; threadText: string }>(c);
+    const input = await body<{ messageId: string; tone: string; instruction: string; sourceText: string; threadText: string; replyAll: boolean }>(c);
     if (typeof input.messageId !== "string" || !input.messageId) throw new MailError("messageId is required", "invalid");
     const draft = await mailbox.siReply({
       messageId: input.messageId,
@@ -516,6 +518,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ...(typeof input.instruction === "string" ? { instruction: input.instruction } : {}),
       ...(typeof input.sourceText === "string" ? { sourceText: input.sourceText } : {}),
       ...(typeof input.threadText === "string" ? { threadText: input.threadText } : {}),
+      ...(input.replyAll === true ? { replyAll: true } : {}),
     });
     return c.json(await mailbox.getDraft(draft.id, { withText: canReadText(c.get("principal")) }), 201);
   });
@@ -555,6 +558,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       draftAttachments: mailbox.draftAttachmentLimits,
       dev: deps.dev,
       principal: c.get("principal").kind,
+      sendFrom: mailbox.config.sendFrom,
     });
   });
   app.post("/v1/session/unlock", need("human"), async (c) => {

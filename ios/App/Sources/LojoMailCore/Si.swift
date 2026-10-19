@@ -179,8 +179,10 @@ public extension Rule {
 public enum SiEntry {
     public static let icon = "sparkles"
     public static let replyTitle = "Reply with SI"
+    public static let replyAllTitle = "Reply All"
+    public static let replyAllWithSiTitle = "Reply All with SI"
     public static let filterTitle = "Filter with SI"
-    public static let actionBar = ["Reply", replyTitle, filterTitle]
+    public static let actionBar = ["Reply", replyAllTitle, replyTitle, replyAllWithSiTitle, filterTitle]
     public static let futureMail = "Also apply to future mail from this sender"
 }
 

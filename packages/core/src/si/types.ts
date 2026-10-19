@@ -94,4 +94,6 @@ export interface SiReplyInput {
   sourceText?: string;
   /** Earlier messages in the thread, already decrypted on the phone. */
   threadText?: string;
+  /** Address the sender and every other recipient, leaving Jon's own addresses out. */
+  replyAll?: boolean;
 }

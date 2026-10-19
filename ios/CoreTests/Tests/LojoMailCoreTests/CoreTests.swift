@@ -177,8 +177,8 @@ final class ModelTests: XCTestCase {
         {"id":"m","threadId":"t","folder":"inbox","origin":"inbound","from":{"email":"a@x.com"},"to":[{"email":"lojo@cyberphysical.us"},{"email":"b@x.com"}],"cc":[{"email":"A@x.com"},{"email":"c@x.com"}],"subject":"S","date":"2026-09-30T00:00:00Z","unread":false,"labels":[],"attachments":[],"locked":false}
         """.utf8))
         let all = MailText.replyAll(to: message, me: "lojo@cyberphysical.us")
-        XCTAssertEqual(all.to, ["a@x.com"])
-        XCTAssertEqual(all.cc, ["b@x.com", "c@x.com"])
+        XCTAssertEqual(all.to, ["a@x.com", "b@x.com"])
+        XCTAssertEqual(all.cc, ["c@x.com"])
     }
 
     func testHtmlFallback() {

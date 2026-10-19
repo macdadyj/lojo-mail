@@ -10,7 +10,7 @@ import { newId, sha256, utcDay } from "./ids.ts";
 import { isBulk } from "./mime/bulk.ts";
 import { snippetFrom } from "./mime/html.ts";
 import { parseMime, type ParsedInbound } from "./mime/parse.ts";
-import { threadIdForRoot } from "./mime/thread.ts";
+import { appendMessageId, threadIdForRoot } from "./mime/thread.ts";
 import { replyBlockers } from "./rules/autosend.ts";
 import { fileByRules, runRuleReply, type ReplyResult, type RulesRuntime } from "./rules/engine.ts";
 import { evaluateRules } from "./rules/match.ts";
@@ -438,7 +438,7 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
       id: draftId,
       threadId,
       inReplyTo: parsed.rfcMessageId,
-      references: [...parsed.references, parsed.rfcMessageId],
+      references: appendMessageId(parsed.references, parsed.rfcMessageId),
       to: [parsed.from],
       cc: [],
       subject: parsed.subject.toLowerCase().startsWith("re:") ? parsed.subject : `Re: ${parsed.subject}`,

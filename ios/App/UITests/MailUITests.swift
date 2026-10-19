@@ -79,6 +79,38 @@ final class MailUITests: XCTestCase {
         row.tap()
         XCTAssertTrue(app.descendants(matching: .any)["thread.action-bar"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["thread.reply"].waitForExistence(timeout: 4))
+        revealBarButton(app, "thread.reply-all")
+        XCTAssertEqual(app.buttons["thread.reply-all"].label, "Reply All")
+        app.buttons["thread.reply-all"].tap()
+        let to = app.textFields["To"]
+        XCTAssertTrue(to.waitForExistence(timeout: 6))
+        let toValue = (to.value as? String) ?? ""
+        XCTAssertTrue(toValue.contains("ada@example.com"))
+        XCTAssertTrue(toValue.contains("bea@example.com"))
+        XCTAssertFalse(toValue.localizedCaseInsensitiveContains("lojo@cyberphysical.us"))
+        XCTAssertFalse(toValue.localizedCaseInsensitiveContains("copy@example.com"))
+        let cc = app.textFields["Cc"]
+        let ccValue = (cc.value as? String) ?? ""
+        XCTAssertTrue(ccValue.contains("copy@example.com"))
+        XCTAssertFalse(ccValue.localizedCaseInsensitiveContains("ada@example.com"))
+        XCTAssertFalse(ccValue.localizedCaseInsensitiveContains("bea@example.com"))
+        XCTAssertFalse(ccValue.localizedCaseInsensitiveContains("lojo@cyberphysical.us"))
+        XCTAssertEqual(app.textFields["Subject"].value as? String, "Re: Gate sensor")
+        let message = app.textViews["Message"]
+        XCTAssertTrue(message.waitForExistence(timeout: 4))
+        let quote = (message.value as? String) ?? ""
+        XCTAssertTrue(quote.contains("wrote:"))
+        XCTAssertTrue(quote.contains("> The north gate is back online."))
+        dismissCompose(app)
+        revealBarButton(app, "si.reply-all")
+        XCTAssertEqual(app.buttons["si.reply-all"].label, "Reply All with SI")
+        app.buttons["si.reply-all"].tap()
+        XCTAssertTrue(app.navigationBars["Reply All with SI"].waitForExistence(timeout: 6))
+        XCTAssertFalse(app.buttons["Send"].exists)
+        XCTAssertFalse(app.buttons["Approve and send"].exists)
+        app.buttons["si.reply.generate"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["compose.cancel"].firstMatch.waitForExistence(timeout: 8))
+        dismissCompose(app)
         revealBarButton(app, "si.reply")
         revealBarButton(app, "si.filter.message")
         XCTAssertEqual(app.buttons["si.reply"].label, "Reply with SI")
@@ -288,10 +320,13 @@ final class MailUITests: XCTestCase {
 
     private func revealBarButton(_ app: XCUIApplication, _ identifier: String) {
         let button = app.buttons[identifier]
-        if button.waitForExistence(timeout: 4), button.isHittable { return }
         let bar = app.descendants(matching: .any)["thread.action-bar"]
-        bar.swipeLeft()
+        for _ in 0..<5 {
+            if button.exists, button.isHittable { return }
+            if bar.exists { bar.swipeLeft() }
+        }
         XCTAssertTrue(button.waitForExistence(timeout: 3), "\(identifier) is missing from the action bar")
+        XCTAssertTrue(button.isHittable, "\(identifier) is off the action bar")
     }
 
     private func dismissSearch(_ app: XCUIApplication) {

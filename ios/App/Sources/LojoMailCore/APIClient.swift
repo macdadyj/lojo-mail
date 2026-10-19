@@ -188,10 +188,11 @@ public struct APIClient: Sendable {
         try await send("GET", "/v1/drafts/\(escaped(id))", query: [URLQueryItem(name: "text", value: "1")])
     }
 
-    public func createDraft(_ fields: DraftFields, threadId: String?, inReplyTo: String?) async throws -> DraftView {
+    public func createDraft(_ fields: DraftFields, threadId: String?, inReplyTo: String?, references: [String]? = nil) async throws -> DraftView {
         var body = fields.payload
         if let threadId { body["threadId"] = threadId }
         if let inReplyTo { body["inReplyTo"] = inReplyTo }
+        if let references, !references.isEmpty { body["references"] = references }
         return try await send("POST", "/v1/drafts", json: body)
     }
 
@@ -303,9 +304,10 @@ public struct APIClient: Sendable {
     }
 
     /// A suggested reply. It is not sent. `sourceText` is the body this phone decrypted.
-    public func siReply(messageId: String, tone: SiTone, instruction: String, sourceText: String?, threadText: String) async throws -> DraftView {
+    public func siReply(messageId: String, tone: SiTone, instruction: String, sourceText: String?, threadText: String, replyAll: Bool = false) async throws -> DraftView {
         var body: [String: Any] = ["messageId": messageId, "tone": tone.rawValue, "instruction": instruction, "threadText": threadText]
         if let sourceText { body["sourceText"] = sourceText }
+        if replyAll { body["replyAll"] = true }
         return try await send("POST", "/v1/si/reply", json: body)
     }
 

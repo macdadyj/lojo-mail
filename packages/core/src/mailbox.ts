@@ -44,6 +44,7 @@ import { MailError } from "./errors.ts";
 import { embedForStorage, embeddingInput, ingestRaw, refreshThread } from "./ingest.ts";
 import { newId, normalizeMessageId, sha256, utcDay } from "./ids.ts";
 import { buildMimeEntity, buildRawMessage, cleanEmail, cleanHeaderValue } from "./mime/compose.ts";
+import { appendMessageId } from "./mime/thread.ts";
 import { encryptMimeEntity, encryptText, type PgpSigningKey } from "./openpgp/mail.ts";
 import { deleteBotRule, preserveBotRules, upsertBotRule } from "./rules/bot-rules.ts";
 import { pushRevision, ruleWhy, undoRevision, type RuleRevision } from "./rules/history.ts";
@@ -127,6 +128,8 @@ export interface DraftInput {
   text: string;
   threadId?: string;
   inReplyTo?: string;
+  /** Fallback chain when the parent message is not in the store. The stored parent wins when it is. */
+  references?: string[];
   pgp?: PgpMode;
   /** Who wrote it. Defaults to agent, which may only address known correspondents. */
   origin?: Extract<DraftOrigin, "human" | "agent" | "client">;
@@ -249,6 +252,25 @@ function replySubject(subject: string): string {
   return subject.toLowerCase().startsWith("re:") ? subject : `Re: ${subject}`;
 }
 
+/** Parent References plus the parent's Message-ID, once, with the parent id last. */
+function chainWithParent(references: string[], rfcMessageId: string): string[] | undefined {
+  const chain = appendMessageId(references, rfcMessageId);
+  return chain.length > 0 ? chain : undefined;
+}
+
+/** A short References chain from the client, used only when the parent message is not stored. */
+function referenceChain(values: string[] | undefined): string[] | undefined {
+  if (!values) return undefined;
+  const out: string[] = [];
+  for (const item of values) {
+    const value = item.trim();
+    if (!value || value.length > 250 || out.includes(value)) continue;
+    out.push(value);
+    if (out.length >= 50) break;
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 function authorOf(actor: Actor): RuleAuthor {
   return actor === "human" ? "human" : "token";
 }
@@ -324,7 +346,32 @@ export class Mailbox {
   }
 
   private isSelf(address: Address): boolean {
-    return address.email.toLowerCase() === this.deps.config.mailbox.toLowerCase();
+    return this.ownAddresses().has(address.email.trim().toLowerCase());
+  }
+
+  private ownAddresses(): Set<string> {
+    return new Set(this.deps.config.sendFrom.map((item) => item.trim().toLowerCase()).filter(Boolean));
+  }
+
+  /** Reply All: sender plus original To, and the original Cc. Jon's own addresses and repeats are left out. */
+  private replyAddresses(message: StoredMessage, all: boolean): { to: Address[]; cc: Address[] } {
+    if (!all) {
+      const to = this.isSelf(message.from) ? message.to.filter((item) => !this.isSelf(item)) : [message.from];
+      return { to: to.length > 0 ? to : [message.from], cc: [] };
+    }
+    const seen = this.ownAddresses();
+    const take = (address: Address, into: Address[]) => {
+      const key = address.email.trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      into.push(address);
+    };
+    const to: Address[] = [];
+    const cc: Address[] = [];
+    if (message.origin !== "sent" && !this.isSelf(message.from)) take(message.from, to);
+    for (const address of message.to) take(address, to);
+    for (const address of message.cc) take(address, cc);
+    return { to: to.length > 0 ? to : [message.from], cc };
   }
 
   private actor(): { actor?: string } {
@@ -623,7 +670,7 @@ export class Mailbox {
     const bcc = addresses(input.bcc);
     // Thunderbird saves drafts before the To line is filled in.
     if (to.length === 0 && origin !== "client") throw new MailError("At least one recipient is required", "invalid");
-    const parent = !input.threadId && input.inReplyTo ? (await this.deps.store.getMessagesByRfcId(input.inReplyTo))[0] : undefined;
+    const parent = input.inReplyTo ? (await this.deps.store.getMessagesByRfcId(input.inReplyTo))[0] : undefined;
     const threadId = input.threadId ?? parent?.threadId;
     if (origin === "agent" && !sendNew) await this.assertKnownRecipients([...to, ...cc, ...bcc].map((item) => item.email), threadId);
     const id = newId("drf");
@@ -645,7 +692,8 @@ export class Mailbox {
     if (sendNew) draft.sendNew = true;
     if (threadId) draft.threadId = threadId;
     if (input.inReplyTo && !sendNew) draft.inReplyTo = input.inReplyTo;
-    if (parent && !sendNew) draft.references = [...parent.references, parent.rfcMessageId];
+    const references = parent ? chainWithParent(parent.references, parent.rfcMessageId) : referenceChain(input.references);
+    if (references && !sendNew) draft.references = references;
     if (origin === "client" && input.clientMessageId) draft.clientMessageId = normalizeMessageId(input.clientMessageId).slice(0, 250);
     await this.deps.store.putDraft(draft);
     return draft;
@@ -790,11 +838,12 @@ export class Mailbox {
     const recipients = this.isSelf(target.from) ? target.to.filter((item) => !this.isSelf(item)) : [target.from];
     const id = newId("drf");
     const now = this.now().toISOString();
+    const references = chainWithParent(target.references, target.rfcMessageId);
     const draft: Draft = {
       id,
       threadId: target.threadId,
       inReplyTo: target.rfcMessageId,
-      references: [...target.references, target.rfcMessageId],
+      ...(references ? { references } : {}),
       to: recipients.length > 0 ? recipients : [target.from],
       cc: [],
       subject: replySubject(target.subject),
@@ -1501,8 +1550,10 @@ export class Mailbox {
     const now = this.now().toISOString();
     const open = (await this.deps.store.listDrafts()).find((draft) => draft.inReplyTo === target.rfcMessageId && EDITABLE.has(draft.status));
     if (open) {
+      const addressed = this.replyAddresses(target, input.replyAll === true);
       const updated: Draft = {
         ...withoutApproval(open),
+        ...(input.replyAll === true ? { to: addressed.to, cc: addressed.cc } : {}),
         status: "suggested",
         lastEditedBy: "ai",
         aiGenerated: true,
@@ -1512,15 +1563,16 @@ export class Mailbox {
       await this.deps.store.putDraft(updated);
       return updated;
     }
-    const recipients = this.isSelf(target.from) ? target.to.filter((item) => !this.isSelf(item)) : [target.from];
+    const addressed = this.replyAddresses(target, input.replyAll === true);
     const id = newId("drf");
+    const references = chainWithParent(target.references, target.rfcMessageId);
     const draft: Draft = {
       id,
       threadId: target.threadId,
       inReplyTo: target.rfcMessageId,
-      references: [...target.references, target.rfcMessageId],
-      to: recipients.length > 0 ? recipients : [target.from],
-      cc: [],
+      ...(references ? { references } : {}),
+      to: addressed.to,
+      cc: addressed.cc,
       subject: replySubject(target.subject),
       status: "suggested",
       origin: "ai",

@@ -402,6 +402,7 @@ struct MailboxView: View {
             }
             .tint(Theme.si)
             .accessibilityIdentifier("si.filter.swipe")
+            replyAllSwipe(conversation)
         } else {
             Button(role: .destructive) {
                 Task { await model.trash(conversation.messages, from: folder) }
@@ -423,12 +424,33 @@ struct MailboxView: View {
                 }
                 .tint(.indigo)
             }
+            replyAllSwipe(conversation)
         }
+    }
+
+    @ViewBuilder
+    private func replyAllSwipe(_ conversation: Conversation) -> some View {
+        if let message = replyMessage(conversation) {
+            Button {
+                compose = .reply(message, all: true)
+            } label: {
+                Label(SiEntry.replyAllTitle, systemImage: "arrowshape.turn.up.left.2")
+            }
+            .tint(.blue)
+            .accessibilityIdentifier("mail.reply-all.swipe")
+        }
+    }
+
+    private func replyMessage(_ conversation: Conversation) -> Message? {
+        conversation.messages.last(where: { $0.origin != "sent" }) ?? conversation.messages.last
     }
 
     @ViewBuilder
     private func contextActions(_ conversation: Conversation) -> some View {
         leadingActions(conversation)
+        if let message = replyMessage(conversation) {
+            Button { compose = .reply(message, all: false) } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }
+        }
         Button {
             openMessageFilter(conversation)
         } label: {

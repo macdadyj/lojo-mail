@@ -79,18 +79,42 @@ public enum MailText {
         """
     }
 
-    /// Reply-all recipients: everyone on the message except this mailbox, sender first.
+    /// Reply All. To is the sender plus the original To line. Cc is the original Cc line.
+    /// `me` is every address Jon sends as. Those, and repeats, are left out.
     public static func replyAll(to message: Message, me: String) -> (to: [String], cc: [String]) {
-        let mine = me.lowercased()
-        let sender = message.origin == "sent" ? message.to.map(\.email) : [message.from.email]
-        var seen = Set(sender.map { $0.lowercased() })
-        seen.insert(mine)
-        var cc: [String] = []
-        for address in message.to + (message.cc ?? []) {
-            let key = address.email.lowercased()
-            if seen.insert(key).inserted { cc.append(address.email) }
+        replyAll(to: message, me: [me])
+    }
+
+    public static func replyAll(to message: Message, me: [String]) -> (to: [String], cc: [String]) {
+        let mine = Set(me.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }.filter { !$0.isEmpty })
+        var seen = mine
+        func take(_ email: String, into list: inout [String]) {
+            let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = trimmed.lowercased()
+            guard !key.isEmpty, seen.insert(key).inserted else { return }
+            list.append(trimmed)
         }
-        return (sender.filter { $0.lowercased() != mine }, cc)
+        var to: [String] = []
+        var cc: [String] = []
+        let fromSelf = message.origin == "sent" || mine.contains(message.from.email.lowercased())
+        if !fromSelf { take(message.from.email, into: &to) }
+        for address in message.to { take(address.email, into: &to) }
+        for address in message.cc ?? [] { take(address.email, into: &cc) }
+        return (to, cc)
+    }
+
+    /// In-Reply-To is the message's own id. References is the chain, with that id last, once.
+    public static func replyReferences(of message: Message) -> [String] {
+        var chain: [String] = []
+        var seen = Set<String>()
+        let ids = (message.references ?? []) + (message.rfcMessageId.map { [$0] } ?? [])
+        for id in ids {
+            let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = trimmed.lowercased()
+            guard !key.isEmpty, seen.insert(key).inserted else { continue }
+            chain.append(trimmed)
+        }
+        return chain
     }
 
     /// A readable plain-text fallback for HTML-only mail. Scripts, styles and remote content never load.

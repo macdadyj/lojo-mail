@@ -158,6 +158,32 @@ test("an SES failure reverts the draft to edited and needs a new approval", asyn
   assert.equal(w.sender.sent.length, 1);
 });
 
+test("a reply stores In-Reply-To and References even when the thread id is already known", async () => {
+  const w = await memoryWorld();
+  const { message } = await w.ingest(fixture("personal.eml"));
+  const draft = await w.mailbox.createDraft({
+    to: ["mina@example.com"],
+    subject: "Re: lease",
+    text: "ok",
+    origin: "human",
+    threadId: message.threadId,
+    inReplyTo: message.rfcMessageId,
+    references: ["<should-not-override@example.com>"],
+  });
+  assert.equal(draft.inReplyTo, message.rfcMessageId);
+  assert.deepEqual(draft.references, [...message.references, message.rfcMessageId]);
+  const fallback = await w.mailbox.createDraft({
+    to: ["mina@example.com"],
+    subject: "Re",
+    text: "ok",
+    origin: "human",
+    threadId: "thr_missing",
+    inReplyTo: "<missing@example.com>",
+    references: ["<older@example.com>", "<missing@example.com>", "<missing@example.com>"],
+  });
+  assert.deepEqual(fallback.references, ["<older@example.com>", "<missing@example.com>"]);
+});
+
 test("an agent may only draft to known correspondents", async () => {
   const w = await memoryWorld();
   const { message } = await w.ingest(fixture("personal.eml"));

@@ -20,7 +20,8 @@ struct ThreadView: View {
     @State private var opening: String?
     @State private var showKeySetup = false
     @State private var confirmTrash = false
-    @State private var siReply = false
+    @State private var siReplyTarget: Message?
+    @State private var siReplyAll = false
     @State private var messageFilter: SiMessageFilterRequest?
     @State private var pendingSiDraft: DraftView?
 
@@ -61,16 +62,14 @@ struct ThreadView: View {
         .sheet(item: $compose) { request in
             NavigationStack { ComposeView(request: request, presentedAsSheet: true) }
         }
-        .sheet(isPresented: $siReply, onDismiss: {
+        .sheet(item: $siReplyTarget, onDismiss: {
             if let pendingSiDraft {
                 compose = .draft(pendingSiDraft)
                 self.pendingSiDraft = nil
             }
-        }) {
+        }) { target in
             NavigationStack {
-                if let target = replyTarget {
-                    SiReplyView(message: target, threadText: threadContext(except: target)) { pendingSiDraft = $0 }
-                }
+                SiReplyView(message: target, threadText: threadContext(except: target), replyAll: siReplyAll) { pendingSiDraft = $0 }
             }
         }
         .sheet(item: $messageFilter) { request in
@@ -123,6 +122,7 @@ struct ThreadView: View {
                         onUnlock: { showKeySetup = true },
                         onAttachment: { attachment, action in Task { await open(attachment, of: message, for: action) } }
                     )
+                    .contextMenu { messageActions(message) }
                 }
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red)
@@ -199,6 +199,18 @@ struct ThreadView: View {
                         dismiss()
                     }
                 } label: { Label("Mark as unread", systemImage: "envelope.badge") }
+                if let target = replyTarget {
+                    Button { compose = .reply(target, all: false) } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }
+                    Button { compose = .reply(target, all: true) } label: { Label(SiEntry.replyAllTitle, systemImage: "arrowshape.turn.up.left.2") }
+                    Button {
+                        siReplyAll = false
+                        siReplyTarget = target
+                    } label: { Label(SiEntry.replyTitle, systemImage: SiEntry.icon) }
+                    Button {
+                        siReplyAll = true
+                        siReplyTarget = target
+                    } label: { Label(SiEntry.replyAllWithSiTitle, systemImage: SiEntry.icon) }
+                }
                 Menu("Move to") {
                     ForEach(Folder.moveTargets.filter { $0.rawValue != latest?.folder }) { target in
                         Button {
@@ -266,11 +278,20 @@ struct ThreadView: View {
             barButton("Reply", "arrowshape.turn.up.left", tint: .accentColor, identifier: "thread.reply") {
                 compose = .reply(target, all: false)
             }
+            barButton(SiEntry.replyAllTitle, "arrowshape.turn.up.left.2", tint: .accentColor, identifier: "thread.reply-all") {
+                compose = .reply(target, all: true)
+            }
             .contextMenu {
-                Button { compose = .reply(target, all: true) } label: { Label("Reply All", systemImage: "arrowshape.turn.up.left.2") }
                 Button { compose = .forward(latest ?? target) } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") }
             }
-            barButton(SiEntry.replyTitle, SiEntry.icon, tint: Theme.si, identifier: "si.reply", prominent: true) { siReply = true }
+            barButton(SiEntry.replyTitle, SiEntry.icon, tint: Theme.si, identifier: "si.reply", prominent: true) {
+                siReplyAll = false
+                siReplyTarget = target
+            }
+            barButton(SiEntry.replyAllWithSiTitle, SiEntry.icon, tint: Theme.si, identifier: "si.reply-all", prominent: true) {
+                siReplyAll = true
+                siReplyTarget = target
+            }
             barButton(SiEntry.filterTitle, SiEntry.icon, tint: Theme.si, identifier: "si.filter.message", prominent: true) { openMessageFilter() }
         }
     }
@@ -294,6 +315,20 @@ struct ThreadView: View {
         .buttonStyle(.plain)
         .accessibilityLabel(title)
         .accessibilityIdentifier(identifier ?? title)
+    }
+
+    @ViewBuilder
+    private func messageActions(_ message: Message) -> some View {
+        Button { compose = .reply(message, all: false) } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }
+        Button { compose = .reply(message, all: true) } label: { Label(SiEntry.replyAllTitle, systemImage: "arrowshape.turn.up.left.2") }
+        Button {
+            siReplyAll = false
+            siReplyTarget = message
+        } label: { Label(SiEntry.replyTitle, systemImage: SiEntry.icon) }
+        Button {
+            siReplyAll = true
+            siReplyTarget = message
+        } label: { Label(SiEntry.replyAllWithSiTitle, systemImage: SiEntry.icon) }
     }
 
     private func threadContext(except target: Message) -> String {
