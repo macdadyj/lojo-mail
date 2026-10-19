@@ -196,34 +196,49 @@ struct MailboxView: View {
 
     @ViewBuilder
     private var overlay: some View {
-        if results == nil {
-            if state.messages.isEmpty {
-                if state.loading {
-                    ProgressView("Loading \(folder.title)…")
-                } else if let error = state.error {
-                    StateView(title: model.online ? "Couldn't load \(folder.title)" : "You're offline", systemImage: model.online ? "exclamationmark.icloud" : "wifi.slash", message: error, actionTitle: "Try again") {
+        if results != nil {
+            if searching {
+                ProgressView(ListStates.loading(.search))
+            } else if searchError != nil {
+                let notice = ListStates.failed(.search)
+                StateView(title: notice.title, systemImage: "exclamationmark.magnifyingglass", message: searchError, actionTitle: ListStates.tryAgain) {
+                    Task { await runSearch() }
+                }
+            } else if results?.isEmpty == true {
+                let notice = ListStates.empty(.search)
+                StateView(title: notice.title, systemImage: "magnifyingglass", message: notice.message)
+            }
+        } else if state.messages.isEmpty {
+            if state.loading {
+                ProgressView(folder == .inbox ? ListStates.loading(.inbox) : "Loading \(folder.title)…")
+            } else if let error = state.error {
+                if folder == .inbox, model.online {
+                    let notice = ListStates.failed(.inbox)
+                    StateView(title: notice.title, systemImage: "exclamationmark.icloud", message: error, actionTitle: ListStates.tryAgain) {
                         Task { await model.refresh(folder) }
                     }
-                } else if state.updatedAt != nil {
+                } else {
+                    StateView(title: model.online ? "Couldn't load \(folder.title)" : "You're offline", systemImage: model.online ? "exclamationmark.icloud" : "wifi.slash", message: error, actionTitle: ListStates.tryAgain) {
+                        Task { await model.refresh(folder) }
+                    }
+                }
+            } else if state.updatedAt != nil {
+                if folder == .inbox {
+                    let notice = ListStates.empty(.inbox, mailbox: model.mailbox)
+                    StateView(title: notice.title, systemImage: folder.systemImage, message: notice.message)
+                } else {
                     StateView(title: emptyTitle, systemImage: folder.systemImage, message: emptyMessage)
                 }
-            } else if visible.isEmpty && !query.isEmpty {
-                ContentUnavailableView.search(text: query)
             }
-        } else if searching {
-            ProgressView("Searching…")
+        } else if visible.isEmpty && !query.isEmpty {
+            let notice = ListStates.empty(.search)
+            StateView(title: notice.title, systemImage: "magnifyingglass", message: notice.message)
         }
     }
 
     @ViewBuilder
     private func searchResults(_ messages: [Message]) -> some View {
         Section {
-            if let searchError {
-                Text(searchError).foregroundStyle(.red).font(.footnote)
-            }
-            if messages.isEmpty && !searching {
-                ContentUnavailableView.search(text: query)
-            }
             ForEach(Conversation.group(messages)) { conversation in
                 NavigationLink(value: ThreadRoute(threadId: conversation.id, folder: conversation.latest.folderValue ?? .inbox)) {
                     ConversationRow(conversation: conversation, me: model.mailbox, showFolder: true)
