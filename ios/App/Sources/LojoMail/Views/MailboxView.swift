@@ -22,6 +22,7 @@ struct MailboxView: View {
     @State private var siFilter: SiFilterRequest?
     @State private var messageFilter: SiMessageFilterRequest?
     @State private var labelFilter: String?
+    @State private var recentSearches: [String] = []
     @Environment(\.openReview) private var openReview
 
     private var state: FolderState { model.state(folder) }
@@ -31,12 +32,18 @@ struct MailboxView: View {
         let labeled = labelFilter.map { label in
             conversations.filter { $0.messages.contains { $0.labels.contains(label) } }
         } ?? conversations
-        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty, results == nil else { return labeled }
+        let parsed = MailSearchQuery(query)
+        guard !parsed.isEmpty, results == nil else { return labeled }
         return labeled.filter { conversation in
             conversation.messages.contains { message in
-                message.subject.lowercased().contains(q) || message.from.email.lowercased().contains(q)
-                    || (message.from.name ?? "").lowercased().contains(q) || (message.snippet ?? "").lowercased().contains(q)
+                MailSearch.matches(
+                    subject: message.subject,
+                    senderName: message.from.name ?? "",
+                    senderEmail: message.from.email,
+                    snippet: message.snippet,
+                    labels: message.labels,
+                    query: parsed
+                )
             }
         }
     }
@@ -44,7 +51,7 @@ struct MailboxView: View {
     var body: some View {
         NavigationStack(path: $path) {
             list
-                .navigationTitle(labelFilter.map(SiLabels.title) ?? folder.title)
+                .navigationTitle(results == nil ? (labelFilter.map(SiLabels.title) ?? folder.title) : "Search")
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) { folderMenu }
                     ToolbarItem(placement: .topBarTrailing) { moreMenu }
@@ -55,9 +62,14 @@ struct MailboxView: View {
                             .accessibilityIdentifier("mail.compose")
                     }
                 }
-                .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search all mail")
+                .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: MailSearch.prompt)
+                .searchSuggestions { suggestions }
                 .onSubmit(of: .search) { Task { await runSearch() } }
                 .onChange(of: query) { _, value in if value.isEmpty { results = nil; searchError = nil } }
+                .onAppear {
+                    guard !LaunchOptions.current.uiTest else { return }
+                    recentSearches = UserDefaults.standard.stringArray(forKey: MailSearch.recentDefaultsKey) ?? []
+                }
                 .navigationDestination(for: ThreadRoute.self) { route in
                     ThreadView(threadId: route.threadId, folder: route.folder)
                 }
@@ -212,9 +224,33 @@ struct MailboxView: View {
                 }
             }
         } header: {
-            Text("\(messages.count) result\(messages.count == 1 ? "" : "s") in all folders · subject, sender and snippet")
+            Text(MailSearch.resultsTitle(count: messages.count))
                 .font(.caption)
                 .textCase(nil)
+                .accessibilityAddTraits(.isHeader)
+        }
+    }
+
+    @ViewBuilder
+    private var suggestions: some View {
+        let parsed = MailSearchQuery(query)
+        if !parsed.isEmpty {
+            Button {
+                Task { await runSearch() }
+            } label: {
+                Label(MailSearch.allMailSuggestion(parsed.text), systemImage: "magnifyingglass")
+            }
+            .accessibilityIdentifier("mail.search.all")
+        } else {
+            ForEach(recentSearches, id: \.self) { term in
+                Button {
+                    query = term
+                    Task { await runSearch() }
+                } label: {
+                    Label(term, systemImage: "clock")
+                }
+                .accessibilityLabel("Recent search \(term)")
+            }
         }
     }
 
@@ -407,6 +443,10 @@ struct MailboxView: View {
         defer { searching = false }
         do {
             results = try await model.search(q)
+            recentSearches = MailSearch.remember(q, recent: recentSearches)
+            if !model.launch.uiTest {
+                UserDefaults.standard.set(recentSearches, forKey: MailSearch.recentDefaultsKey)
+            }
         } catch {
             searchError = error.localizedDescription
         }
