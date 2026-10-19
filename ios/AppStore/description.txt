@@ -1,0 +1,7 @@
+LOJO Mail is your mailbox on this iPhone.
+
+Sign in with your passphrase. Load the envelope key once so this iPhone can open sealed mail. The key stays in the Keychain.
+
+Filter with SI sorts mail. Reply with SI writes a draft. Nothing sends until you tap Approve and send.
+
+Trash is kept, and you can restore it. From the inbox you can archive a conversation or mark it read or unread.
