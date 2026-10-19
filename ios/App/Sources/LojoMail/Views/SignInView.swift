@@ -23,7 +23,7 @@ struct SignInView: View {
                         // The username half of the login form. The API only takes the passphrase, but password
                         // managers (iCloud Keychain, 1Password…) pair a .username field with the .password one to
                         // offer, save and fill the credential.
-                        TextField("Account", text: $account)
+                        TextField(SetupCopy.accountLabel, text: $account)
                             .textContentType(.username)
                             .keyboardType(.emailAddress)
                             .textInputAutocapitalization(.never)
@@ -31,7 +31,7 @@ struct SignInView: View {
                             .submitLabel(.next)
                             .padding(.horizontal, 14)
                             .frame(minHeight: 50)
-                            .accessibilityLabel("Account")
+                            .accessibilityLabel(SetupCopy.accountLabel)
                         Divider().padding(.leading, 14)
                         SecretField(title: "Passphrase", text: $passphrase, noun: "passphrase", submitLabel: .go) {
                             Task { await signIn() }
@@ -42,6 +42,9 @@ struct SignInView: View {
                     }
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
+                    Text(SetupCopy.accountDetail)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
                     Text("Your password manager can fill the passphrase: tap the field, then the key or Passwords button above the keyboard. Save it under \(model.mailbox) (website app.cyberphysical.us) to find it here.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -136,6 +139,18 @@ struct SignInView: View {
                 .accessibilityHidden(true)
             Text("LOJO Mail").font(.largeTitle.weight(.bold))
             Text(model.mailbox).font(.subheadline).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(SetupCopy.steps.enumerated()), id: \.offset) { index, step in
+                    Text("\(index + 1). \(step)")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 8)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(SetupCopy.steps.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: " "))
         }
     }
 
