@@ -231,13 +231,15 @@ struct ThreadView: View {
     private var actionBar: some View {
         VStack(spacing: 0) {
             Divider()
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 6) {
-                    actionButtons
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .top, spacing: 6) { mailActions }
+                if replyTarget != nil {
+                    HStack(alignment: .top, spacing: 6) { siActions }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(.bar)
         }
         .accessibilityElement(children: .contain)
@@ -245,7 +247,7 @@ struct ThreadView: View {
     }
 
     @ViewBuilder
-    private var actionButtons: some View {
+    private var mailActions: some View {
         if inTrash {
             barButton("Restore", "arrow.uturn.backward", tint: .accentColor) {
                 Task {
@@ -284,6 +286,12 @@ struct ThreadView: View {
             barButton(SiEntry.replyAllTitle, "arrowshape.turn.up.left.2", tint: .accentColor, identifier: "thread.reply-all") {
                 compose = .reply(target, all: true)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var siActions: some View {
+        if let target = replyTarget {
             barButton(SiEntry.replyTitle, SiEntry.icon, tint: Theme.si, identifier: "si.reply", prominent: true) {
                 siReplyAll = false
                 siReplyTarget = target
