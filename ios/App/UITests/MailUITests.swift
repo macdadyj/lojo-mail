@@ -317,9 +317,7 @@ final class MailUITests: XCTestCase {
     /// A filled multiline field keeps its identifier. Its accessibility label may be the text itself.
     private func composeValue(_ app: XCUIApplication, _ identifier: String) -> String {
         let element = app.descendants(matching: .any)[identifier]
-        let fields = app.textFields.allElementsBoundByIndex.prefix(8).map(\.label).joined(separator: ", ")
-        let views = app.textViews.allElementsBoundByIndex.prefix(8).map(\.label).joined(separator: ", ")
-        XCTAssertTrue(element.waitForExistence(timeout: 6), "\(identifier) is missing. Text fields: \(fields). Text views: \(views)")
+        XCTAssertTrue(element.waitForExistence(timeout: 6), "\(identifier) is missing")
         if let value = element.value as? String, !value.isEmpty { return value }
         let nested = element.textViews.firstMatch
         if nested.exists, let value = nested.value as? String, !value.isEmpty { return value }
