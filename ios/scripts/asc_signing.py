@@ -304,11 +304,16 @@ def profile_records(items):
     return records
 
 
-def list_profiles(token):
-    path = "/v1/profiles?" + urllib.parse.urlencode({
-        "filter[profileType]": PROFILE_TYPE,
+def list_profiles(token, name=None, profile_type=PROFILE_TYPE):
+    query = {
+        "include": "bundleId,certificates",
         "limit": "200",
-    })
+    }
+    if profile_type:
+        query["filter[profileType]"] = profile_type
+    if name:
+        query["filter[name]"] = name
+    path = "/v1/profiles?" + urllib.parse.urlencode(query)
     records = []
     pages = 0
     while path and pages < 20:
@@ -375,6 +380,8 @@ def profile_payload(name, bundle_resource_id, certificate_id):
 def create_profile(token, name, bundle_resource_id, certificate_id):
     payload = profile_payload(name, bundle_resource_id, certificate_id)
     status, body = api(token, "POST", "/v1/profiles", payload)
+    if status == 409 and "Multiple profiles" in body:
+        return None
     parsed = parse_data(status, body, "profile")
     attributes = parsed["data"].get("attributes") or {}
     content = attributes.get("profileContent")
@@ -392,6 +399,25 @@ def download_profile(token, profile_id):
     return base64.b64decode(content)
 
 
+def profiles_to_replace(records, preferred_name):
+    """Profiles that block a new one: same name, and not already chosen as usable."""
+    return [
+        record for record in records
+        if record["name"] == preferred_name and record["profile_type"] in (None, "", PROFILE_TYPE)
+    ]
+
+
+def replace_named_profiles(token, records, bundle_id, preferred_name):
+    stale = profiles_to_replace(records, preferred_name)
+    for record in stale:
+        print(
+            f"Replacing the App Store profile for {bundle_id} so it is tied to the shared distribution certificate.",
+            flush=True,
+        )
+        delete_profile(token, record["id"])
+    return len(stale)
+
+
 def fetch_or_create_profile(token, bundle_resource_id, bundle_id, preferred_name):
     records = list_profiles(token)
     chosen = choose_profile(
@@ -403,21 +429,39 @@ def fetch_or_create_profile(token, bundle_resource_id, bundle_id, preferred_name
     if chosen:
         print(f"Using the App Store profile for {bundle_id}.", flush=True)
         return chosen["id"], chosen["name"], download_profile(token, chosen["id"])
-    for record in records:
-        if record["name"] != preferred_name or record["bundle_resource_id"] != bundle_resource_id:
-            continue
-        print(
-            f"Replacing the App Store profile for {bundle_id} so it is tied to the shared distribution certificate.",
-            flush=True,
-        )
-        delete_profile(token, record["id"])
+    replace_named_profiles(token, records, bundle_id, preferred_name)
     print(f"Creating an App Store profile for {bundle_id}.", flush=True)
-    return create_profile(
+    created = create_profile(
         token,
         preferred_name,
         bundle_resource_id,
         DISTRIBUTION_CERTIFICATE_ID,
     )
+    if created is not None:
+        return created
+    # Apple refuses the name when more than one profile already uses it, even if the
+    # typed list above did not return those rows.
+    print(
+        f"Removing duplicate App Store profiles named {preferred_name}.",
+        flush=True,
+    )
+    replace_named_profiles(
+        token,
+        list_profiles(token, name=preferred_name, profile_type=None),
+        bundle_id,
+        preferred_name,
+    )
+    created = create_profile(
+        token,
+        preferred_name,
+        bundle_resource_id,
+        DISTRIBUTION_CERTIFICATE_ID,
+    )
+    if created is None:
+        raise SystemExit(
+            f"Multiple profiles are still named {preferred_name}. Stopped without creating a certificate."
+        )
+    return created
 
 
 def decode_profile(raw):
@@ -1128,6 +1172,8 @@ def prepare_roundtrip():
                 })
             return 200, json.dumps({"data": []})
         if method == "GET" and path.startswith("/v1/profiles?"):
+            if ("name%5D=" in path or "filter[name]" in path) and mode.get("named") is not None:
+                return 200, json.dumps({"data": mode["named"], "links": {}})
             return 200, json.dumps({"data": mode["profiles"], "links": {}})
         if method == "GET" and path.startswith("/v1/profiles/"):
             return 200, json.dumps({
@@ -1143,6 +1189,15 @@ def prepare_roundtrip():
         if method == "DELETE" and path.startswith("/v1/profiles/"):
             return 204, ""
         if method == "POST" and path == "/v1/profiles":
+            if mode.get("conflict_posts", 0) > 0:
+                mode["conflict_posts"] -= 1
+                return 409, json.dumps({
+                    "errors": [{
+                        "status": "409",
+                        "code": "ENTITY_ERROR",
+                        "detail": "Multiple profiles found with the name 'LOJO Mail App Store'.  Please remove the duplicate profiles and try again.",
+                    }]
+                })
             certificates = payload["data"]["relationships"]["certificates"]["data"]
             if certificates != [{"type": "certificates", "id": DISTRIBUTION_CERTIFICATE_ID}]:
                 raise SystemExit("profile was not tied to the shared certificate")
@@ -1266,6 +1321,36 @@ targets:
                 raise SystemExit("prepare did not replace the stale profile")
             if any("/v1/certificates" in path and method in ("POST", "DELETE") for method, path, _payload in calls):
                 raise SystemExit("replacing a profile touched a certificate")
+
+            calls.clear()
+            mode["profiles"] = [
+                {"id": "PROF_DUP_A", "attributes": {"name": "LOJO Mail App Store", "profileType": PROFILE_TYPE, "profileState": "ACTIVE"}},
+                {"id": "PROF_DUP_B", "attributes": {"name": "LOJO Mail App Store", "profileType": PROFILE_TYPE, "profileState": "ACTIVE"}},
+            ]
+            project.write_text(sample_pbxproj())
+            prepare(argv)
+            methods = [(method, path) for method, path, _payload in calls]
+            if ("DELETE", "/v1/profiles/PROF_DUP_A") not in methods or ("DELETE", "/v1/profiles/PROF_DUP_B") not in methods:
+                raise SystemExit("prepare left duplicate profiles that share the App Store name")
+            if not any(method == "POST" and path == "/v1/profiles" for method, path, _payload in calls):
+                raise SystemExit("prepare did not create a profile after removing duplicates")
+
+            calls.clear()
+            mode["profiles"] = []
+            mode["named"] = [
+                {"id": "PROF_HIDDEN_A", "attributes": {"name": "LOJO Mail App Store"}},
+                {"id": "PROF_HIDDEN_B", "attributes": {"name": "LOJO Mail App Store"}},
+            ]
+            mode["conflict_posts"] = 1
+            project.write_text(sample_pbxproj())
+            prepare(argv)
+            methods = [(method, path) for method, path, _payload in calls]
+            if ("DELETE", "/v1/profiles/PROF_HIDDEN_A") not in methods or ("DELETE", "/v1/profiles/PROF_HIDDEN_B") not in methods:
+                raise SystemExit("prepare did not remove duplicate profiles that the typed list missed")
+            if not any(method == "POST" and path == "/v1/profiles" for method, path, _payload in calls):
+                raise SystemExit("prepare did not create a profile after the duplicate-name refusal")
+            mode["named"] = None
+            mode["conflict_posts"] = 0
 
             calls.clear()
             certs.write_bytes(other_pem)
