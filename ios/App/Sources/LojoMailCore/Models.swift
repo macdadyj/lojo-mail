@@ -310,6 +310,8 @@ public struct ServerSettings: Codable, Sendable, Hashable {
     public var draftAttachments: DraftAttachmentSupport?
     public var dev: Bool
     public var principal: String
+    /// Addresses this mailbox sends as. Absent on servers that only report `mailbox`.
+    public var sendFrom: [String]?
 }
 
 public struct RuleReply: Codable, Sendable, Hashable {

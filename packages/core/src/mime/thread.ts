@@ -39,6 +39,18 @@ class UnionFind {
   }
 }
 
+/** References plus this message's id. The id is last, and it is listed once. */
+export function appendMessageId(references: string[], rfcMessageId: string): string[] {
+  const out: string[] = [];
+  for (const item of [...references, rfcMessageId]) {
+    const value = item.trim();
+    if (!value || value.length > 250 || out.includes(value)) continue;
+    out.push(value);
+    if (out.length >= 50) break;
+  }
+  return out;
+}
+
 export function threadIdForRoot(rootRfcId: string): string {
   return `thr_${sha256(rootRfcId).slice(0, 24)}`;
 }

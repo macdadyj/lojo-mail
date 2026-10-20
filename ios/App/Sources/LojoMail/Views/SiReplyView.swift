@@ -7,6 +7,7 @@ struct SiReplyView: View {
     @Environment(\.dismiss) private var dismiss
     var message: Message
     var threadText: String
+    var replyAll = false
     var onDraft: (DraftView) -> Void
 
     @State private var screen = SiReplyScreen()
@@ -53,7 +54,7 @@ struct SiReplyView: View {
                 .accessibilityIdentifier("si.reply.generate")
             }
         }
-        .navigationTitle("Reply with SI")
+        .navigationTitle(replyAll ? SiEntry.replyAllWithSiTitle : SiEntry.replyTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
@@ -76,8 +77,9 @@ struct SiReplyView: View {
         let sourceText = model.bodyText(message)
         let earlier = threadText
         do {
+            let replyAll = replyAll
             let view = try await model.call {
-                try await $0.siReply(messageId: messageId, tone: tone, instruction: instruction, sourceText: sourceText, threadText: earlier)
+                try await $0.siReply(messageId: messageId, tone: tone, instruction: instruction, sourceText: sourceText, threadText: earlier, replyAll: replyAll)
             }
             model.upsertDraft(view)
             dismiss()

@@ -52,6 +52,19 @@ final class AppModel {
     var apiBase: URL
     var mailbox = "lojo@cyberphysical.us"
 
+    /// The mailbox, plus any extra addresses this account sends as.
+    var ownAddresses: [String] {
+        var seen: [String] = []
+        func add(_ value: String) {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !seen.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) else { return }
+            seen.append(trimmed)
+        }
+        add(mailbox)
+        for address in serverSettings?.sendFrom ?? [] { add(address) }
+        return seen
+    }
+
     var folders: [Folder: FolderState] = [:]
     var bodies: [String: BodyState] = [:]
     var drafts: [DraftView] = []

@@ -72,7 +72,7 @@ final class SiUITests: XCTestCase {
     }
 
     func testActionBarKeepsSiBesideReply() {
-        XCTAssertEqual(SiEntry.actionBar, ["Reply", "Reply with SI", "Filter with SI"])
+        XCTAssertEqual(SiEntry.actionBar, ["Reply", "Reply All", "Reply with SI", "Reply All with SI", "Filter with SI"])
         XCTAssertEqual(SiEntry.icon, "sparkles")
         XCTAssertFalse(AppChrome.tabs.contains("Review"))
         XCTAssertEqual(SiDirectChoice.allCases.map(\.title), [

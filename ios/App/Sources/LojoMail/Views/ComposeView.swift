@@ -171,7 +171,9 @@ struct ComposeView: View {
                     .autocorrectionDisabled()
                     .textContentType(.emailAddress)
                     .accessibilityLabel(ComposeChrome.toLabel)
+                    .accessibilityIdentifier("compose.to")
             }
+            .accessibilityIdentifier("compose.to")
             LabeledContent(ComposeChrome.ccLabel) {
                 TextField("Optional", text: $model.fields.cc, axis: .vertical)
                     .font(.body)
@@ -180,13 +182,17 @@ struct ComposeView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .accessibilityLabel(ComposeChrome.ccLabel)
+                    .accessibilityIdentifier("compose.cc")
             }
+            .accessibilityIdentifier("compose.cc")
             LabeledContent(ComposeChrome.subjectLabel) {
                 TextField("Subject", text: $model.fields.subject, axis: .vertical)
                     .font(.body)
                     .focused($focus, equals: .subject)
                     .accessibilityLabel(ComposeChrome.subjectLabel)
+                    .accessibilityIdentifier("compose.subject")
             }
+            .accessibilityIdentifier("compose.subject")
         } header: {
             Text("Recipients").textCase(nil)
         }
@@ -212,6 +218,7 @@ struct ComposeView: View {
                     .focused($focus, equals: .body)
                     .frame(minHeight: CGFloat(ComposeChrome.editorMinHeight(accessibilitySize: typeSize.isAccessibilitySize)))
                     .accessibilityLabel(ComposeChrome.messageLabel)
+                    .accessibilityIdentifier("compose.message")
                     .disabled(model.closed)
             }
         } header: {
@@ -431,7 +438,7 @@ struct ComposeView: View {
         if let draft = model.draft, draft.origin.isBot { return "Review draft" }
         switch request {
         case .new: return "New message"
-        case .reply(_, let all): return all ? "Reply all" : "Reply"
+        case .reply(_, let all): return all ? SiEntry.replyAllTitle : "Reply"
         case .forward: return "Forward"
         case .aiReply: return "Reply with SI"
         case .draft: return model.closed ? "Draft" : "Edit draft"

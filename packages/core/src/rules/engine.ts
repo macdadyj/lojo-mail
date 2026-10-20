@@ -4,6 +4,7 @@ import { draftContext, rulesContext, serverOpen, serverSeal, type KeyWrapper } f
 import { MailError } from "../errors.ts";
 import { newId, sha256, utcDay } from "../ids.ts";
 import { buildRawMessage, cleanHeaderValue } from "../mime/compose.ts";
+import { appendMessageId } from "../mime/thread.ts";
 import type { MailSender, OutboundMessage } from "../send.ts";
 import type { MailStore } from "../store/types.ts";
 import type { Draft, LojoConfig, ServerSealedBlob, StoredMessage } from "../types.ts";
@@ -221,7 +222,7 @@ export async function runRuleReply(
     id: draftId,
     threadId: message.threadId,
     inReplyTo: message.rfcMessageId,
-    references: [...message.references, message.rfcMessageId],
+    references: appendMessageId(message.references, message.rfcMessageId),
     to: [{ email: message.from.email, ...(message.from.name ? { name: message.from.name } : {}) }],
     cc: [],
     subject: cleanHeaderValue(replySubject(message.subject)),

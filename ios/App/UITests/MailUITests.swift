@@ -79,6 +79,34 @@ final class MailUITests: XCTestCase {
         row.tap()
         XCTAssertTrue(app.descendants(matching: .any)["thread.action-bar"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["thread.reply"].waitForExistence(timeout: 4))
+        revealBarButton(app, "thread.reply-all")
+        XCTAssertEqual(app.buttons["thread.reply-all"].label, "Reply All")
+        app.buttons["thread.reply-all"].tap()
+        XCTAssertTrue(app.navigationBars["Reply All"].waitForExistence(timeout: 6))
+        let toValue = composeValue(app, "compose.to")
+        XCTAssertTrue(toValue.contains("ada@example.com"))
+        XCTAssertTrue(toValue.contains("bea@example.com"))
+        XCTAssertFalse(toValue.localizedCaseInsensitiveContains("lojo@cyberphysical.us"))
+        XCTAssertFalse(toValue.localizedCaseInsensitiveContains("copy@example.com"))
+        let ccValue = composeValue(app, "compose.cc")
+        XCTAssertTrue(ccValue.contains("copy@example.com"))
+        XCTAssertFalse(ccValue.localizedCaseInsensitiveContains("ada@example.com"))
+        XCTAssertFalse(ccValue.localizedCaseInsensitiveContains("bea@example.com"))
+        XCTAssertFalse(ccValue.localizedCaseInsensitiveContains("lojo@cyberphysical.us"))
+        XCTAssertEqual(composeValue(app, "compose.subject"), "Re: Gate sensor")
+        let quote = composeValue(app, "compose.message")
+        XCTAssertTrue(quote.contains("wrote:"))
+        XCTAssertTrue(quote.contains("> The north gate is back online."))
+        dismissCompose(app)
+        revealBarButton(app, "si.reply-all")
+        XCTAssertEqual(app.buttons["si.reply-all"].label, "Reply All with SI")
+        app.buttons["si.reply-all"].tap()
+        XCTAssertTrue(app.navigationBars["Reply All with SI"].waitForExistence(timeout: 6))
+        XCTAssertFalse(app.buttons["Send"].exists)
+        XCTAssertFalse(app.buttons["Approve and send"].exists)
+        app.buttons["si.reply.generate"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["compose.cancel"].firstMatch.waitForExistence(timeout: 8))
+        dismissCompose(app)
         revealBarButton(app, "si.reply")
         revealBarButton(app, "si.filter.message")
         XCTAssertEqual(app.buttons["si.reply"].label, "Reply with SI")
@@ -286,12 +314,30 @@ final class MailUITests: XCTestCase {
         return element.exists
     }
 
+    /// A filled multiline field keeps its identifier. Its accessibility label may be the text itself.
+    private func composeValue(_ app: XCUIApplication, _ identifier: String) -> String {
+        let element = app.descendants(matching: .any)[identifier]
+        XCTAssertTrue(element.waitForExistence(timeout: 6), "\(identifier) is missing")
+        if let value = element.value as? String, !value.isEmpty { return value }
+        let nested = element.textViews.firstMatch
+        if nested.exists, let value = nested.value as? String, !value.isEmpty { return value }
+        let nestedField = element.textFields.firstMatch
+        if nestedField.exists, let value = nestedField.value as? String, !value.isEmpty { return value }
+        return ""
+    }
+
+    /// Scrolls the action bar until the button's center is on screen. Asking `isHittable` for a button still off the bar fails the test.
     private func revealBarButton(_ app: XCUIApplication, _ identifier: String) {
         let button = app.buttons[identifier]
-        if button.waitForExistence(timeout: 4), button.isHittable { return }
+        XCTAssertTrue(button.waitForExistence(timeout: 4), "\(identifier) is missing from the action bar")
         let bar = app.descendants(matching: .any)["thread.action-bar"]
-        bar.swipeLeft()
-        XCTAssertTrue(button.waitForExistence(timeout: 3), "\(identifier) is missing from the action bar")
+        let screen = app.windows.firstMatch.frame.insetBy(dx: 8, dy: 0)
+        for _ in 0..<8 {
+            let frame = button.frame
+            if frame.width > 1, frame.height > 1, screen.contains(CGPoint(x: frame.midX, y: frame.midY)) { return }
+            if frame.midX < screen.minX { bar.swipeRight() } else { bar.swipeLeft() }
+        }
+        XCTFail("\(identifier) is off the action bar")
     }
 
     private func dismissSearch(_ app: XCUIApplication) {

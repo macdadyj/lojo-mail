@@ -31,6 +31,7 @@ final class ComposeModel {
     private(set) var draft: Draft?
     private var threadId: String?
     private var inReplyTo: String?
+    private var references: [String] = []
     var busy = false
     var status: String?
     var error: String?
@@ -53,9 +54,8 @@ final class ComposeModel {
         case .new(let to):
             fields.to = to ?? ""
         case .reply(let message, let all):
-            let me = model.mailbox
             if all {
-                let recipients = MailText.replyAll(to: message, me: me)
+                let recipients = MailText.replyAll(to: message, me: model.ownAddresses)
                 fields.to = recipients.to.joined(separator: ", ")
                 fields.cc = recipients.cc.joined(separator: ", ")
             } else {
@@ -65,6 +65,7 @@ final class ComposeModel {
             fields.text = MailText.quoted(model.bodyText(message) ?? "", from: message.from, date: message.sentDate)
             threadId = message.threadId
             inReplyTo = message.rfcMessageId
+            references = MailText.replyReferences(of: message)
         case .forward(let message):
             fields.subject = MailText.forwardSubject(message.subject)
             fields.text = MailText.forwarded(model.bodyText(message) ?? "(The original text is sealed; load your envelope key to include it.)", message: message)
@@ -215,6 +216,7 @@ final class ComposeModel {
             fields.subject = MailText.replySubject(message.subject)
             threadId = message.threadId
             inReplyTo = message.rfcMessageId
+            references = MailText.replyReferences(of: message)
         }
     }
 
@@ -245,7 +247,8 @@ final class ComposeModel {
             } else {
                 let threadId = threadId
                 let inReplyTo = inReplyTo
-                view = try await model.call { try await $0.createDraft(fields, threadId: threadId, inReplyTo: inReplyTo) }
+                let references = references
+                view = try await model.call { try await $0.createDraft(fields, threadId: threadId, inReplyTo: inReplyTo, references: references) }
             }
             show(view)
             id = view.draft.id
