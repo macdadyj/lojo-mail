@@ -326,15 +326,18 @@ final class MailUITests: XCTestCase {
         return ""
     }
 
+    /// Scrolls the action bar until the button's center is on screen. Asking `isHittable` for a button still off the bar fails the test.
     private func revealBarButton(_ app: XCUIApplication, _ identifier: String) {
         let button = app.buttons[identifier]
+        XCTAssertTrue(button.waitForExistence(timeout: 4), "\(identifier) is missing from the action bar")
         let bar = app.descendants(matching: .any)["thread.action-bar"]
-        for _ in 0..<5 {
-            if button.exists, button.isHittable { return }
-            if bar.exists { bar.swipeLeft() }
+        let screen = app.windows.firstMatch.frame.insetBy(dx: 8, dy: 0)
+        for _ in 0..<8 {
+            let frame = button.frame
+            if frame.width > 1, frame.height > 1, screen.contains(CGPoint(x: frame.midX, y: frame.midY)) { return }
+            if frame.midX < screen.minX { bar.swipeRight() } else { bar.swipeLeft() }
         }
-        XCTAssertTrue(button.waitForExistence(timeout: 3), "\(identifier) is missing from the action bar")
-        XCTAssertTrue(button.isHittable, "\(identifier) is off the action bar")
+        XCTFail("\(identifier) is off the action bar")
     }
 
     private func dismissSearch(_ app: XCUIApplication) {
