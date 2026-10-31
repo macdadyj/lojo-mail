@@ -13,13 +13,13 @@
   "dependencies": {
     "@lojo/core": "*",
     "esbuild": "^0.25.5",
-    "smtp-server": "^3.19.15"
+    "smtp-server": "^3.21.3"
   },
   "devDependencies": {
     "@lojo/api": "*",
     "@types/nodemailer": "^8.0.2",
     "@types/smtp-server": "^3.5.13",
     "imapflow": "^2.1.2",
-    "nodemailer": "^10.0.12"
+    "nodemailer": "^10.3.1"
   }
 }

@@ -1,4 +1,4 @@
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { z } from "zod";
 import { asScope, hasScope, type Scope } from "./scopes.ts";
 import { tools, type ToolAnnotations } from "./tools.ts";
 
@@ -27,7 +27,7 @@ export function describeTool(tool: Tool): string {
 
 /** JSON Schema for one tool's arguments, inlined (no $ref) so small local models and every MCP client can read it. */
 export function inputSchemaOf(tool: Tool): Record<string, unknown> {
-  const { $schema: _schema, ...schema } = zodToJsonSchema(tool.schema, { target: "jsonSchema7", $refStrategy: "none" }) as Record<string, unknown>;
+  const { $schema: _schema, ...schema } = z.toJSONSchema(tool.schema, { target: "draft-07", reused: "inline" });
   return schema;
 }
 

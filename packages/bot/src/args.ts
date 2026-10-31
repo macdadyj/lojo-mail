@@ -33,13 +33,13 @@ export function parseArgv(argv: readonly string[]): ParsedArgs {
   return { positionals, flags };
 }
 
-function unwrap(schema: z.ZodTypeAny): z.ZodTypeAny {
-  if (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable) return unwrap(schema.unwrap() as z.ZodTypeAny);
-  if (schema instanceof z.ZodDefault) return unwrap(schema.removeDefault() as z.ZodTypeAny);
+function unwrap(schema: z.core.$ZodType): z.core.$ZodType {
+  if (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable) return unwrap(schema.unwrap());
+  if (schema instanceof z.ZodDefault) return unwrap(schema.removeDefault());
   return schema;
 }
 
-function coerce(value: string | boolean, schema: z.ZodTypeAny | undefined): unknown {
+function coerce(value: string | boolean, schema: z.core.$ZodType | undefined): unknown {
   if (typeof value === "boolean") return value;
   const inner = schema ? unwrap(schema) : undefined;
   if (inner instanceof z.ZodString || inner instanceof z.ZodEnum) return value;
