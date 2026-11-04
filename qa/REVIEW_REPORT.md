@@ -105,7 +105,7 @@ Fix, at minimum:
 **P1-1. The dev API is network-exposed and the documented production refusal is false.**
 `packages/api/src/server.ts` calls `serve({ fetch, port })` with no hostname and listens on `::` (all interfaces), while it logs `http://127.0.0.1`. It also calls `tokenBookFromEnv(process.env, false)`, which hard-codes `production=false`. Repro (`qa/evidence/dev-server-exposure.txt`):
 
-- `curl http://<LAN-IP>:8787/v1/settings -H 'authorization: Bearer dev-only-change-me'` returns `unlocked:true`.
+- `curl http://<LAN-IP>:8787/v1/settings -H 'authorization: Bearer <REDACTED>'` returns `unlocked:true`.
 - With `NODE_ENV=production`, `dev-send-change-me` is still accepted.
 
 `server.ts`, the Settings page, and the README all say it is refused. On any shared network, anyone can read and send from the unlocked demo mailbox, and from a real one if Jon points dev at real data or a real LLM key. Fix: bind `127.0.0.1` and honor `NODE_ENV`.
