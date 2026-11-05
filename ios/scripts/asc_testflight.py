@@ -299,7 +299,9 @@ def release(version, wait_seconds, require_ready):
     token = signing.jwt_from_env()
     app_id = find_app(token)
     found = None
-    deadline = time.time() + min(180, wait_seconds)
+    # App Store Connect can list an upload after the old 180s cap. The caller's
+    # wait is the budget for that gap; build 58 was still missing at 180s.
+    deadline = time.time() + wait_seconds
     while found is None and time.time() < deadline:
         found = find_build(token, app_id, version)
         if found is None:
@@ -394,6 +396,98 @@ def prepare_key():
     write_key(handle.name)
     os.environ["KEY_PATH"] = handle.name
     return handle.name
+
+
+def assert_lookup_uses_full_wait():
+    """A build listed after the old 180s cap is still released within --wait-seconds."""
+    start = 1_000_000.0
+    wait_seconds = 600
+    appear_after = 570
+    clock = {"now": start}
+    appeared = {"at": None}
+
+    def fake_time():
+        return clock["now"]
+
+    def fake_sleep(seconds):
+        clock["now"] += seconds
+
+    def api(token, method, path, payload=None):
+        if path.startswith("/v1/apps?"):
+            return 200, json.dumps({
+                "data": [{"type": "apps", "id": "APP", "attributes": {"bundleId": BUNDLE_ID}}]
+            })
+        if path.startswith("/v1/builds?"):
+            if clock["now"] < start + appear_after:
+                return 200, json.dumps({"data": []})
+            appeared["at"] = clock["now"]
+            return 200, json.dumps({
+                "data": [{
+                    "type": "builds",
+                    "id": "BUILD",
+                    "attributes": {
+                        "version": "58",
+                        "processingState": "VALID",
+                        "usesNonExemptEncryption": False,
+                        "uploadedDate": "2026-11-04T19:00:59Z",
+                        "expired": False,
+                    },
+                }],
+                "included": [{
+                    "type": "buildBetaDetails",
+                    "id": "BUILD",
+                    "attributes": {"internalBuildState": "IN_BETA_TESTING"},
+                }],
+            })
+        if path == "/v1/apps/APP/betaGroups?limit=50":
+            return 200, json.dumps({
+                "data": [{
+                    "type": "betaGroups",
+                    "id": "GROUP",
+                    "attributes": {"name": "Internal", "isInternalGroup": True},
+                }]
+            })
+        if path.startswith("/v1/betaGroups/GROUP/builds"):
+            return 200, json.dumps({
+                "data": [{"type": "builds", "id": "BUILD", "attributes": {"version": "58"}}]
+            })
+        if path.startswith("/v1/betaGroups/GROUP/betaTesters"):
+            return 200, json.dumps({"data": [{"id": "T", "attributes": {"state": "ACTIVE"}}]})
+        if path == "/v1/builds/BUILD/buildBetaDetail":
+            return 200, json.dumps({
+                "data": {
+                    "type": "buildBetaDetails",
+                    "id": "BUILD",
+                    "attributes": {"internalBuildState": "IN_BETA_TESTING"},
+                }
+            })
+        return 404, "{}"
+
+    real_api = signing.api
+    real_jwt = signing.jwt_from_env
+    real_sleep = time.sleep
+    real_time = time.time
+    signing.api = api
+    signing.jwt_from_env = lambda: "token"
+    time.sleep = fake_sleep
+    time.time = fake_time
+    held = sys.stdout
+    sys.stdout = captured = __import__("io").StringIO()
+    try:
+        release("58", wait_seconds=wait_seconds, require_ready=True)
+    except SystemExit:
+        raise SystemExit("lookup gave up before --wait-seconds; the build was not listed yet")
+    finally:
+        sys.stdout = held
+        signing.api = real_api
+        signing.jwt_from_env = real_jwt
+        time.sleep = real_sleep
+        time.time = real_time
+    text = captured.getvalue()
+    if "found build 58" not in text:
+        raise SystemExit("late build lookup did not report the build")
+    if appeared["at"] is None or appeared["at"] < start + appear_after:
+        raise SystemExit("late build lookup did not wait past the old 180s cap")
 
 
 def self_test():
@@ -563,6 +657,7 @@ def self_test():
             raise SystemExit("self-test missing after unreadable groups: " + line)
     if "owner@example.com" in hidden:
         raise SystemExit("self-test printed a tester address")
+    assert_lookup_uses_full_wait()
     show("asc testflight: ok")
 
 
