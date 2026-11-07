@@ -644,22 +644,30 @@ final class AppModel {
         guard !local.isEmpty else { return nil }
         var confirmed: [Message] = []
         for message in local {
+            let messageId = message.id
             do {
-                let fresh = try await call { try await $0.message(message.id) }
+                let fresh = try await call { try await $0.message(messageId) }
                 if fresh.threadId == id { confirmed.append(fresh) }
             } catch let error as APIError {
                 if case .notFound = error { continue }
                 throw error
             }
         }
-        var opened = ThreadOpen.listed(id, in: confirmed)
-        guard !opened.isEmpty else { return nil }
+        var opened: [Message] = []
         var marked = false
-        for index in opened.indices where opened[index].unread {
-            try await call { try await $0.setUnread(opened[index].id, false) }
-            opened[index].unread = false
-            marked = true
+        for message in ThreadOpen.listed(id, in: confirmed) {
+            if message.unread {
+                let messageId = message.id
+                try await call { try await $0.setUnread(messageId, false) }
+                var read = message
+                read.unread = false
+                opened.append(read)
+                marked = true
+            } else {
+                opened.append(message)
+            }
         }
+        guard !opened.isEmpty else { return nil }
         if marked {
             do {
                 let response = try await call { try await $0.thread(id) }
