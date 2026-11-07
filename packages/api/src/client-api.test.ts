@@ -18,6 +18,35 @@ test("folders list newest first with the threading metadata a mail client needs"
   assert.equal((await t.call("/v1/folders/nowhere/messages", { token: "read-token" })).status, 400);
 });
 
+test("opening the reported missing thread returns that conversation, and an unknown id stays 404", async () => {
+  const t = await testApp();
+  const { message } = await t.ingest(fixture("personal.eml"));
+  const other = await t.ingest(fixture("newsletter.eml"));
+  const reported = "thr_f9fee2c77944c39118a79237";
+  await t.store.updateMessage(message.id, { threadId: reported });
+  assert.equal(await t.store.getThread(reported), null);
+
+  const missing = await t.call("/v1/threads/thr_missing", { token: "read-token" });
+  assert.equal(missing.status, 404);
+  assert.equal(missing.json.error, "No thread thr_missing");
+  assert.equal((await t.store.listMessages()).length, 2);
+
+  const opened = await t.call(`/v1/threads/${reported}`, { token: "read-token" });
+  assert.equal(opened.status, 200);
+  const messages = opened.json.messages as Array<{ id: string; threadId: string; unread: boolean; folder: string }>;
+  assert.deepEqual(
+    messages.map((item) => item.id),
+    [message.id],
+  );
+  assert.equal(messages[0]?.threadId, reported);
+  assert.equal(messages[0]?.unread, false);
+  assert.equal(messages[0]?.folder, "inbox");
+  assert.equal((await t.store.getMessage(message.id))?.folder, "inbox");
+  assert.equal((await t.store.getMessage(other.message.id))?.folder, other.message.folder);
+  assert.equal((await t.store.getMessage(other.message.id))?.unread, other.message.unread);
+  assert.equal(t.sender.sent.length, 0);
+});
+
 test("read state syncs through /flags, and needs write", async () => {
   const t = await testApp();
   const { message } = await t.ingest(fixture("personal.eml"));

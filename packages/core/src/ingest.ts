@@ -159,8 +159,27 @@ async function resolveThreadId(
   return threadIdForRoot(parsed.references[0] ?? parsed.inReplyTo ?? parsed.rfcMessageId);
 }
 
-export async function refreshThread(store: MailStore, threadId: string, fallbackSubject: string): Promise<Thread | null> {
-  const messages = await store.listThreadMessages(threadId);
+/**
+ * `known` is mail the caller just stored. The thread index is a GSI, so a query
+ * in the same request can miss it. An empty query must not skip the row: the
+ * phone lists messages, then opens `GET /v1/threads/:id`, which 404s when the row
+ * was never written.
+ */
+export async function refreshThread(
+  store: MailStore,
+  threadId: string,
+  fallbackSubject: string,
+  known: readonly StoredMessage[] = [],
+): Promise<Thread | null> {
+  const indexed = await store.listThreadMessages(threadId);
+  const byId = new Map<string, StoredMessage>();
+  for (const message of indexed) {
+    if (message.threadId === threadId) byId.set(message.id, message);
+  }
+  for (const message of known) {
+    if (message.threadId === threadId && !byId.has(message.id)) byId.set(message.id, message);
+  }
+  const messages = [...byId.values()];
   if (messages.length === 0) {
     await store.retireThread(threadId);
     return null;
@@ -269,6 +288,9 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
   const id = messageIdFor(deliveryId);
 
   const duplicate = async (message: StoredMessage): Promise<IngestResult> => {
+    if (!(await deps.store.getThread(message.threadId))) {
+      await refreshThread(deps.store, message.threadId, message.subject, [message]);
+    }
     await deps.store.putAudit({ id: newId("aud"), day: utcDay(now), at: now.toISOString(), action: "ingest", messageId: message.id, outcome: "duplicate" });
     return { message, duplicate: true };
   };
@@ -416,7 +438,7 @@ export async function ingestRaw(raw: Buffer | string, deps: IngestDeps, options:
   if (origin === "sent" || (origin === "import" && classes.fromSelf)) {
     await upsertCorrespondents(deps.store, [...parsed.to, ...parsed.cc], deps.config.mailbox);
   }
-  await refreshThread(deps.store, threadId, parsed.subject);
+  await refreshThread(deps.store, message.threadId, message.subject || parsed.subject, [message]);
 
   const reply = ruled ? await afterStore(message, ruled, deps, now, parsed.text) : null;
 

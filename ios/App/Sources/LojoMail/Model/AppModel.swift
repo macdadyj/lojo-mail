@@ -626,16 +626,73 @@ final class AppModel {
             }
             return messages
         }
-        let response = try await call { try await $0.thread(id) }
-        let messages = response.messages.sorted { ($0.sentDate ?? .distantPast) < ($1.sentDate ?? .distantPast) }
-        let ids = Set(messages.map(\.id))
+        do {
+            let response = try await call { try await $0.thread(id) }
+            return await presentThread(id, response.messages)
+        } catch let error as APIError {
+            guard case .notFound = error else { throw error }
+            if let recovered = try await recoverListedThread(id) { return recovered }
+            throw error
+        }
+    }
+
+    /// The thread row can be missing while this mailbox already lists that conversation.
+    /// Confirm each message still has this thread id. A real miss, or a message that now
+    /// belongs to another thread, stays the not-found error.
+    private func recoverListedThread(_ id: String) async throws -> [Message]? {
+        let local = ThreadOpen.listed(id, in: folders.values.flatMap(\.messages))
+        guard !local.isEmpty else { return nil }
+        var confirmed: [Message] = []
+        for message in local {
+            let messageId = message.id
+            do {
+                let fresh = try await call { try await $0.message(messageId) }
+                if fresh.threadId == id { confirmed.append(fresh) }
+            } catch let error as APIError {
+                if case .notFound = error { continue }
+                throw error
+            }
+        }
+        var opened: [Message] = []
+        var marked = false
+        for message in ThreadOpen.listed(id, in: confirmed) {
+            if message.unread {
+                let messageId = message.id
+                try await call { try await $0.setUnread(messageId, false) }
+                var read = message
+                read.unread = false
+                opened.append(read)
+                marked = true
+            } else {
+                opened.append(message)
+            }
+        }
+        guard !opened.isEmpty else { return nil }
+        if marked {
+            do {
+                let response = try await call { try await $0.thread(id) }
+                let full = ThreadOpen.listed(id, in: response.messages)
+                if !full.isEmpty { return await presentThread(id, full) }
+            } catch let error as APIError {
+                if case .notFound = error {
+                    return await presentThread(id, opened)
+                }
+                throw error
+            }
+        }
+        return await presentThread(id, opened)
+    }
+
+    private func presentThread(_ id: String, _ messages: [Message]) async -> [Message] {
+        let sorted = ThreadOpen.listed(id, in: messages)
+        let ids = Set(sorted.map(\.id))
         for folder in folders.keys {
             for index in folders[folder]!.messages.indices where ids.contains(folders[folder]!.messages[index].id) {
                 folders[folder]!.messages[index].unread = false
             }
         }
-        await openBodies(messages)
-        return messages
+        await openBodies(sorted)
+        return sorted
     }
 
     func openBodies(_ messages: [Message]) async {
