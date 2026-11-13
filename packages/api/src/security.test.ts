@@ -55,6 +55,50 @@ test("[control] API: path variants do not bypass auth or the send gate", async (
   assert.equal(t.sender.sent.length, 0);
 });
 
+test("[control] API: encoded line terminators and backslashes do not skip /v1 auth", async () => {
+  const t = await testApp();
+  const { message } = await t.ingest(fixture("personal.eml"));
+  const opened = await t.call(`/v1/messages/${message.id}`, { token: "body-token" });
+  assert.equal(opened.status, 200, opened.text);
+  assert.match(opened.text, /CODEWORD-ZEBRA/);
+
+  // RegExpRouter used to miss wildcard middleware for %0A and U+2028. %5C must stay a character, not a separator.
+  const paths = [
+    "/v1/inbox",
+    "/v1/export",
+    `/v1/messages/${message.id}`,
+    `/v1/messages/${message.id}/body`,
+    "/v1/inbox%0A",
+    "/v1/%0Ainbox",
+    `/v1/messages/${message.id}%0A`,
+    `/v1/messages/%0A${message.id}`,
+    "/v1/folders/inbox%0A/messages",
+    "/v1/export%0A",
+    "/v1/inbox%E2%80%A8",
+    `/v1/messages/${message.id}%E2%80%A8`,
+    `/v1/threads/${message.threadId}%E2%80%A8`,
+    "/v1/export%E2%80%A8",
+    "/v1/inbox%5C",
+    `/v1/messages/${message.id}%5C`,
+    "/v1/inbox%5C../export",
+    "/v1/%5Cexport",
+  ];
+  for (const path of paths) {
+    const res = await t.app.request(path);
+    const text = await res.text();
+    assert.equal(res.status, 401, `${path} -> ${res.status} ${text}`);
+    assert.deepEqual(JSON.parse(text), { error: "unauthorized" });
+    assert.doesNotMatch(text, /CODEWORD-ZEBRA|Lease renewal|bodyEnvelope/);
+  }
+
+  for (const route of t.app.routes as Array<{ method: string; path: string }>) {
+    for (const pattern of route.path.matchAll(/\{([^}]+)\}/g)) {
+      const source = pattern[1] ?? "";
+      assert.equal(new RegExp(source).test(""), false, `${route.method} ${route.path} can match the empty string`);
+    }
+  }
+});
+
 test("[P2] API: a read-only token can search", async () => {
   const t = await testApp();
   await t.ingest(fixture("personal.eml"));
