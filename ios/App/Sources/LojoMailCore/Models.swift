@@ -233,6 +233,8 @@ public struct Draft: Codable, Sendable, Hashable, Identifiable {
     public var inReplyTo: String?
     public var to: [Address]
     public var cc: [Address]
+    /// Blind copies. Omitted by the API when the draft has none.
+    public var bcc: [Address]?
     public var subject: String
     public var status: DraftStatus
     public var origin: DraftAuthor

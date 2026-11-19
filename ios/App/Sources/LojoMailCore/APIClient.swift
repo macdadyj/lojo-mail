@@ -393,6 +393,7 @@ public struct APIClient: Sendable {
 public struct DraftFields: Sendable, Hashable {
     public var to: String
     public var cc: String
+    public var bcc: String
     public var subject: String
     public var text: String
     public var pgp: PgpMode
@@ -400,9 +401,10 @@ public struct DraftFields: Sendable, Hashable {
     /// files are added and removed with their own calls, and the approval names exactly these.
     public var attachments: [String]
 
-    public init(to: String = "", cc: String = "", subject: String = "", text: String = "", pgp: PgpMode = .auto, attachments: [String] = []) {
+    public init(to: String = "", cc: String = "", bcc: String = "", subject: String = "", text: String = "", pgp: PgpMode = .auto, attachments: [String] = []) {
         self.to = to
         self.cc = cc
+        self.bcc = bcc
         self.subject = subject
         self.text = text
         self.pgp = pgp
@@ -413,6 +415,7 @@ public struct DraftFields: Sendable, Hashable {
         self.init(
             to: view.draft.to.map(\.email).joined(separator: ", "),
             cc: view.draft.cc.map(\.email).joined(separator: ", "),
+            bcc: (view.draft.bcc ?? []).map(\.email).joined(separator: ", "),
             subject: view.draft.subject,
             text: view.text ?? "",
             pgp: view.draft.pgp,
@@ -428,10 +431,12 @@ public struct DraftFields: Sendable, Hashable {
 
     public var toList: [String] { DraftFields.addresses(to) }
     public var ccList: [String] { DraftFields.addresses(cc) }
-    public var allRecipients: [String] { toList + ccList }
+    public var bccList: [String] { DraftFields.addresses(bcc) }
+    public var allRecipients: [String] { toList + ccList + bccList }
 
+    /// `bcc` is always sent, including an empty list, so clearing the field removes blind copies on the draft.
     var payload: [String: Any] {
-        ["to": toList, "cc": ccList, "subject": subject, "text": text, "pgp": pgp.rawValue]
+        ["to": toList, "cc": ccList, "bcc": bccList, "subject": subject, "text": text, "pgp": pgp.rawValue]
     }
 
     /// `attachments` is only sent when there are some, so an approval without files is the same body as before.
@@ -447,6 +452,7 @@ public struct DraftFields: Sendable, Hashable {
         let norm = { (value: String) in DraftFields.addresses(value).map { $0.lowercased() }.joined(separator: ",") }
         if norm(to) != norm(current.to) { out.append("recipients (To)") }
         if norm(cc) != norm(current.cc) { out.append("recipients (Cc)") }
+        if norm(bcc) != norm(current.bcc) { out.append("recipients (Bcc)") }
         if subject != current.subject { out.append("subject") }
         if text != current.text { out.append("message text") }
         if pgp != current.pgp { out.append("encryption") }

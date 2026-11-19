@@ -42,13 +42,48 @@ public struct Conversation: Identifiable, Sendable, Hashable {
     }
 }
 
+/// What Forward opens in Compose. Recipients start empty. Every original file is carried until one is removed.
+public struct ForwardCompose: Sendable, Equatable {
+    public var to: String
+    public var cc: String
+    public var bcc: String
+    public var subject: String
+    public var text: String
+    public private(set) var attachments: [AttachmentMeta]
+
+    public init(message: Message, body: String, note: String = "") {
+        to = ""
+        cc = ""
+        bcc = ""
+        subject = MailText.forwardSubject(message.subject)
+        text = MailText.forwardBody(note: note, original: body, message: message)
+        attachments = message.attachments
+    }
+
+    /// Drops one original file before it is copied onto the outgoing draft.
+    public mutating func removeAttachment(id: String) {
+        attachments.removeAll { $0.id == id }
+    }
+}
+
 public enum MailText {
     public static func replySubject(_ subject: String) -> String {
         prefixed(subject, "Re:")
     }
 
+    /// `Fwd: ` once. A subject that already starts with `Fwd:` or `Fw:` is left as it is.
     public static func forwardSubject(_ subject: String) -> String {
-        prefixed(subject, "Fwd:")
+        let trimmed = subject.trimmingCharacters(in: .whitespacesAndNewlines)
+        if alreadyForwarded(trimmed) { return trimmed }
+        return "Fwd: \(trimmed)"
+    }
+
+    /// The line that starts the quoted original. A note, when there is one, is placed above it.
+    public static let forwardSeparator = "---------- Forwarded message ----------"
+
+    private static func alreadyForwarded(_ subject: String) -> Bool {
+        let lower = subject.lowercased()
+        return lower.hasPrefix("fwd:") || lower.hasPrefix("fw:")
     }
 
     private static func prefixed(_ subject: String, _ prefix: String) -> String {
@@ -63,20 +98,43 @@ public enum MailText {
         return "\n\nOn \(when), \(from.display) <\(from.email)> wrote:\n\(body)"
     }
 
+    /// The original, under a blank line, so a note can be typed above the header.
     public static func forwarded(_ text: String, message: Message) -> String {
+        forwardBody(note: "", original: text, message: message)
+    }
+
+    /// Note first, then the forwarded header (From, Date, Subject, To, and Cc when anyone was copied) and the original body.
+    public static func forwardBody(note: String, original: String, message: Message) -> String {
+        let quote = forwardQuote(original, message: message)
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "\n\n\(quote)" }
+        return "\(trimmed)\n\n\(quote)"
+    }
+
+    private static func forwardQuote(_ text: String, message: Message) -> String {
         let when = message.sentDate.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? message.date
-        let to = message.to.map { "\($0.display) <\($0.email)>" }.joined(separator: ", ")
-        return """
+        var lines = [
+            forwardSeparator,
+            "From: \(addressList([message.from]))",
+            "Date: \(when)",
+            "Subject: \(message.subject)",
+            "To: \(addressList(message.to))",
+        ]
+        let copied = message.cc ?? []
+        if !copied.isEmpty { lines.append("Cc: \(addressList(copied))") }
+        return lines.joined(separator: "\n") + "\n\n" + text
+    }
 
+    private static func addressList(_ addresses: [Address]) -> String {
+        addresses.map(addressLine).joined(separator: ", ")
+    }
 
-        ---------- Forwarded message ----------
-        From: \(message.from.display) <\(message.from.email)>
-        Date: \(when)
-        Subject: \(message.subject)
-        To: \(to)
-
-        \(text)
-        """
+    private static func addressLine(_ address: Address) -> String {
+        let name = address.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if name.isEmpty || name.caseInsensitiveCompare(address.email) == .orderedSame {
+            return address.email
+        }
+        return "\(name) <\(address.email)>"
     }
 
     /// Reply All. To is the sender plus the original To line. Cc is the original Cc line.

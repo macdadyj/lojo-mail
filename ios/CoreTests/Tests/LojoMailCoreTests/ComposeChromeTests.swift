@@ -4,15 +4,17 @@ import XCTest
 final class ComposeChromeTests: XCTestCase {
     func testFieldOrderWalksToThenCcThenSubjectThenMessage() {
         XCTAssertEqual(ComposeChrome.nextField(.to), .cc)
-        XCTAssertEqual(ComposeChrome.nextField(.cc), .subject)
+        XCTAssertEqual(ComposeChrome.nextField(.cc), .bcc)
+        XCTAssertEqual(ComposeChrome.nextField(.bcc), .subject)
         XCTAssertEqual(ComposeChrome.nextField(.subject), .body)
         XCTAssertNil(ComposeChrome.nextField(.body))
         XCTAssertNil(ComposeChrome.nextField(nil))
         XCTAssertEqual(ComposeChrome.previousField(.body), .subject)
-        XCTAssertEqual(ComposeChrome.previousField(.subject), .cc)
+        XCTAssertEqual(ComposeChrome.previousField(.subject), .bcc)
+        XCTAssertEqual(ComposeChrome.previousField(.bcc), .cc)
         XCTAssertEqual(ComposeChrome.previousField(.cc), .to)
         XCTAssertNil(ComposeChrome.previousField(.to))
-        XCTAssertEqual(ComposeField.allCases.map(\.accessibilityLabel), ["To", "Cc", "Subject", "Message"])
+        XCTAssertEqual(ComposeField.allCases.map(\.accessibilityLabel), ["To", "Cc", "Bcc", "Subject", "Message"])
     }
 
     func testEditorGrowsForAccessibilitySizesAndDoesNotSend() {

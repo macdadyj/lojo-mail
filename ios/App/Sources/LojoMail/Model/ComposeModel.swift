@@ -67,10 +67,18 @@ final class ComposeModel {
             inReplyTo = message.rfcMessageId
             references = MailText.replyReferences(of: message)
         case .forward(let message):
-            fields.subject = MailText.forwardSubject(message.subject)
-            fields.text = MailText.forwarded(model.bodyText(message) ?? "(The original text is sealed; load your envelope key to include it.)", message: message)
-            if !message.attachments.isEmpty {
-                Task { await self.forwardAttachments(of: message) }
+            let composed = ForwardCompose(
+                message: message,
+                body: model.bodyText(message) ?? "(The original text is sealed; load your envelope key to include it.)"
+            )
+            fields.to = composed.to
+            fields.cc = composed.cc
+            fields.bcc = composed.bcc
+            fields.subject = composed.subject
+            fields.text = composed.text
+            if !composed.attachments.isEmpty {
+                let files = composed.attachments
+                Task { await self.forwardAttachments(files, of: message) }
             }
         case .aiReply(let message):
             preparing = true
@@ -81,7 +89,8 @@ final class ComposeModel {
     }
 
     var dirty: Bool {
-        !attachments.isEmpty || (saved.map { $0 != fields } ?? !(fields.to.isEmpty && fields.subject.isEmpty && fields.text.isEmpty))
+        let blank = fields.to.isEmpty && fields.cc.isEmpty && fields.bcc.isEmpty && fields.subject.isEmpty && fields.text.isEmpty
+        return !attachments.isEmpty || (saved.map { $0 != fields } ?? !blank)
     }
     var closed: Bool { draft.map { !$0.status.editable } ?? false }
 
@@ -144,10 +153,10 @@ final class ComposeModel {
         }
     }
 
-    private func forwardAttachments(of message: Message) async {
-        loadingAttachments += message.attachments.count
+    private func forwardAttachments(_ files: [AttachmentMeta], of message: Message) async {
+        loadingAttachments += files.count
         var skipped: [String] = []
-        for meta in message.attachments {
+        for meta in files {
             defer { loadingAttachments -= 1 }
             guard let data = try? await model.attachmentData(meta, of: message) else {
                 skipped.append(meta.filename)

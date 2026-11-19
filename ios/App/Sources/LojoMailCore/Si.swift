@@ -181,8 +181,9 @@ public enum SiEntry {
     public static let replyTitle = "Reply with SI"
     public static let replyAllTitle = "Reply All"
     public static let replyAllWithSiTitle = "Reply All with SI"
+    public static let forwardTitle = "Forward"
     public static let filterTitle = "Filter with SI"
-    public static let actionBar = ["Reply", replyAllTitle, replyTitle, replyAllWithSiTitle, filterTitle]
+    public static let actionBar = ["Reply", replyAllTitle, forwardTitle, replyTitle, replyAllWithSiTitle, filterTitle]
     public static let futureMail = "Also apply to future mail from this sender"
 }
 
