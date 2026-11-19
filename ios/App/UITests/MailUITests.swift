@@ -138,7 +138,7 @@ final class MailUITests: XCTestCase {
         if !remove.waitForExistence(timeout: 2) { app.swipeUp() }
         XCTAssertTrue(remove.waitForExistence(timeout: 4))
         remove.tap()
-        XCTAssertTrue(attached.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(remove.waitForNonExistence(timeout: 3))
         dismissCompose(app)
         revealBarButton(app, "si.reply-all")
         XCTAssertEqual(app.buttons["si.reply-all"].label, "Reply All with SI")
