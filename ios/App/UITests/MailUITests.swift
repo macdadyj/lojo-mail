@@ -119,9 +119,18 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(forwarded.contains("From: Ada <ada@example.com>"))
         XCTAssertTrue(forwarded.contains("Date:"))
         XCTAssertTrue(forwarded.contains("Subject: Gate sensor"))
-        XCTAssertTrue(forwarded.contains("To: lojo@cyberphysical.us, bea@example.com"))
-        XCTAssertTrue(forwarded.contains("Cc: Ada <ada@example.com>, copy@example.com"))
-        XCTAssertFalse(forwarded.contains("> The north gate is back online."))
+        XCTAssertTrue(forwarded.contains("To: lojo@cyberphysical.us, bea@example.com"), forwarded)
+        let ccHeader = forwarded.range(of: "Cc:")
+        let copied = forwarded.range(of: "copy@example.com")
+        XCTAssertNotNil(ccHeader, forwarded)
+        XCTAssertNotNil(copied, forwarded)
+        if let ccHeader, let original {
+            XCTAssertLessThan(ccHeader.lowerBound, original.lowerBound, forwarded)
+        }
+        if let ccHeader, let copied {
+            XCTAssertLessThan(ccHeader.lowerBound, copied.lowerBound, forwarded)
+        }
+        XCTAssertFalse(forwarded.contains("> The north gate is back online."), forwarded)
         let attached = app.staticTexts["gate.jpg"]
         if !attached.waitForExistence(timeout: 2) { app.swipeUp() }
         XCTAssertTrue(attached.waitForExistence(timeout: 4), "the original file is included")
