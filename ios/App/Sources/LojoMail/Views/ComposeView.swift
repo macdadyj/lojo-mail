@@ -181,10 +181,23 @@ struct ComposeView: View {
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .textContentType(.emailAddress)
                     .accessibilityLabel(ComposeChrome.ccLabel)
                     .accessibilityIdentifier("compose.cc")
             }
             .accessibilityIdentifier("compose.cc")
+            LabeledContent(ComposeChrome.bccLabel) {
+                TextField("Optional", text: $model.fields.bcc, axis: .vertical)
+                    .font(.body)
+                    .focused($focus, equals: .bcc)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .textContentType(.emailAddress)
+                    .accessibilityLabel(ComposeChrome.bccLabel)
+                    .accessibilityIdentifier("compose.bcc")
+            }
+            .accessibilityIdentifier("compose.bcc")
             LabeledContent(ComposeChrome.subjectLabel) {
                 TextField("Subject", text: $model.fields.subject, axis: .vertical)
                     .font(.body)

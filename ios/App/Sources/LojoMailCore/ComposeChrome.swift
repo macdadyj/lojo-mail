@@ -5,6 +5,7 @@ import Foundation
 public enum ComposeChrome {
     public static let toLabel = "To"
     public static let ccLabel = "Cc"
+    public static let bccLabel = "Bcc"
     public static let subjectLabel = "Subject"
     public static let messageLabel = "Message"
     public static let placeholder = "Write your message"
@@ -21,7 +22,8 @@ public enum ComposeChrome {
     public static func nextField(_ field: ComposeField?) -> ComposeField? {
         switch field {
         case .to: return .cc
-        case .cc: return .subject
+        case .cc: return .bcc
+        case .bcc: return .subject
         case .subject: return .body
         case .body, nil: return nil
         }
@@ -31,7 +33,8 @@ public enum ComposeChrome {
     public static func previousField(_ field: ComposeField?) -> ComposeField? {
         switch field {
         case .cc: return .to
-        case .subject: return .cc
+        case .bcc: return .cc
+        case .subject: return .bcc
         case .body: return .subject
         case .to, nil: return nil
         }
@@ -41,6 +44,7 @@ public enum ComposeChrome {
 public enum ComposeField: String, CaseIterable, Sendable {
     case to
     case cc
+    case bcc
     case subject
     case body
 
@@ -48,6 +52,7 @@ public enum ComposeField: String, CaseIterable, Sendable {
         switch self {
         case .to: return ComposeChrome.toLabel
         case .cc: return ComposeChrome.ccLabel
+        case .bcc: return ComposeChrome.bccLabel
         case .subject: return ComposeChrome.subjectLabel
         case .body: return ComposeChrome.messageLabel
         }

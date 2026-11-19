@@ -748,6 +748,9 @@ final class AppModel {
 
     /// Decrypted bytes, in memory only (forwarding re-attaches them without writing them to disk).
     func attachmentData(_ attachment: AttachmentMeta, of message: Message) async throws -> Data {
+        if launch.uiTest {
+            return Data("uitest-attachment:\(attachment.id)".utf8)
+        }
         let payload = try await call { try await $0.attachment(messageId: message.id, attachmentId: attachment.id) }
         let context = Envelope.attachmentContext(message.id, attachment.id)
         let bytes: Data

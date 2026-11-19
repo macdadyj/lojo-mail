@@ -450,6 +450,7 @@ struct MailboxView: View {
         leadingActions(conversation)
         if let message = replyMessage(conversation) {
             Button { compose = .reply(message, all: false) } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }
+            Button { compose = .forward(message) } label: { Label(SiEntry.forwardTitle, systemImage: "arrowshape.turn.up.right") }
         }
         Button {
             openMessageFilter(conversation)

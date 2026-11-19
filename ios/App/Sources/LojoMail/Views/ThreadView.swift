@@ -202,6 +202,7 @@ struct ThreadView: View {
                 if let target = replyTarget {
                     Button { compose = .reply(target, all: false) } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }
                     Button { compose = .reply(target, all: true) } label: { Label(SiEntry.replyAllTitle, systemImage: "arrowshape.turn.up.left.2") }
+                    Button { compose = .forward(target) } label: { Label(SiEntry.forwardTitle, systemImage: "arrowshape.turn.up.right") }
                     Button {
                         siReplyAll = false
                         siReplyTarget = target
@@ -280,11 +281,11 @@ struct ThreadView: View {
             barButton("Reply", "arrowshape.turn.up.left", tint: .accentColor, identifier: "thread.reply") {
                 compose = .reply(target, all: false)
             }
-            .contextMenu {
-                Button { compose = .forward(latest ?? target) } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") }
-            }
             barButton(SiEntry.replyAllTitle, "arrowshape.turn.up.left.2", tint: .accentColor, identifier: "thread.reply-all") {
                 compose = .reply(target, all: true)
+            }
+            barButton(SiEntry.forwardTitle, "arrowshape.turn.up.right", tint: .accentColor, identifier: "thread.forward") {
+                compose = .forward(target)
             }
         }
     }
@@ -314,7 +315,7 @@ struct ThreadView: View {
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
             }
-            .frame(minWidth: prominent ? 96 : 68)
+            .frame(minWidth: prominent ? 96 : 44)
             .padding(.vertical, 6)
             .padding(.horizontal, 2)
             .foregroundStyle(tint)
@@ -329,6 +330,7 @@ struct ThreadView: View {
     private func messageActions(_ message: Message) -> some View {
         Button { compose = .reply(message, all: false) } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }
         Button { compose = .reply(message, all: true) } label: { Label(SiEntry.replyAllTitle, systemImage: "arrowshape.turn.up.left.2") }
+        Button { compose = .forward(message) } label: { Label(SiEntry.forwardTitle, systemImage: "arrowshape.turn.up.right") }
         Button {
             siReplyAll = false
             siReplyTarget = message

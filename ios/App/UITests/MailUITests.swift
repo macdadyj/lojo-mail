@@ -98,6 +98,39 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(quote.contains("wrote:"))
         XCTAssertTrue(quote.contains("> The north gate is back online."))
         dismissCompose(app)
+        revealBarButton(app, "thread.forward")
+        XCTAssertEqual(app.buttons["thread.forward"].label, "Forward")
+        app.buttons["thread.forward"].tap()
+        XCTAssertTrue(app.navigationBars["Forward"].waitForExistence(timeout: 6))
+        for field in ["compose.to", "compose.cc", "compose.bcc"] {
+            let value = composeValue(app, field)
+            XCTAssertFalse(value.localizedCaseInsensitiveContains("ada@example.com"), field)
+            XCTAssertFalse(value.localizedCaseInsensitiveContains("bea@example.com"), field)
+            XCTAssertFalse(value.localizedCaseInsensitiveContains("lojo@cyberphysical.us"), field)
+            XCTAssertFalse(value.localizedCaseInsensitiveContains("copy@example.com"), field)
+        }
+        XCTAssertEqual(composeValue(app, "compose.subject"), "Fwd: Gate sensor")
+        let forwarded = composeValue(app, "compose.message")
+        let header = forwarded.range(of: "---------- Forwarded message ----------")
+        let original = forwarded.range(of: "The north gate is back online.")
+        XCTAssertNotNil(header)
+        XCTAssertNotNil(original)
+        if let header, let original { XCTAssertLessThan(header.lowerBound, original.lowerBound) }
+        XCTAssertTrue(forwarded.contains("From: Ada <ada@example.com>"))
+        XCTAssertTrue(forwarded.contains("Date:"))
+        XCTAssertTrue(forwarded.contains("Subject: Gate sensor"))
+        XCTAssertTrue(forwarded.contains("To: lojo@cyberphysical.us, bea@example.com"))
+        XCTAssertTrue(forwarded.contains("Cc: Ada <ada@example.com>, copy@example.com"))
+        XCTAssertFalse(forwarded.contains("> The north gate is back online."))
+        let attached = app.staticTexts["gate.jpg"]
+        if !attached.waitForExistence(timeout: 2) { app.swipeUp() }
+        XCTAssertTrue(attached.waitForExistence(timeout: 4), "the original file is included")
+        let remove = app.buttons["Remove gate.jpg"]
+        if !remove.waitForExistence(timeout: 2) { app.swipeUp() }
+        XCTAssertTrue(remove.waitForExistence(timeout: 4))
+        remove.tap()
+        XCTAssertTrue(attached.waitForNonExistence(timeout: 3))
+        dismissCompose(app)
         revealBarButton(app, "si.reply-all")
         XCTAssertEqual(app.buttons["si.reply-all"].label, "Reply All with SI")
         app.buttons["si.reply-all"].tap()
