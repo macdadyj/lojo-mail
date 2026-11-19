@@ -2,8 +2,7 @@ name: iOS
 
 on:
   push:
-    # Temporary: upload an Internal TestFlight build of the Forward branch without merging.
-    branches: [main, cursor/forward-message-b0d6]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
