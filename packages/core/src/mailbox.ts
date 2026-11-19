@@ -290,6 +290,29 @@ function automationSummary(doc: RulesDocument): string {
   return `live:${list(true)} shadow:${list(false)}`;
 }
 
+/**
+ * Messages for this thread id only. The list screens group mail by `threadId` on
+ * each message; opening used to require the thread row as well. When that row was
+ * never written, the phone showed "No thread …" for a conversation it had just
+ * listed. An id with no row and no messages is still not found, and a message
+ * whose thread id differs is not returned.
+ */
+export async function messagesForThread(store: MailStore, threadId: string): Promise<{ thread: Thread; messages: StoredMessage[] }> {
+  let thread = await store.getThread(threadId);
+  let messages = (await store.listThreadMessages(threadId)).filter((message) => message.threadId === threadId);
+  if (messages.length === 0 && thread && thread.messageIds.length > 0) {
+    const loaded = await Promise.all(thread.messageIds.map((id) => store.getMessage(id)));
+    messages = loaded.filter((message): message is StoredMessage => message != null && message.threadId === threadId);
+  }
+  if (!thread) {
+    if (messages.length === 0) throw new MailError(`No thread ${threadId}`, "not_found");
+    const repaired = await refreshThread(store, threadId, messages[0]?.subject ?? "", messages);
+    if (!repaired) throw new MailError(`No thread ${threadId}`, "not_found");
+    thread = repaired;
+  }
+  return { thread, messages };
+}
+
 export class Mailbox {
   constructor(private readonly deps: MailboxDeps) {}
 
@@ -486,7 +509,7 @@ export class Mailbox {
   async setUnread(messageId: string, unread: boolean): Promise<StoredMessage> {
     await this.requireMessage(messageId);
     const updated = await this.deps.store.updateMessage(messageId, { unread });
-    await refreshThread(this.deps.store, updated.threadId, updated.subject);
+    await refreshThread(this.deps.store, updated.threadId, updated.subject, [updated]);
     return updated;
   }
 
@@ -511,16 +534,16 @@ export class Mailbox {
   }
 
   async readThread(threadId: string, opts: ViewOptions = {}): Promise<{ thread: Thread; messages: MessageView[] }> {
-    const thread = await this.deps.store.getThread(threadId);
-    if (!thread) throw new MailError(`No thread ${threadId}`, "not_found");
-    const messages = await this.deps.store.listThreadMessages(threadId);
+    const resolved = await messagesForThread(this.deps.store, threadId);
+    const { thread, messages } = resolved;
     let changed = false;
     for (const message of messages) {
       if (!message.unread) continue;
       await this.deps.store.updateMessage(message.id, { unread: false });
+      message.unread = false;
       changed = true;
     }
-    if (changed) await refreshThread(this.deps.store, threadId, thread.subject);
+    if (changed) await refreshThread(this.deps.store, threadId, thread.subject, messages);
     const views = await Promise.all(messages.map((message) => this.present({ ...message, unread: false }, opts)));
     return { thread: { ...thread, unreadCount: 0 }, messages: views };
   }
@@ -1092,7 +1115,7 @@ export class Mailbox {
     if (folder !== "inbox") patch.unread = false;
     const remove: Array<keyof MessagePatch> = message.folder === "trash" ? ["trashedAt", "trashedBy", "keepUntil"] : [];
     const updated = await this.deps.store.updateMessage(messageId, patch, remove);
-    await refreshThread(this.deps.store, updated.threadId, updated.subject);
+    await refreshThread(this.deps.store, updated.threadId, updated.subject, [updated]);
     if (message.folder === "trash") await this.audit("message.restored", "ok", { messageId, detail: `to ${folder}, was ${message.trashedBy ?? "trashed"}` });
     return updated;
   }
@@ -1124,7 +1147,7 @@ export class Mailbox {
       keepUntil: new Date(at.getTime() + retentionDays * 86_400_000).toISOString(),
     };
     const updated = await this.deps.store.updateMessage(messageId, patch);
-    await refreshThread(this.deps.store, updated.threadId, updated.subject);
+    await refreshThread(this.deps.store, updated.threadId, updated.subject, [updated]);
     await this.audit("message.trashed", "ok", { messageId, detail: `by:${by} from:${message.folder} keepUntil:${patch.keepUntil ?? ""}` });
     return updated;
   }
@@ -1134,7 +1157,7 @@ export class Mailbox {
     const message = await this.requireMessage(messageId);
     if (message.folder !== "trash") throw new MailError("Message is not in trash", "invalid");
     const updated = await this.deps.store.updateMessage(messageId, { folder: "inbox" }, ["trashedAt", "trashedBy", "keepUntil"]);
-    await refreshThread(this.deps.store, updated.threadId, updated.subject);
+    await refreshThread(this.deps.store, updated.threadId, updated.subject, [updated]);
     await this.audit("message.restored", "ok", { messageId, detail: `was ${message.trashedBy ?? "trashed"}` });
     return updated;
   }

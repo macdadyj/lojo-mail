@@ -133,15 +133,21 @@ async function relinkThreads(store: MailStore, imported: StoredMessage[]): Promi
     imported.map((message) => ({ rfcMessageId: message.rfcMessageId, references: message.references, inReplyTo: message.inReplyTo })),
   );
   const touched = new Map<string, string>();
+  const known = new Map<string, StoredMessage[]>();
   for (const message of imported) {
-    const threadId = assigned.get(message.rfcMessageId);
+    const assignedId = assigned.get(message.rfcMessageId);
+    const threadId = assignedId && assignedId !== message.threadId ? assignedId : message.threadId;
     touched.set(message.threadId, message.subject);
-    if (threadId && threadId !== message.threadId) {
+    if (threadId !== message.threadId) {
       await store.updateMessage(message.id, { threadId });
       touched.set(threadId, message.subject);
     }
+    const current = { ...message, threadId };
+    const list = known.get(threadId) ?? [];
+    list.push(current);
+    known.set(threadId, list);
   }
-  for (const [threadId, subject] of touched) await refreshThread(store, threadId, subject);
+  for (const [threadId, subject] of touched) await refreshThread(store, threadId, subject, known.get(threadId) ?? []);
 }
 
 export function loadFolderMap(raw: string): Record<string, string> {

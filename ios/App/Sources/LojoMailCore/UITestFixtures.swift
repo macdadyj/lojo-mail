@@ -49,10 +49,9 @@ public enum UITestFixtures {
     }
 
     public static func thread(_ id: String) throws -> [Message] {
-        let all = try inbox() + sent() + trash()
-        let matches = all.filter { $0.threadId == id }
-        if !matches.isEmpty { return matches }
-        return try inbox()
+        let matches = try ThreadOpen.listed(id, in: inbox() + sent() + trash())
+        if matches.isEmpty { throw ThreadOpenError.notFound(id) }
+        return matches
     }
 
     public static func drafts() throws -> [DraftView] {
